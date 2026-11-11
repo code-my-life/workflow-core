@@ -1,0 +1,7 @@
+# The workflows the core serves: one [[workflow]] table each, with its key, its board and the path of its sheet.
+# The key of a workflow is the name of its board (ADR 0003). The manifests of the engine epic will replace this list.
+
+[[workflow]]
+key = "factory"
+board = "factory"
+sheet = "~/perso/hermes-software-factory/config/workflow.json"
