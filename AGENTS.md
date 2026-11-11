@@ -14,7 +14,7 @@ sont dans `docs/decisions/`, une par fichier (ADR 0001 à 0019).
 | Un seul fichier de test | `uv run pytest tests/test_runtime_confined.py` |
 | Types | aucun pour l'instant |
 | Build | `uv build` |
-| Démarrer | pas encore de service (epic du socle observateur, story 2) |
+| Démarrer | `WORKFLOW_CORE_SECRET=<secret> uv run python -m workflow_core` (127.0.0.1:8447) ; service : `scripts/install.sh` |
 | Bout en bout | aucun |
 | Lint et format | `uv run ruff check` et `uv run ruff format --check` |
 | Hermès confiné | `python3 scripts/check_runtime_confined.py` |
