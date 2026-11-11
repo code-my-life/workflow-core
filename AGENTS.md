@@ -18,6 +18,7 @@ sont dans `docs/decisions/`, une par fichier (ADR 0001 à 0019).
 | Bout en bout | aucun |
 | Lint et format | `uv run ruff check` et `uv run ruff format --check` |
 | Hermès confiné | `python3 scripts/check_runtime_confined.py` |
+| JSON Schema de la fiche | `uv run python scripts/write_sheet_schema.py` (après un changement de la forme) |
 
 ## Conventions
 

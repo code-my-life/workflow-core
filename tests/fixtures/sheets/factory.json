@@ -1,0 +1,155 @@
+{
+  "item": { "type": "issue", "label": "Issue" },
+  "groups": [{ "key": "gate", "label": "Gate", "icon": "shield-check" }],
+  "stations": [
+    {
+      "key": "intake",
+      "label": "Intake",
+      "icon": "issue-opened",
+      "kind": "script",
+      "col": 0,
+      "row": 0
+    },
+    { "key": "brief", "label": "Brief", "icon": "workflow", "kind": "ai", "col": 0, "row": 1 },
+    {
+      "key": "implementation",
+      "label": "Implémentation",
+      "icon": "code",
+      "kind": "ai",
+      "col": 1,
+      "row": 1
+    },
+    {
+      "key": "gate:failfirst",
+      "label": "Fail-first",
+      "icon": "shield-check",
+      "kind": "script",
+      "col": 2,
+      "row": 1,
+      "group": "gate",
+      "types": ["bug", "interface", "fonctionnalite"]
+    },
+    {
+      "key": "gate:sabotage",
+      "label": "Sabotages",
+      "icon": "shield-check",
+      "kind": "script",
+      "col": 2,
+      "row": 2,
+      "group": "gate",
+      "types": ["tests"]
+    },
+    {
+      "key": "gate:invariance",
+      "label": "Invariance",
+      "icon": "shield-check",
+      "kind": "script",
+      "col": 2,
+      "row": 3,
+      "group": "gate",
+      "types": ["maintenance"]
+    },
+    {
+      "key": "gate:documents",
+      "label": "Documents",
+      "icon": "shield-check",
+      "kind": "script",
+      "col": 2,
+      "row": 4,
+      "group": "gate",
+      "types": ["documentation"]
+    },
+    {
+      "key": "gate:skill",
+      "label": "Skill",
+      "icon": "shield-check",
+      "kind": "script",
+      "col": 2,
+      "row": 5,
+      "group": "gate",
+      "types": ["skill"]
+    },
+    { "key": "review", "label": "Ta revue", "icon": "eye", "kind": "owner", "col": 3, "row": 1 },
+    {
+      "key": "merge",
+      "label": "Fusion",
+      "icon": "git-merge",
+      "kind": "github",
+      "col": 3,
+      "row": 2
+    },
+    { "key": "ci", "label": "CI de main", "icon": "play", "kind": "github", "col": 3, "row": 3 },
+    {
+      "key": "deploy",
+      "label": "Déploiement",
+      "icon": "rocket",
+      "kind": "script",
+      "col": 3,
+      "row": 4
+    },
+    {
+      "key": "done",
+      "label": "Terminé",
+      "icon": "check-circle",
+      "kind": "end",
+      "col": 3,
+      "row": 5
+    },
+    {
+      "key": "diagnostic",
+      "label": "Diagnostic",
+      "icon": "search",
+      "kind": "ai",
+      "col": 0,
+      "row": 2
+    }
+  ],
+  "edges": [
+    { "from": "intake", "to": "brief", "kind": "line" },
+    { "from": "brief", "to": "implementation", "kind": "line" },
+    { "from": "implementation", "to": "gate:failfirst", "kind": "fan" },
+    { "from": "implementation", "to": "gate:sabotage", "kind": "fan" },
+    { "from": "implementation", "to": "gate:invariance", "kind": "fan" },
+    { "from": "implementation", "to": "gate:documents", "kind": "fan" },
+    { "from": "implementation", "to": "gate:skill", "kind": "fan" },
+    { "from": "gate:failfirst", "to": "review", "kind": "fan" },
+    { "from": "gate:sabotage", "to": "review", "kind": "fan" },
+    { "from": "gate:invariance", "to": "review", "kind": "fan" },
+    { "from": "gate:documents", "to": "review", "kind": "fan" },
+    { "from": "gate:skill", "to": "review", "kind": "fan" },
+    { "from": "review", "to": "merge", "kind": "line" },
+    { "from": "merge", "to": "ci", "kind": "line" },
+    { "from": "ci", "to": "deploy", "kind": "line" },
+    { "from": "deploy", "to": "done", "kind": "line" },
+    {
+      "from": "brief",
+      "to": "diagnostic",
+      "kind": "branch",
+      "id": "diag:in",
+      "label": "Diagnostic, sans PR"
+    },
+    { "from": "diagnostic", "to": "done", "kind": "branch", "id": "diag:out" },
+    {
+      "from": "gate",
+      "to": "implementation",
+      "kind": "return",
+      "id": "loop:gate",
+      "label": "Retour : gate rouge"
+    },
+    {
+      "from": "review",
+      "to": "implementation",
+      "kind": "return",
+      "id": "loop:review",
+      "label": "Retour : changements demandés"
+    },
+    {
+      "from": "ci",
+      "to": "review",
+      "kind": "return",
+      "id": "loop:revert",
+      "label": "Revert : main rouge"
+    }
+  ],
+  "models": ["brief", "implementation", "diagnostic"]
+}
