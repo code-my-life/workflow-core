@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
 from types import ModuleType
 from typing import Any
 
@@ -13,9 +12,11 @@ import uvicorn
 from fastapi import FastAPI
 
 from workflow_core.api.app import create_app
+from workflow_core.clock import utc_now
 from workflow_core.config import Workflow
 from workflow_core.events import JOURNAL_FILE, state_dir
-from workflow_core.model.contract import ContractVerdict, CoreState
+from workflow_core.model.contract import ContractVerdict
+from workflow_core.model.state import CoreState
 
 # journald reads a leading "<n>" on a service's output as the syslog priority of the line.
 ERROR = "<3>"
@@ -40,9 +41,7 @@ def build_service(
     try:
         verdict = adapter.check_contract(boards)
     except Exception as error:  # a check that cannot run is a broken contract, never a crash at startup
-        verdict = ContractVerdict(
-            ok=False, checked_at=datetime.now(UTC).isoformat(timespec="seconds"), problems=[f"vérification : {error}"]
-        )
+        verdict = ContractVerdict(ok=False, checked_at=utc_now(), problems=[f"vérification : {error}"])
     version, _ = adapter.read_runtime_version()
     state = CoreState(contract=verdict, runtime_version=version)
     if verdict.ok:

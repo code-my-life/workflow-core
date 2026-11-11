@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlencode
 
-import httpx
+import httpx2 as httpx
 import pytest
 import uvicorn
 from workflow_core.adapters import runtime_adapter
@@ -312,3 +312,25 @@ def test_the_service_stops_within_seconds_with_an_open_stream(runtime_home, stat
     assert stopped["alive"] is False
     assert stopped["seconds"] < 5
     stream.close()
+
+
+def test_the_read_routes_carry_the_current_cursor(runtime_home, state_dir):
+    # A client reads the state, then opens the stream at the cursor of that read: it misses nothing in between.
+    with running_service() as base:
+        time.sleep(0.5)
+        routes = ("/api/workflows", "/api/workflows/factory/items", "/api/machine")
+        cursors = {route: httpx.get(f"{base}{route}", headers=AUTH).json().get("cursor") for route in routes}
+        journal = EventJournal.open_existing(state_dir / "events.db")
+        current = journal.cursor
+        journal.close()
+        assert cursors == dict.fromkeys(routes, current)
+
+        read = httpx.get(f"{base}/api/workflows/factory/items", headers=AUTH).json()
+        write(board_base(runtime_home, "factory"), "UPDATE tasks SET status = 'review' WHERE id = 't_0002'")
+        time.sleep(0.6)
+        stream = Stream(base, params={"cursor": read["cursor"]})
+        cursor, kind, event = stream.next()
+        stream.close()
+
+    epoch, n = read["cursor"].split(":")
+    assert (cursor, kind, event["item"]) == (f"{epoch}:{int(n) + 1}", "changed", "t_0002")

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 
 from workflow_core.adapters.hermes.board import (
     CARD_COLUMNS,
@@ -19,6 +18,7 @@ from workflow_core.adapters.hermes.board import (
     make_board_reader,
 )
 from workflow_core.adapters.hermes.version import read_runtime_version
+from workflow_core.clock import utc_now
 from workflow_core.model.board import BoardUnavailableError
 from workflow_core.model.contract import ContractVerdict
 
@@ -106,6 +106,6 @@ def check_contract(boards: list[str], environ: dict[str, str] | None = None) -> 
         problems.append(version_problem)
     return ContractVerdict(
         ok=not problems,
-        checked_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        checked_at=utc_now(),
         problems=problems,
     )

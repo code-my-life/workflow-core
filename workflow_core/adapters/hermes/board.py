@@ -26,6 +26,21 @@ LINK_COLUMNS = ("parent_id", "child_id")
 COMMENT_COLUMNS = ("id", "task_id", "author", "body", "created_at")
 
 
+def open_read_only(board: str, path: Path) -> sqlite3.Connection:
+    """A read-only connection to a board's base (SQLite URI `mode=ro`), in autocommit mode: a read transaction is
+    opened only where asked, with BEGIN, and closed at once. A missing or unopenable base is a named error."""
+    if not path.is_file():
+        raise BoardUnavailableError(board, f"no base at {path}")
+    try:
+        return sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True, isolation_level=None)
+    except sqlite3.Error as error:
+        raise BoardUnavailableError(board, str(error)) from error
+
+
+def _select_cards(db: sqlite3.Connection) -> list[sqlite3.Row]:
+    return db.execute(f"SELECT {', '.join(CARD_COLUMNS)} FROM tasks ORDER BY created_at, id").fetchall()
+
+
 def hermes_home(environ: dict[str, str] | None = None) -> Path:
     env = os.environ if environ is None else environ
     return Path(env.get(HOME_VARIABLE) or DEFAULT_HOME).expanduser()
@@ -45,14 +60,7 @@ class HermesBoardReader:
     @contextmanager
     def open_board(self, board: str) -> Iterator[sqlite3.Connection]:
         """A read-only connection to the named board's base, closed on exit."""
-        path = self.base_path(board)
-        if not path.is_file():
-            raise BoardUnavailableError(board, f"no base at {path}")
-        try:
-            # Autocommit mode: a read transaction is opened only where asked, with BEGIN, and closed at once.
-            db = sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True, isolation_level=None)
-        except sqlite3.Error as error:
-            raise BoardUnavailableError(board, str(error)) from error
+        db = open_read_only(board, self.base_path(board))
         try:
             db.row_factory = sqlite3.Row
             yield db
@@ -62,7 +70,7 @@ class HermesBoardReader:
     def read_cards(self, board: str) -> list[Card]:
         with self.open_board(board) as db:
             try:
-                rows = db.execute(f"SELECT {', '.join(CARD_COLUMNS)} FROM tasks ORDER BY created_at, id").fetchall()
+                rows = _select_cards(db)
             except sqlite3.Error as error:
                 raise BoardUnavailableError(board, str(error)) from error
         return [Card(**dict(row)) for row in rows]
@@ -73,9 +81,7 @@ class HermesBoardReader:
             try:
                 db.execute("BEGIN")
                 try:
-                    cards = db.execute(
-                        f"SELECT {', '.join(CARD_COLUMNS)} FROM tasks ORDER BY created_at, id"
-                    ).fetchall()
+                    cards = _select_cards(db)
                     runs = db.execute(f"SELECT {', '.join(RUN_COLUMNS)} FROM task_runs ORDER BY id").fetchall()
                     links = db.execute(f"SELECT {', '.join(LINK_COLUMNS)} FROM task_links ORDER BY 1, 2").fetchall()
                     comments = db.execute(
@@ -118,13 +124,7 @@ class HermesBoardWatcher:
     def _connection(self, name: str) -> sqlite3.Connection:
         db = self._connections.get(name)
         if db is None:
-            path = self.reader.base_path(name)
-            if not path.is_file():
-                raise BoardUnavailableError(name, f"no base at {path}")
-            try:
-                db = sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True, isolation_level=None)
-            except sqlite3.Error as error:
-                raise BoardUnavailableError(name, str(error)) from error
+            db = open_read_only(name, self.reader.base_path(name))
             self._connections[name] = db
         return db
 

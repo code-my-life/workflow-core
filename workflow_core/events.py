@@ -15,10 +15,10 @@ import json
 import os
 import sqlite3
 from collections.abc import AsyncIterator, Callable
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from workflow_core.clock import utc_now
 from workflow_core.config import Workflow
 from workflow_core.model.board import BoardUnavailableError, Item
 
@@ -45,10 +45,6 @@ def state_dir(environ: dict[str, str] | None = None) -> Path:
         Path(env["XDG_STATE_HOME"]).expanduser() if env.get("XDG_STATE_HOME") else Path("~/.local/state").expanduser()
     )
     return base / "workflow-core"
-
-
-def _now() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _canonical(state: dict) -> str:
@@ -120,7 +116,7 @@ class EventJournal:
             "workflow": workflow,
             "item": item,
             "kind": kind,
-            "at": _now(),
+            "at": utc_now(),
             "state": state,
         }
         self._db.execute(

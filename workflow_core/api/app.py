@@ -6,7 +6,6 @@ import secrets
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -15,10 +14,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.exceptions import HTTPException
 
+from workflow_core.clock import utc_now
 from workflow_core.config import Workflow
 from workflow_core.events import BoardWatcher, EventHub
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
-from workflow_core.model.contract import CoreState
+from workflow_core.model.state import CoreState
 from workflow_core.sheets import InvalidSheetError, SheetUnavailableError, read_sheet, sheet_json
 
 # The version of the API's contract (ADR 0018): within it, responses only gain optional fields.
@@ -37,10 +37,6 @@ def error(status: int, code: str, detail: str) -> JSONResponse:
 def _bearer(request: Request) -> str | None:
     scheme, _, token = request.headers.get("authorization", "").partition(" ")
     return token if scheme.lower() == "bearer" and token else None
-
-
-def _now() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def create_app(
@@ -85,7 +81,7 @@ def create_app(
     def read_items(board: str) -> list[Item]:
         items = boards.read_items(board)
         # Only a successful read moves the time: a failed one keeps the last good time.
-        core.last_read_at[board] = _now()
+        core.last_read_at[board] = utc_now()
         return items
 
     if watcher is not None and journal_path is not None:
@@ -93,6 +89,16 @@ def create_app(
             workflows=workflows, watcher=watcher, read_items=read_items, journal_path=journal_path, clock=clock, spy=spy
         )
     app.state.events = hub
+
+    def with_cursor(payload: dict, cursor: str | None) -> dict:
+        # The journal's cursor taken before the read (ADR 0018: an optional field). A client that opens the stream at it
+        # misses nothing; an event that fell between the two comes again, harmless since it carries the full state.
+        if cursor is not None:
+            payload["cursor"] = cursor
+        return payload
+
+    def current_cursor() -> str | None:
+        return hub.journal.cursor if hub is not None and hub.journal is not None else None
 
     @app.middleware("http")
     async def require_the_secret(request: Request, call_next):
@@ -133,6 +139,7 @@ def create_app(
 
     @app.get("/api/workflows")
     def list_workflows() -> dict:
+        cursor = current_cursor()
         listed = []
         for workflow in workflows.values():
             try:
@@ -141,7 +148,7 @@ def create_app(
             except (InvalidSheetError, SheetUnavailableError):
                 valid = False
             listed.append({"key": workflow.key, "board": workflow.board, "sheet_valid": valid})
-        return {"schema_version": SCHEMA_VERSION, "workflows": listed}
+        return with_cursor({"schema_version": SCHEMA_VERSION, "workflows": listed}, cursor)
 
     @app.get("/api/workflows/{key}/sheet")
     def sheet(key: str) -> dict:
@@ -151,11 +158,13 @@ def create_app(
     @app.get("/api/workflows/{key}/items")
     def items(key: str) -> dict:
         workflow = declared(key)
-        return {
+        cursor = current_cursor()
+        payload = {
             "schema_version": SCHEMA_VERSION,
             "workflow": workflow.key,
             "items": [item.model_dump() for item in read_items(workflow.board)],
         }
+        return with_cursor(payload, cursor)
 
     @app.get("/api/events")
     async def events(request: Request, cursor: str | None = None) -> StreamingResponse:
@@ -170,12 +179,14 @@ def create_app(
 
     @app.get("/api/machine")
     def machine() -> dict:
-        return {
+        cursor = current_cursor()
+        payload = {
             "schema_version": SCHEMA_VERSION,
             "runtime_version": core.runtime_version,
             "contract": core.contract.model_dump() if core.contract is not None else None,
             "mode": core.mode,
             "boards": {board: {"last_read_at": at} for board, at in sorted(core.last_read_at.items())},
         }
+        return with_cursor(payload, cursor)
 
     return app
