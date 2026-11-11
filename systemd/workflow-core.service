@@ -1,0 +1,20 @@
+# workflow-core as a systemd user service. scripts/install.sh copies it to ~/.config/systemd/user/;
+# the owner enables and starts it. The shared secret lives in the machine's .env, never in the repository.
+[Unit]
+Description=workflow-core, le socle commun des workflows (lecture seule)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/perso/workflow-core
+EnvironmentFile=%h/.config/workflow-core/.env
+# A user service does not get ~/.local/bin on its PATH; the runtime's command is installed there.
+Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=%h/perso/workflow-core/.venv/bin/python -m workflow_core --host 127.0.0.1 --port 8447
+Restart=always
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

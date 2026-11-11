@@ -1,0 +1,9 @@
+# The watchdog of workflow-core, run every minute by workflow-core-watchdog.timer. It asks /healthz and writes an
+# outage of 5 minutes or more to journald, once. System Python, standard library only: independent of the core.
+[Unit]
+Description=workflow-core, chien de garde de /healthz
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/workflow-core/.env
+ExecStart=/usr/bin/python3 %h/perso/workflow-core/scripts/healthz_watchdog.py
