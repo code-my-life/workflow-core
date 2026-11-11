@@ -1,0 +1,25 @@
+{
+  "item": { "type": "video", "label": "Vidéo" },
+  "stations": [
+    { "key": "idee", "label": "Idée", "icon": "light-bulb", "kind": "script", "col": 0, "row": 0 },
+    { "key": "script", "label": "Script", "icon": "file", "kind": "ai", "col": 0, "row": 1 },
+    { "key": "approbation", "label": "Approbation", "icon": "check-circle", "kind": "owner", "col": 1, "row": 1 },
+    { "key": "tournage", "label": "Tournage", "icon": "device-camera-video", "kind": "owner", "col": 2, "row": 1 },
+    { "key": "montage", "label": "Montage", "icon": "video", "kind": "script", "col": 3, "row": 1 },
+    { "key": "revue", "label": "Revue", "icon": "eye", "kind": "owner", "col": 3, "row": 2 },
+    { "key": "publication", "label": "Publication", "icon": "upload", "kind": "script", "col": 3, "row": 3 },
+    { "key": "publiee", "label": "Publiée", "icon": "check-circle-fill", "kind": "end", "col": 3, "row": 4 }
+  ],
+  "edges": [
+    { "from": "idee", "to": "script", "kind": "line" },
+    { "from": "script", "to": "approbation", "kind": "line" },
+    { "from": "approbation", "to": "tournage", "kind": "line" },
+    { "from": "tournage", "to": "montage", "kind": "line" },
+    { "from": "montage", "to": "revue", "kind": "line" },
+    { "from": "revue", "to": "publication", "kind": "line" },
+    { "from": "publication", "to": "publiee", "kind": "line" },
+    { "from": "approbation", "to": "script", "kind": "return", "id": "refaire:script", "label": "Refaire le brouillon" },
+    { "from": "revue", "to": "montage", "kind": "return", "id": "refaire:montage", "label": "Refaire le montage" }
+  ],
+  "models": ["script"]
+}
