@@ -13,14 +13,17 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote
 
-from workflow_core.model.board import BoardUnavailableError, Card
+from workflow_core.model.board import BoardUnavailableError, Card, Item
 
 # The variable that locates Hermès' home; only this adapter reads it.
 HOME_VARIABLE = "HERMES_HOME"
 DEFAULT_HOME = "~/.hermes"
 
-# The columns of Hermès' `tasks` table that the core reads.
+# The columns of Hermès' tables that the core reads. The contract test checks them (contract.py).
 CARD_COLUMNS = ("id", "title", "body", "status", "assignee", "created_at", "started_at", "completed_at", "block_kind")
+RUN_COLUMNS = ("id", "task_id", "profile", "status", "outcome", "started_at", "ended_at", "summary")
+LINK_COLUMNS = ("parent_id", "child_id")
+COMMENT_COLUMNS = ("id", "task_id", "author", "body", "created_at")
 
 
 def hermes_home(environ: dict[str, str] | None = None) -> Path:
@@ -46,7 +49,8 @@ class HermesBoardReader:
         if not path.is_file():
             raise BoardUnavailableError(board, f"no base at {path}")
         try:
-            db = sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True)
+            # Autocommit mode: a read transaction is opened only where asked, with BEGIN, and closed at once.
+            db = sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True, isolation_level=None)
         except sqlite3.Error as error:
             raise BoardUnavailableError(board, str(error)) from error
         try:
@@ -62,6 +66,41 @@ class HermesBoardReader:
             except sqlite3.Error as error:
                 raise BoardUnavailableError(board, str(error)) from error
         return [Card(**dict(row)) for row in rows]
+
+    def read_items(self, board: str) -> list[Item]:
+        """The cards of the board with their runs, links and comments, read in one short read transaction."""
+        with self.open_board(board) as db:
+            try:
+                db.execute("BEGIN")
+                try:
+                    cards = db.execute(
+                        f"SELECT {', '.join(CARD_COLUMNS)} FROM tasks ORDER BY created_at, id"
+                    ).fetchall()
+                    runs = db.execute(f"SELECT {', '.join(RUN_COLUMNS)} FROM task_runs ORDER BY id").fetchall()
+                    links = db.execute(f"SELECT {', '.join(LINK_COLUMNS)} FROM task_links ORDER BY 1, 2").fetchall()
+                    comments = db.execute(
+                        f"SELECT {', '.join(COMMENT_COLUMNS)} FROM task_comments ORDER BY id"
+                    ).fetchall()
+                finally:
+                    db.execute("COMMIT")
+            except sqlite3.Error as error:
+                raise BoardUnavailableError(board, str(error)) from error
+
+        by_card: dict[str, dict[str, list]] = {
+            row["id"]: {"runs": [], "parents": [], "children": [], "comments": []} for row in cards
+        }
+        for row in runs:
+            if row["task_id"] in by_card:
+                by_card[row["task_id"]]["runs"].append({k: row[k] for k in RUN_COLUMNS if k != "task_id"})
+        for row in links:
+            if row["child_id"] in by_card:
+                by_card[row["child_id"]]["parents"].append(row["parent_id"])
+            if row["parent_id"] in by_card:
+                by_card[row["parent_id"]]["children"].append(row["child_id"])
+        for row in comments:
+            if row["task_id"] in by_card:
+                by_card[row["task_id"]]["comments"].append({k: row[k] for k in COMMENT_COLUMNS if k != "task_id"})
+        return [Item(**dict(row), **by_card[row["id"]]) for row in cards]
 
 
 def make_board_reader(environ: dict[str, str] | None = None) -> HermesBoardReader:

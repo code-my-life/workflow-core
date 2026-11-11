@@ -5,3 +5,8 @@
 key = "factory"
 board = "factory"
 sheet = "~/perso/hermes-software-factory/config/workflow.json"
+
+[[workflow]]
+key = "studio"
+board = "studio"
+sheet = "~/perso/video-factory/hermes/workflow.json"

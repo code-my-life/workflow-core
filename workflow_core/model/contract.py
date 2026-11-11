@@ -26,9 +26,13 @@ class ContractVerdict(BaseModel):
 
 
 class CoreState(BaseModel):
-    """What the core holds about itself; the machine state of the API serves it (story 5)."""
+    """What the core holds about itself; GET /api/machine serves it."""
 
     contract: ContractVerdict | None = None
+    # The installed runtime's version, None when its output could not be read.
+    runtime_version: str | None = None
+    # Per declared board, the time of its last successful read (ISO 8601 UTC), None before the first.
+    last_read_at: dict[str, str | None] = {}
 
     @property
     def mode(self) -> Mode:

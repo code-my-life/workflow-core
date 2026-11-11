@@ -4,6 +4,9 @@ It runs at the install (scripts/install.sh) and by `uv run pytest tests/contract
 base (the CI on GitHub), it is skipped with its reason, never passed empty.
 """
 
+import re
+import shutil
+
 import pytest
 from workflow_core.adapters import runtime_adapter
 from workflow_core.config import load_workflows
@@ -19,3 +22,14 @@ def test_the_installed_boards_keep_the_contract():
     verdict = adapter.check_contract(boards)
 
     assert verdict.ok, "contract broken:\n" + "\n".join(verdict.problems)
+
+
+def test_the_installed_version_line_keeps_the_contract():
+    adapter = runtime_adapter()
+    if shutil.which(adapter.VERSION_COMMAND[0]) is None:
+        pytest.skip(f"no installed runtime command {adapter.VERSION_COMMAND[0]!r} on the PATH")
+
+    version, problem = adapter.read_runtime_version()
+
+    assert problem is None, problem
+    assert re.fullmatch(r"\d+\.\d+\.\d+", version)

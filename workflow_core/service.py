@@ -31,12 +31,11 @@ def build_service(*, secret: str, workflows: dict[str, Workflow], adapter: Modul
         verdict = ContractVerdict(
             ok=False, checked_at=datetime.now(UTC).isoformat(timespec="seconds"), problems=[f"vérification : {error}"]
         )
-    state = CoreState(contract=verdict)
+    version, _ = adapter.read_runtime_version()
+    state = CoreState(contract=verdict, runtime_version=version)
     if verdict.ok:
         journal(INFO, f"contrat tenu pour {', '.join(boards)} ; mode {state.mode}")
     else:
         journal(ERROR, f"contrat cassé, mode {state.mode} : " + " ; ".join(verdict.problems))
 
-    app = create_app(secret=secret, workflows=workflows, boards=adapter.make_board_reader())
-    app.state.core = state
-    return app
+    return create_app(secret=secret, workflows=workflows, boards=adapter.make_board_reader(), state=state)
