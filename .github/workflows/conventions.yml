@@ -1,0 +1,17 @@
+name: Conventions
+
+# The branch, the title and the text of each pull request follow the type of its issue (ADR 0017 of
+# hermes-software-factory): the check lives in code-my-life/.github, this workflow only calls it.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  conventions:
+    name: Conventions
+    uses: code-my-life/.github/.github/workflows/conventions.yml@main
