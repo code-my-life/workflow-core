@@ -1,0 +1,41 @@
+[project]
+name = "workflow-core"
+version = "0.1.0"
+description = "Le socle commun des workflows de code-my-life : il observe les boards et les sert à factory-live."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi==0.162.0",
+    "pydantic==2.14.1",
+    "uvicorn==0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.2.0",
+    "ruff==0.17.3",
+]
+
+[build-system]
+requires = ["uv_build==0.12.3"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "workflow_core"
+module-root = ""
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["workflow_core", "scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "B", "C4", "UP", "SIM", "PIE", "PTH", "RET", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["scripts"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+markers = ["acceptance(name): an acceptance test of an issue, carrying the exact name the issue gives it"]

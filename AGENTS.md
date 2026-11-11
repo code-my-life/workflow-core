@@ -1,35 +1,47 @@
-# <nom du dépôt>
+# workflow-core
 
-<Ce que fait ce dépôt, en cinq lignes au plus : pour qui, ce qu'il produit, où il tourne.>
+Le socle commun des workflows de code-my-life (la ligne du code, `factory`, et la ligne vidéo, `studio`). Il observe
+les boards du kanban d'Hermès, juge la fiche de chaque workflow, et sert le tout à factory-live par une API locale.
+Il tourne sur la machine de la factory, en service utilisateur systemd lié à 127.0.0.1. Ses décisions d'architecture
+sont dans `docs/decisions/`, une par fichier (ADR 0001 à 0019).
 
 ## Commandes
 
 | Quoi | Commande |
 |---|---|
-| Installer | `<à compléter>` |
-| Tous les tests | `<à compléter>` |
-| Un seul fichier de test | `<à compléter>` |
-| Types | `<à compléter>` |
-| Build | `<à compléter>` |
-| Démarrer | `<à compléter>` |
-| Bout en bout | `<à compléter>` |
+| Installer | `uv sync --locked` |
+| Tous les tests | `uv run pytest` |
+| Un seul fichier de test | `uv run pytest tests/test_runtime_confined.py` |
+| Types | aucun pour l'instant |
+| Build | `uv build` |
+| Démarrer | pas encore de service (epic du socle observateur, story 2) |
+| Bout en bout | aucun |
+| Lint et format | `uv run ruff check` et `uv run ruff format --check` |
+| Hermès confiné | `python3 scripts/check_runtime_confined.py` |
 
 ## Conventions
 
-- Issues, branches et pull requests : <à compléter : avec les types de la factory, les modèles d'issues de
-  l'organisation et le workflow « Conventions » qui juge chaque pull request ; sans types, la règle de ce dépôt>.
+- Issues, branches et pull requests suivent les types de la software factory : un modèle d'issue de l'organisation par
+  type, une branche `<préfixe>/<n° de l'issue>-<sujet>`, et le workflow « Conventions », qui juge chaque pull request.
+- Hermès n'est nommé que dans `workflow_core/adapters/hermes/` (ADR 0001) : la CI refuse toute mention ailleurs dans
+  le paquet. Les docs, les ADR, les tests de contrat et les profils d'agent peuvent le nommer.
+- Python 3.12, uv 0.12.3, versions figées dans `pyproject.toml` et `uv.lock` (Pydantic 2.14.1, FastAPI, uvicorn).
+- Aucun secret dans le dépôt, qui est public (ADR 0002) : jetons et clés restent dans le `.env` de la machine.
 - Les commentaires du code sont en anglais. Aucun nom de personne dans un commentaire ou un titre de test.
 - Les décisions vivent dans `docs/decisions/`, une par fichier.
 
 ## Échecs connus
 
-<Les tests qui échouent déjà, et pourquoi.>
+Aucun.
 
 ## Interdits
 
 - Affaiblir ou retirer une assertion, allonger un timeout.
 - Pousser sur main, forcer un push, contourner un hook git.
+- Nommer Hermès hors de `workflow_core/adapters/hermes/`, écrire dans une base d'Hermès hors de l'adaptateur.
 
 ## Chemins sensibles
 
-<Les fichiers qui portent les contrôles du dépôt, et les données à ne pas toucher.>
+- `.github/workflows/ci.yml` et `scripts/check_runtime_confined.py` : les contrôles du dépôt.
+- `pyproject.toml` et `uv.lock` : les versions figées de la Stack.
+- `docs/decisions/` : les décisions d'architecture.

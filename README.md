@@ -1,10 +1,16 @@
-# <nom du dépôt>
+# workflow-core
 
-<Une phrase : ce que fait ce dépôt, et pour qui.>
+Le socle commun des workflows de code-my-life : il observe les boards d'Hermès et les sert à factory-live.
 
 ## Démarrer
 
-<Les commandes pour l'installer, le tester et le lancer.>
+```bash
+uv sync --locked
+uv run pytest
+```
+
+Le service n'existe pas encore : il arrive avec l'epic du socle observateur. Les décisions d'architecture sont dans
+`docs/decisions/`.
 
 ## Contribuer
 

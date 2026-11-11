@@ -1,0 +1,45 @@
+name: CI
+
+# Lint, tests and the runtime confinement check. Every push runs it, on any branch.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  confined:
+    name: Hermès confiné à son adaptateur
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Le paquet ne nomme le runtime que dans workflow_core/adapters/hermes/ (ADR 0001)
+        run: python3 scripts/check_runtime_confined.py
+
+  verify:
+    name: Lint et tests (Python 3.12)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.12.3'
+          python-version: '3.12'
+          enable-cache: true
+      - name: Installer (uv.lock, sans le modifier)
+        run: uv sync --locked
+      - name: Lint (ruff)
+        run: uv run ruff check
+      - name: Format (ruff)
+        run: uv run ruff format --check
+      - name: Tests (pytest)
+        run: uv run pytest
