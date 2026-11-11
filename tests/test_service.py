@@ -2,6 +2,7 @@
 
 import configparser
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -50,6 +51,24 @@ def test_the_unit_serves_on_127_0_0_1_8447_with_the_machine_env():
     assert service["WorkingDirectory"] == "%h/perso/workflow-core"
     # Its logs go to its own output, which journald collects.
     assert service.get("StandardOutput", "journal") == "journal"
+
+
+def test_the_unit_puts_the_user_bin_folder_first_on_the_service_path(tmp_path):
+    # Under systemd, a user service's PATH lacks ~/.local/bin, where the runtime's command is installed.
+    service = read_unit()["Service"]
+    variables = dict(item.split("=", 1) for item in service.get("Environment", "").split())
+    path = variables["PATH"].split(":")
+    assert path[0] == "%h/.local/bin"
+    assert [folder for folder in path if folder in ("/usr/local/bin", "/usr/bin", "/bin")] == [
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+    ]
+
+    home = tmp_path / "home"
+    command = fake_version_command(home / ".local" / "bin")
+    expanded = ":".join(folder.replace("%h", str(home)) for folder in path)
+    assert shutil.which("hermes", path=expanded) == str(command / "hermes")
 
 
 def run_install(home: Path, calls: Path, runtime_home: Path | None = None) -> subprocess.CompletedProcess:
