@@ -47,7 +47,7 @@ def test_the_unit_serves_on_127_0_0_1_8447_with_the_machine_env():
     assert command[command.index("--host") + 1] == "127.0.0.1"
     assert command[command.index("--port") + 1] == "8447"
     assert service["EnvironmentFile"] == "%h/.config/workflow-core/.env"
-    assert service["Restart"] == "on-failure"
+    assert service["Restart"] == "always"
     assert service["WorkingDirectory"] == "%h/perso/workflow-core"
     # Its logs go to its own output, which journald collects.
     assert service.get("StandardOutput", "journal") == "journal"
@@ -137,3 +137,51 @@ def test_the_install_runs_the_contract_tests_and_reports_a_failure(tmp_path):
     assert broken.stdout.strip().splitlines()[-1].startswith("Contrat cassé")
     # The unit stays installed: the service will start in observer mode.
     assert (home / ".config" / "systemd" / "user" / "workflow-core.service").read_bytes() == UNIT.read_bytes()
+
+
+WATCHDOG_SERVICE = ROOT / "systemd" / "workflow-core-watchdog.service"
+WATCHDOG_TIMER = ROOT / "systemd" / "workflow-core-watchdog.timer"
+
+
+def read(path: Path) -> configparser.ConfigParser:
+    unit = configparser.ConfigParser(strict=False, interpolation=None)
+    unit.optionxform = str
+    unit.read(path, encoding="utf-8")
+    return unit
+
+
+def test_the_units_restart_the_service_and_run_the_watchdog_every_minute():
+    service = read_unit()["Service"]
+    assert (service["Restart"], service["RestartSec"]) == ("always", "2")
+
+    watchdog = read(WATCHDOG_SERVICE)["Service"]
+    assert watchdog["Type"] == "oneshot"
+    assert watchdog["EnvironmentFile"] == "%h/.config/workflow-core/.env"
+    command = watchdog["ExecStart"].split()
+    assert command[0] == "/usr/bin/python3"  # the system's Python: independent of the core and its venv
+    assert command[1].endswith("/scripts/healthz_watchdog.py")
+
+    timer = read(WATCHDOG_TIMER)
+    assert timer["Timer"]["OnCalendar"] == "minutely"
+    assert timer["Timer"]["Unit"] == "workflow-core-watchdog.service"
+    assert timer["Install"]["WantedBy"] == "timers.target"
+
+
+def test_the_install_copies_the_watchdog_units_without_enabling_them(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    calls = tmp_path / "systemctl.calls"
+
+    first = run_install(home, calls)
+    assert first.returncode == 0, first.stdout + first.stderr
+    target = home / ".config" / "systemd" / "user"
+    for unit in (UNIT, WATCHDOG_SERVICE, WATCHDOG_TIMER):
+        assert (target / unit.name).read_bytes() == unit.read_bytes()
+    after_first = snapshot(home / ".config")
+
+    second = run_install(home, calls)
+    assert second.returncode == 0, second.stderr
+    assert snapshot(home / ".config") == after_first
+    # Neither the timer nor the service is enabled or started: that is the owner's task.
+    assert set(calls.read_text(encoding="utf-8").splitlines()) == {"--user daemon-reload"}
+    assert not (target / "timers.target.wants").exists()

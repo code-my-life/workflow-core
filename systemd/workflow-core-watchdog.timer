@@ -1,0 +1,12 @@
+# Runs the workflow-core watchdog every minute. scripts/install.sh copies it; the owner enables it:
+# systemctl --user enable --now workflow-core-watchdog.timer
+[Unit]
+Description=workflow-core, chien de garde toutes les minutes
+
+[Timer]
+OnCalendar=minutely
+AccuracySec=1s
+Unit=workflow-core-watchdog.service
+
+[Install]
+WantedBy=timers.target
