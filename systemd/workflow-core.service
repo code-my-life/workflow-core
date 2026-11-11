@@ -11,7 +11,7 @@ EnvironmentFile=%h/.config/workflow-core/.env
 # A user service does not get ~/.local/bin on its PATH; the runtime's command is installed there.
 Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=%h/perso/workflow-core/.venv/bin/python -m workflow_core --host 127.0.0.1 --port 8447
-Restart=on-failure
+Restart=always
 RestartSec=2
 StandardOutput=journal
 StandardError=journal
