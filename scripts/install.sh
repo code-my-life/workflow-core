@@ -25,3 +25,13 @@ if [ "$changed" -eq 1 ]; then
 else
   echo "systemd rechargé, rien n'a changé."
 fi
+
+# The contract test against the installed runtime (ADR 0001). A failure does not undo the install: the service will
+# start in observer mode. It is said on the last line, and the install exits with 1.
+echo "Test de contrat : uv run pytest tests/contract"
+if (cd "$repo" && uv run pytest tests/contract -rs); then
+  echo "Contrat tenu : le service démarrera en mode normal."
+else
+  echo "Contrat cassé : l'unité est installée, mais le service démarrera en mode observateur (voir ci-dessus)."
+  exit 1
+fi

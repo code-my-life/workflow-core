@@ -29,14 +29,11 @@ def main(argv: list[str] | None = None) -> int:
     import uvicorn
 
     from workflow_core.adapters import runtime_adapter
-    from workflow_core.api.app import create_app
     from workflow_core.config import load_workflows
+    from workflow_core.service import build_service
 
-    app = create_app(
-        secret=secret,
-        workflows=load_workflows(),
-        boards=runtime_adapter().make_board_reader(),
-    )
+    # The contract is checked before serving; a broken one keeps the observer mode, the service still starts.
+    app = build_service(secret=secret, workflows=load_workflows(), adapter=runtime_adapter())
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0
 
