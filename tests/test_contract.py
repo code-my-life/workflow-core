@@ -1,5 +1,6 @@
 """The contract test: what the adapter reads is still what the installed runtime provides (ADR 0001, ADR 0019)."""
 
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -9,7 +10,7 @@ from workflow_core.adapters import runtime_adapter
 from workflow_core.config import Workflow
 from workflow_core.service import build_service
 
-from conftest import FACTORY_CARDS
+from conftest import FACTORY_ITEMS, fake_version_command
 
 SECRET = "test-secret-not-a-real-one"
 WORKFLOWS = {
@@ -109,7 +110,7 @@ def test_a_kept_contract_at_startup_logs_an_information_line(runtime_home, capsy
     assert any(line.startswith("<6>") and "contrat" in line for line in err)
     assert app.state.core.mode == "normal"
     response = TestClient(app).get("/api/workflows/factory/items", headers={"Authorization": f"Bearer {SECRET}"})
-    assert response.json()["items"] == FACTORY_CARDS
+    assert response.json()["items"] == FACTORY_ITEMS
 
 
 def test_the_check_leaves_every_base_unchanged(runtime_home):
@@ -124,3 +125,37 @@ def test_the_check_leaves_every_base_unchanged(runtime_home):
         check()
 
     assert {base: base.read_bytes() for base in bases} == before
+
+
+def test_the_new_read_tables_and_the_version_line_are_in_the_contract(runtime_home, tmp_path, monkeypatch):
+    from workflow_core.adapters.hermes.contract import CONTRACT
+
+    assert set(CONTRACT["task_runs"].columns) == {
+        "id",
+        "task_id",
+        "profile",
+        "status",
+        "outcome",
+        "started_at",
+        "ended_at",
+        "summary",
+    }
+    assert set(CONTRACT["task_links"].columns) == {"parent_id", "child_id"}
+    assert set(CONTRACT["task_comments"].columns) == {"id", "task_id", "author", "body", "created_at"}
+    assert check().ok is True
+
+    rebuild_tasks_column(board_base(runtime_home, "factory"), "task_comments", "body")
+    assert check().problems == ["factory: task_comments.body absente"]
+
+    bin_dir = fake_version_command(tmp_path / "other-bin", "Hermes Agent 1.0 · renamed")
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    problems = check().problems
+    assert problems[0] == "factory: task_comments.body absente"
+    assert problems[1].startswith("version : première ligne inattendue")
+    assert "Hermes Agent 1.0" in problems[1]
+
+
+def rebuild_tasks_column(base: Path, table: str, column: str) -> None:
+    with sqlite3.connect(base) as db:
+        db.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+    db.close()
