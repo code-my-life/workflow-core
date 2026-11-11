@@ -1,6 +1,6 @@
 [project]
 name = "workflow-core"
-version = "0.1.0"
+version = "0.2.0"
 description = "Le socle commun des workflows de code-my-life : il observe les boards et les sert à factory-live."
 readme = "README.md"
 license = "MIT"
@@ -14,7 +14,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "httpx==0.28.1",
+    "httpx2==2.16.0",
     "pytest==9.2.0",
     "ruff==0.17.3",
 ]
