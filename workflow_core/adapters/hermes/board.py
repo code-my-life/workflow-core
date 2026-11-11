@@ -6,6 +6,7 @@ SQLite URI `mode=ro`: SQLite refuses every write on the connection, and the base
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from collections.abc import Iterator
@@ -14,6 +15,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from workflow_core.model.board import BoardUnavailableError, Card, Item
+from workflow_core.model.facts import CardDetail, CardFacts, EventFact, RunFact, RuntimeTerms
 
 # The variable that locates Hermès' home; only this adapter reads it.
 HOME_VARIABLE = "HERMES_HOME"
@@ -24,6 +26,26 @@ CARD_COLUMNS = ("id", "title", "body", "status", "assignee", "created_at", "star
 RUN_COLUMNS = ("id", "task_id", "profile", "status", "outcome", "started_at", "ended_at", "summary")
 LINK_COLUMNS = ("parent_id", "child_id")
 COMMENT_COLUMNS = ("id", "task_id", "author", "body", "created_at")
+# What the diagnosis reads besides, as factory-live reads it (apps/server/src/adapters/hermes/kanban.ts at d47f235).
+CARD_FACT_COLUMNS = (
+    "current_run_id",
+    "workspace_path",
+    "skills",
+    "last_heartbeat_at",
+    "branch_name",
+    "consecutive_failures",
+    "block_recurrences",
+    "last_failure_error",
+    "max_runtime_seconds",
+    "idempotency_key",
+    "model_override",
+    "provider_override",
+)
+RUN_FACT_COLUMNS = ("metadata", "error")
+EVENT_COLUMNS = ("id", "task_id", "run_id", "kind", "payload", "created_at")
+
+# Hermès' own words that a diagnosis quotes.
+TERMS = RuntimeTerms(runtime_limit_key="max_runtime_seconds")
 
 
 def open_read_only(board: str, path: Path) -> sqlite3.Connection:
@@ -41,6 +63,25 @@ def _select_cards(db: sqlite3.Connection) -> list[sqlite3.Row]:
     return db.execute(f"SELECT {', '.join(CARD_COLUMNS)} FROM tasks ORDER BY created_at, id").fetchall()
 
 
+def _json_object(text: str | None) -> dict:
+    """A JSON object column; anything else (NULL, invalid JSON, another type) is an empty object, as factory-live
+    reads it."""
+    try:
+        value = json.loads(text) if text else {}
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _string_list(text: str | None) -> list[str]:
+    """A JSON list of strings column (`skills`); anything else is an empty list."""
+    try:
+        value = json.loads(text) if text else []
+    except ValueError:
+        return []
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+
 def hermes_home(environ: dict[str, str] | None = None) -> Path:
     env = os.environ if environ is None else environ
     return Path(env.get(HOME_VARIABLE) or DEFAULT_HOME).expanduser()
@@ -51,6 +92,7 @@ class HermesBoardReader:
 
     def __init__(self, home: Path) -> None:
         self.home = home
+        self.terms = TERMS
 
     def base_path(self, board: str) -> Path:
         if not board or "/" in board or board in {".", ".."}:
@@ -107,6 +149,46 @@ class HermesBoardReader:
             if row["task_id"] in by_card:
                 by_card[row["task_id"]]["comments"].append({k: row[k] for k in COMMENT_COLUMNS if k != "task_id"})
         return [Item(**dict(row), **by_card[row["id"]]) for row in cards]
+
+    def read_card_facts(self, board: str, card: str) -> CardFacts | None:
+        """The card, its runs and its events, read in one short read transaction; `None` if the card is absent."""
+        card_columns = CARD_COLUMNS + CARD_FACT_COLUMNS
+        run_columns = RUN_COLUMNS + RUN_FACT_COLUMNS
+        with self.open_board(board) as db:
+            try:
+                db.execute("BEGIN")
+                try:
+                    row = db.execute(f"SELECT {', '.join(card_columns)} FROM tasks WHERE id = ?", (card,)).fetchone()
+                    runs = db.execute(
+                        f"SELECT {', '.join(run_columns)} FROM task_runs WHERE task_id = ? ORDER BY id", (card,)
+                    ).fetchall()
+                    events = db.execute(
+                        f"SELECT {', '.join(EVENT_COLUMNS)} FROM task_events WHERE task_id = ? ORDER BY id", (card,)
+                    ).fetchall()
+                finally:
+                    db.execute("COMMIT")
+            except sqlite3.Error as error:
+                raise BoardUnavailableError(board, str(error)) from error
+        if row is None:
+            return None
+        return CardFacts(
+            card=CardDetail(**{**dict(row), "skills": _string_list(row["skills"])}),
+            runs=[
+                RunFact(
+                    **{**{k: run[k] for k in run_columns if k != "task_id"}, "metadata": _json_object(run["metadata"])}
+                )
+                for run in runs
+            ],
+            events=[
+                EventFact(
+                    **{
+                        **{k: event[k] for k in EVENT_COLUMNS if k != "task_id"},
+                        "payload": _json_object(event["payload"]),
+                    }
+                )
+                for event in events
+            ],
+        )
 
 
 class HermesBoardWatcher:

@@ -139,6 +139,8 @@ def test_the_new_read_tables_and_the_version_line_are_in_the_contract(runtime_ho
         "started_at",
         "ended_at",
         "summary",
+        "metadata",
+        "error",
     }
     assert set(CONTRACT["task_links"].columns) == {"parent_id", "child_id"}
     assert set(CONTRACT["task_comments"].columns) == {"id", "task_id", "author", "body", "created_at"}
@@ -178,3 +180,28 @@ def test_the_data_version_read_is_in_the_contract(runtime_home):
             return ("seven",)
 
     assert contract.pragma_problems(TextVersion()) == ["PRAGMA data_version illisible : 'seven'"]
+
+
+def test_the_card_runs_and_events_read_for_the_diagnosis_are_in_the_contract(runtime_home):
+    from workflow_core.adapters.hermes.contract import CONTRACT
+
+    assert set(CONTRACT["tasks"].columns) >= {
+        "current_run_id",
+        "workspace_path",
+        "skills",
+        "last_heartbeat_at",
+        "branch_name",
+        "consecutive_failures",
+        "block_recurrences",
+        "last_failure_error",
+        "max_runtime_seconds",
+        "idempotency_key",
+        "model_override",
+        "provider_override",
+    }
+    assert {"error", "metadata"} <= set(CONTRACT["task_runs"].columns)
+    assert set(CONTRACT["task_events"].columns) == {"id", "task_id", "run_id", "kind", "payload", "created_at"}
+    assert check().ok is True
+
+    rebuild_tasks_column(board_base(runtime_home, "studio"), "task_events", "payload")
+    assert check().problems == ["studio: task_events.payload absente"]

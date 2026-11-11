@@ -11,9 +11,12 @@ from dataclasses import dataclass, field
 
 from workflow_core.adapters.hermes.board import (
     CARD_COLUMNS,
+    CARD_FACT_COLUMNS,
     COMMENT_COLUMNS,
+    EVENT_COLUMNS,
     LINK_COLUMNS,
     RUN_COLUMNS,
+    RUN_FACT_COLUMNS,
     HermesBoardReader,
     make_board_reader,
 )
@@ -34,7 +37,7 @@ class Table:
 # What the adapter reads of Hermès 0.22.2. Every story that reads something new adds it here.
 CONTRACT: dict[str, Table] = {
     "tasks": Table(
-        columns=CARD_COLUMNS,
+        columns=CARD_COLUMNS + CARD_FACT_COLUMNS,
         values={
             "status": frozenset(
                 {"triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done", "archived"}
@@ -43,9 +46,10 @@ CONTRACT: dict[str, Table] = {
         },
         nullable=frozenset({"block_kind"}),
     ),
-    "task_runs": Table(columns=RUN_COLUMNS),
+    "task_runs": Table(columns=RUN_COLUMNS + RUN_FACT_COLUMNS),
     "task_links": Table(columns=LINK_COLUMNS),
     "task_comments": Table(columns=COMMENT_COLUMNS),
+    "task_events": Table(columns=EVENT_COLUMNS),
 }
 # The pragmas the adapter reads, on a read-only connection: data_version must be an integer (HermesBoardWatcher).
 PRAGMAS = ("data_version",)

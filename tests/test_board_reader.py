@@ -4,9 +4,10 @@ import sqlite3
 
 import pytest
 from workflow_core.adapters import runtime_adapter
+from workflow_core.adapters.hermes.board import HermesBoardReader
 from workflow_core.model.board import BoardUnavailableError
 
-from conftest import FACTORY_CARDS, STUDIO_CARDS
+from conftest import FACTORY_CARDS, STUDIO_CARDS, make_runtime_board
 
 
 def test_a_write_on_the_opened_board_is_refused(runtime_home):
@@ -40,3 +41,48 @@ def test_a_missing_base_is_a_named_error_not_an_empty_list(runtime_home):
     reader = runtime_adapter().make_board_reader()
     with pytest.raises(BoardUnavailableError, match="nowhere"):
         reader.read_cards("nowhere")
+
+
+def test_reading_the_facts_of_a_card_leaves_the_base_unchanged(tmp_path):
+    home = tmp_path / "runtime"
+    base = make_runtime_board(
+        home,
+        "factory",
+        tasks=[
+            {
+                "id": "t_0042",
+                "title": "Une carte",
+                "status": "ready",
+                "created_at": 1793000000,
+                "skills": '["github"]',
+                "max_runtime_seconds": 7200,
+            }
+        ],
+        runs=[
+            {
+                "id": 1,
+                "task_id": "t_0042",
+                "profile": "coder",
+                "status": "timed_out",
+                "started_at": 1793000060,
+                "metadata": '{"worker_session_id": "s1"}',
+                "error": "timed out",
+            }
+        ],
+        events=[
+            {"task_id": "t_0042", "run_id": 1, "kind": "timed_out", "payload": "not json", "created_at": 1793007320}
+        ],
+    )
+    before = base.read_bytes()
+    reader = HermesBoardReader(home)
+
+    facts = reader.read_card_facts("factory", "t_0042")
+
+    assert facts.card.skills == ["github"]
+    assert facts.card.max_runtime_seconds == 7200
+    assert facts.runs[0].metadata == {"worker_session_id": "s1"}
+    assert facts.runs[0].error == "timed out"
+    # A payload that is not a JSON object is read as an empty one, as factory-live reads it.
+    assert facts.events[0].payload == {}
+    assert reader.read_card_facts("factory", "t_9999") is None
+    assert base.read_bytes() == before

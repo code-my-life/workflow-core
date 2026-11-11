@@ -22,7 +22,19 @@ CREATE TABLE tasks (
     created_at INTEGER NOT NULL,
     started_at INTEGER,
     completed_at INTEGER,
-    block_kind TEXT
+    block_kind TEXT,
+    idempotency_key TEXT,
+    current_run_id INTEGER,
+    workspace_path TEXT,
+    skills TEXT,
+    model_override TEXT,
+    provider_override TEXT,
+    last_heartbeat_at INTEGER,
+    branch_name TEXT,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    block_recurrences INTEGER NOT NULL DEFAULT 0,
+    last_failure_error TEXT,
+    max_runtime_seconds INTEGER
 )
 """
 
@@ -67,7 +79,7 @@ STUDIO_CARDS = [
 
 COLUMNS = ("id", "title", "body", "status", "assignee", "created_at", "started_at", "completed_at", "block_kind")
 
-# The runtime's tables of runs, links and comments: the columns the core reads, plus some it does not.
+# The runtime's tables of runs, links, comments and events: the columns the core reads, plus some it does not.
 OTHER_TABLES = (
     """CREATE TABLE task_runs (
         id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, profile TEXT, step_key TEXT,
@@ -77,6 +89,10 @@ OTHER_TABLES = (
     "CREATE TABLE task_links (parent_id TEXT NOT NULL, child_id TEXT NOT NULL, PRIMARY KEY (parent_id, child_id))",
     """CREATE TABLE task_comments (
         id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, author TEXT NOT NULL, body TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    )""",
+    """CREATE TABLE task_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, run_id INTEGER, kind TEXT NOT NULL, payload TEXT,
         created_at INTEGER NOT NULL
     )""",
 )
@@ -201,3 +217,26 @@ def runtime_home(tmp_path, monkeypatch) -> Path:
     bin_dir = fake_version_command(tmp_path / "runtime-bin")
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     return home
+
+
+# The schema of a board's base as the runtime 0.22.2 creates it, without data (copied from factory-live at d47f235).
+RUNTIME_SCHEMA = Path(__file__).resolve().parent / "fixtures" / "hermes-schema" / "kanban.sql"
+
+
+def make_runtime_board(
+    home: Path, board: str, *, tasks: list[dict], runs: list[dict] = (), events: list[dict] = ()
+) -> Path:
+    """Create `<home>/kanban/boards/<board>/kanban.db` with the runtime's real schema, holding these rows. Each row
+    names only the columns it sets; the others keep the schema's defaults."""
+    folder = home / "kanban" / "boards" / board
+    folder.mkdir(parents=True)
+    base = folder / "kanban.db"
+    with sqlite3.connect(base) as db:
+        db.execute("PRAGMA journal_mode=wal")
+        db.executescript(RUNTIME_SCHEMA.read_text(encoding="utf-8"))
+        for table, rows in (("tasks", tasks), ("task_runs", runs), ("task_events", events)):
+            for row in rows:
+                columns = ", ".join(row)
+                db.execute(f"INSERT INTO {table} ({columns}) VALUES ({', '.join('?' * len(row))})", tuple(row.values()))
+    db.close()
+    return base

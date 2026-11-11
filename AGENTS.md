@@ -20,6 +20,7 @@ sont dans `docs/decisions/`, une par fichier (ADR 0001 à 0019).
 | Hermès confiné | `python3 scripts/check_runtime_confined.py` |
 | Test de contrat (Hermès installé) | `uv run pytest tests/contract -rs` (sauté sans base de board, comme en CI) |
 | JSON Schema de la fiche | `uv run python scripts/write_sheet_schema.py` (après un changement de la forme) |
+| JSON Schema du diagnostic | `uv run python scripts/write_diagnosis_schema.py` (après un changement du contrat `Diagnosis`) |
 
 ## Conventions
 
