@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from workflow_core.model import sheet_schema_text
+from workflow_core.model.sheet import sheet_schema_text
 
 SCHEMA = Path(__file__).resolve().parent.parent / "schema" / "workflow-sheet.schema.json"
 CROSS_RULES = (

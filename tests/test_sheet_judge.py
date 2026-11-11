@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import pytest
-from workflow_core.model import judge_sheet
+from workflow_core.model.sheet import judge_sheet
 
 SHEETS = Path(__file__).resolve().parent / "fixtures" / "sheets"
 
