@@ -196,6 +196,8 @@ def runtime_home(tmp_path, monkeypatch) -> Path:
     make_board(home, "factory", FACTORY_CARDS, FACTORY_RUNS, FACTORY_LINKS, FACTORY_COMMENTS)
     make_board(home, "studio", STUDIO_CARDS, STUDIO_RUNS)
     monkeypatch.setenv(RUNTIME_HOME_VAR, str(home))
+    # The core's own state (its event journal) stays in the test's folder too.
+    monkeypatch.setenv("WORKFLOW_CORE_STATE_DIR", str(tmp_path / "state"))
     bin_dir = fake_version_command(tmp_path / "runtime-bin")
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     return home

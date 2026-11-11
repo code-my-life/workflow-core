@@ -47,6 +47,24 @@ CONTRACT: dict[str, Table] = {
     "task_links": Table(columns=LINK_COLUMNS),
     "task_comments": Table(columns=COMMENT_COLUMNS),
 }
+# The pragmas the adapter reads, on a read-only connection: data_version must be an integer (HermesBoardWatcher).
+PRAGMAS = ("data_version",)
+
+
+def pragma_problems(db) -> list[str]:
+    problems = []
+    for pragma in PRAGMAS:
+        try:
+            row = db.execute(f"PRAGMA {pragma}").fetchone()
+        except sqlite3.Error as error:
+            problems.append(f"PRAGMA {pragma} illisible : {error}")
+            continue
+        value = row[0] if row else None
+        if not isinstance(value, int) or isinstance(value, bool):
+            problems.append(f"PRAGMA {pragma} illisible : {value!r}")
+    return problems
+
+
 # The version output is part of the contract too: its first line must keep the form VERSION_LINE reads.
 
 
@@ -71,6 +89,7 @@ def board_problems(reader: HermesBoardReader, board: str) -> list[str]:
     try:
         with reader.open_board(board) as db:
             problems = [problem for name, table in CONTRACT.items() for problem in _table_problems(db, name, table)]
+            problems += pragma_problems(db)
     except BoardUnavailableError as error:
         return [f"{board}: base absente ou illisible ({error})"]
     except sqlite3.Error as error:

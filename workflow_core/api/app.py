@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import secrets
+import time
+from collections.abc import Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.exceptions import HTTPException
 
 from workflow_core.config import Workflow
+from workflow_core.events import BoardWatcher, EventHub
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
 from workflow_core.model.contract import CoreState
 from workflow_core.sheets import InvalidSheetError, SheetUnavailableError, read_sheet, sheet_json
@@ -38,12 +44,33 @@ def _now() -> str:
 
 
 def create_app(
-    *, secret: str, workflows: dict[str, Workflow], boards: BoardReader, state: CoreState | None = None
+    *,
+    secret: str,
+    workflows: dict[str, Workflow],
+    boards: BoardReader,
+    state: CoreState | None = None,
+    watcher: BoardWatcher | None = None,
+    journal_path: Path | None = None,
+    clock: Callable[[], float] = time.time,
+    spy: Callable[[str], Any] | None = None,
 ) -> FastAPI:
+    """The API. With a board watcher and a journal path, it also probes the boards and serves GET /api/events."""
     if not secret:
         raise ValueError("the shared secret is empty")
     expected = secret.encode("utf-8")
-    app = FastAPI(title="workflow-core", docs_url=None, redoc_url=None, openapi_url=None)
+    hub: EventHub | None = None
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if hub is not None:
+            await hub.start()
+        try:
+            yield
+        finally:
+            if hub is not None:
+                await hub.stop()
+
+    app = FastAPI(title="workflow-core", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     core = state if state is not None else CoreState()
     for workflow in workflows.values():
         core.last_read_at.setdefault(workflow.board, None)
@@ -60,6 +87,12 @@ def create_app(
         # Only a successful read moves the time: a failed one keeps the last good time.
         core.last_read_at[board] = _now()
         return items
+
+    if watcher is not None and journal_path is not None:
+        hub = EventHub(
+            workflows=workflows, watcher=watcher, read_items=read_items, journal_path=journal_path, clock=clock, spy=spy
+        )
+    app.state.events = hub
 
     @app.middleware("http")
     async def require_the_secret(request: Request, call_next):
@@ -123,6 +156,17 @@ def create_app(
             "workflow": workflow.key,
             "items": [item.model_dump() for item in read_items(workflow.board)],
         }
+
+    @app.get("/api/events")
+    async def events(request: Request, cursor: str | None = None) -> StreamingResponse:
+        if hub is None:
+            raise HTTPException(404, "the event stream is not running")
+        resume = request.headers.get("last-event-id") or cursor
+        return StreamingResponse(
+            hub.stream(resume),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.get("/api/machine")
     def machine() -> dict:

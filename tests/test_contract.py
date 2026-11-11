@@ -159,3 +159,22 @@ def rebuild_tasks_column(base: Path, table: str, column: str) -> None:
     with sqlite3.connect(base) as db:
         db.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
     db.close()
+
+
+def test_the_data_version_read_is_in_the_contract(runtime_home):
+    from workflow_core.adapters.hermes import contract
+
+    assert "data_version" in contract.PRAGMAS
+    assert check().ok is True
+
+    class TextVersion:
+        """A connection whose data_version is not an integer."""
+
+        def execute(self, sql):
+            assert sql == "PRAGMA data_version"
+            return self
+
+        def fetchone(self):
+            return ("seven",)
+
+    assert contract.pragma_problems(TextVersion()) == ["PRAGMA data_version illisible : 'seven'"]

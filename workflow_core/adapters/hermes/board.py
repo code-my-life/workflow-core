@@ -103,6 +103,60 @@ class HermesBoardReader:
         return [Item(**dict(row), **by_card[row["id"]]) for row in cards]
 
 
+class HermesBoardWatcher:
+    """Watches Hermès boards for writes, cheaply enough to be asked every 300 ms.
+
+    It keeps one read-only connection per board and reads `PRAGMA data_version`, a counter SQLite moves when another
+    connection commits to the base. Every call names its board.
+    """
+
+    def __init__(self, reader: HermesBoardReader) -> None:
+        self.reader = reader
+        self._connections: dict[str, sqlite3.Connection] = {}
+        self._versions: dict[str, int] = {}
+
+    def _connection(self, name: str) -> sqlite3.Connection:
+        db = self._connections.get(name)
+        if db is None:
+            path = self.reader.base_path(name)
+            if not path.is_file():
+                raise BoardUnavailableError(name, f"no base at {path}")
+            try:
+                db = sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True, isolation_level=None)
+            except sqlite3.Error as error:
+                raise BoardUnavailableError(name, str(error)) from error
+            self._connections[name] = db
+        return db
+
+    def changed(self, board: str) -> bool:
+        """True at the first call for a board, then each time another connection has written to its base."""
+        db = self._connection(board)
+        try:
+            (version,) = db.execute("PRAGMA data_version").fetchone()
+        except sqlite3.Error as error:
+            self._forget(board)
+            raise BoardUnavailableError(board, str(error)) from error
+        if self._versions.get(board) == version:
+            return False
+        self._versions[board] = version
+        return True
+
+    def _forget(self, board: str) -> None:
+        db = self._connections.pop(board, None)
+        self._versions.pop(board, None)
+        if db is not None:
+            db.close()
+
+    def close(self) -> None:
+        for board in list(self._connections):
+            self._forget(board)
+
+
+def make_board_watcher(environ: dict[str, str] | None = None) -> HermesBoardWatcher:
+    """A watcher of the boards of the Hermès home named by `HERMES_HOME`."""
+    return HermesBoardWatcher(make_board_reader(environ))
+
+
 def make_board_reader(environ: dict[str, str] | None = None) -> HermesBoardReader:
     """The board reader of the Hermès home named by `HERMES_HOME`, `~/.hermes` by default."""
     return HermesBoardReader(hermes_home(environ))
