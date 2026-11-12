@@ -207,3 +207,15 @@ def test_observer_mode_writes_nothing_but_the_contract_issue(runtime_home, tmp_p
         assert [call[0] for call in github.calls] == ["list_issues", "create_issue"]
 
     assert base.read_bytes() == before
+
+
+def test_an_unreadable_runtime_version_is_written_in_the_contract_issue(runtime_home, tmp_path, monkeypatch):
+    # The runtime's command missing from the PATH: the version cannot be read, and the issue says so.
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    github = FakeGitHub()
+
+    start(tmp_path, github)
+
+    body = github.issues[0]["body"]
+    assert "lue : `illisible`" in body
+    assert "--version" in body
