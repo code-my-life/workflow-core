@@ -12,7 +12,14 @@ from workflow_core.api.app import create_app
 from workflow_core.config import load_workflows
 from workflow_core.service import build_service
 
-from conftest import FACTORY_ITEMS, STUDIO_ITEMS
+from conftest import (
+    FACTORY_ITEMS,
+    FACTORY_ITEMS_BEFORE,
+    RUNTIME_HOME_VAR,
+    STUDIO_ITEMS,
+    STUDIO_ITEMS_BEFORE,
+    make_runtime_board,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 SECRET = "test-secret-not-a-real-one"
@@ -210,3 +217,149 @@ def test_run_verdicts_of_an_unknown_card_is_unknown_item(client):
     )
     refused = client.get("/api/workflows/factory/items/t_0001/run-verdicts")
     assert (refused.status_code, refused.json()["error"]) == (401, "unauthorized")
+
+
+ITEM_KEYS_BEFORE = (
+    "id",
+    "title",
+    "body",
+    "status",
+    "assignee",
+    "created_at",
+    "started_at",
+    "completed_at",
+    "block_kind",
+    "runs",
+    "parents",
+    "children",
+    "comments",
+)
+RUN_KEYS_BEFORE = ("id", "profile", "status", "outcome", "started_at", "ended_at", "summary")
+
+
+def full_state_home(tmp_path, monkeypatch, runs: list[dict]) -> TestClient:
+    """A runtime home whose factory board has the runtime's real schema and one card, `t_full`, with these runs."""
+    home = tmp_path / "full-runtime"
+    make_runtime_board(
+        home,
+        "factory",
+        tasks=[
+            {
+                "id": "t_full",
+                "title": "La carte de l'issue 24",
+                "status": "blocked",
+                "assignee": "coder",
+                "created_at": 1762900000,
+                "started_at": 1762900100,
+                "block_kind": "needs_input",
+                "idempotency_key": "gh-factory-live-24",
+                "workspace_path": "/work/factory-live-24",
+                "current_run_id": 7,
+                "last_heartbeat_at": 1762900500,
+                "model_override": "claude-opus",
+                "provider_override": "anthropic",
+                "skills": '["factory-issue", "gril"]',
+            }
+        ],
+        runs=runs,
+        # Inserted out of order: the item lists them by id.
+        events=[
+            {
+                "id": 3,
+                "task_id": "t_full",
+                "run_id": 7,
+                "kind": "blocked",
+                "payload": '{"reason": "C3 sans preuve"}',
+                "created_at": 1762900600,
+            },
+            {
+                "id": 1,
+                "task_id": "t_full",
+                "run_id": None,
+                "kind": "created",
+                "payload": None,
+                "created_at": 1762900000,
+            },
+            {
+                "id": 2,
+                "task_id": "t_full",
+                "run_id": 7,
+                "kind": "claimed",
+                "payload": '{"profile": "coder"}',
+                "created_at": 1762900100,
+            },
+        ],
+    )
+    monkeypatch.setenv(RUNTIME_HOME_VAR, str(home))
+    app = create_app(
+        secret=SECRET,
+        workflows=load_workflows(ROOT / "config" / "workflows.toml"),
+        boards=runtime_adapter().make_board_reader(),
+    )
+    return TestClient(app)
+
+
+CURRENT_RUN = {
+    "id": 7,
+    "task_id": "t_full",
+    "profile": "coder",
+    "status": "running",
+    "started_at": 1762900100,
+    "metadata": json.dumps({"branch": "feat/24-x", "pr_url": "https://github.com/code-my-life/factory-live/pull/25"}),
+}
+
+
+def test_an_item_carries_the_full_state_of_its_card(tmp_path, monkeypatch):
+    client = full_state_home(tmp_path, monkeypatch, [CURRENT_RUN])
+    base = tmp_path / "full-runtime" / "kanban" / "boards" / "factory" / "kanban.db"
+    before = base.read_bytes()
+
+    response = client.get("/api/workflows/factory/items", headers=GOOD)
+
+    assert base.read_bytes() == before
+
+    assert response.status_code == 200
+    (item,) = response.json()["items"]
+    assert item["idempotency_key"] == "gh-factory-live-24"
+    assert item["workspace_path"] == "/work/factory-live-24"
+    assert item["current_run_id"] == 7
+    assert item["last_heartbeat_at"] == 1762900500
+    assert item["model_override"] == "claude-opus"
+    assert item["provider_override"] == "anthropic"
+    assert item["skills"] == ["factory-issue", "gril"]
+    assert item["runs"][0]["metadata"] == {
+        "branch": "feat/24-x",
+        "pr_url": "https://github.com/code-my-life/factory-live/pull/25",
+    }
+    assert item["events"] == [
+        {"id": 1, "run_id": None, "kind": "created", "payload": {}, "created_at": 1762900000},
+        {"id": 2, "run_id": 7, "kind": "claimed", "payload": {"profile": "coder"}, "created_at": 1762900100},
+        {"id": 3, "run_id": 7, "kind": "blocked", "payload": {"reason": "C3 sans preuve"}, "created_at": 1762900600},
+    ]
+
+
+def test_an_unreadable_run_metadata_is_an_empty_object(tmp_path, monkeypatch):
+    runs = [
+        {**CURRENT_RUN, "id": run_id, "metadata": metadata}
+        for run_id, metadata in ((1, None), (2, ""), (3, "pas du JSON {"), (4, "[1, 2]"), (5, '"texte"'))
+    ]
+    client = full_state_home(tmp_path, monkeypatch, runs)
+
+    response = client.get("/api/workflows/factory/items", headers=GOOD)
+
+    assert response.status_code == 200
+    (item,) = response.json()["items"]
+    assert [(run["id"], run["metadata"]) for run in item["runs"]] == [(n, {}) for n in range(1, 6)]
+
+
+def test_the_existing_item_fields_are_unchanged(client):
+    items = client.get("/api/workflows/factory/items", headers=GOOD).json()["items"]
+    studio = client.get("/api/workflows/studio/items", headers=GOOD).json()["items"]
+
+    def before(item: dict) -> dict:
+        kept = {key: item[key] for key in ITEM_KEYS_BEFORE}
+        kept["runs"] = [{key: run[key] for key in RUN_KEYS_BEFORE} for run in item["runs"]]
+        return kept
+
+    assert [before(item) for item in items] == FACTORY_ITEMS_BEFORE
+    assert [before(item) for item in studio] == STUDIO_ITEMS_BEFORE

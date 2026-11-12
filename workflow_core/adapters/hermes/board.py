@@ -44,6 +44,18 @@ CARD_FACT_COLUMNS = (
 )
 RUN_FACT_COLUMNS = ("metadata", "error")
 EVENT_COLUMNS = ("id", "task_id", "run_id", "kind", "payload", "created_at")
+# What the items carry besides: the full state of a card, as factory-live's code line needs it.
+ITEM_CARD_COLUMNS = (
+    *CARD_COLUMNS,
+    "idempotency_key",
+    "workspace_path",
+    "current_run_id",
+    "last_heartbeat_at",
+    "model_override",
+    "provider_override",
+    "skills",
+)
+ITEM_RUN_COLUMNS = (*RUN_COLUMNS, "metadata")
 FACT_CARD_COLUMNS = CARD_COLUMNS + CARD_FACT_COLUMNS
 FACT_RUN_COLUMNS = RUN_COLUMNS + RUN_FACT_COLUMNS
 
@@ -118,28 +130,33 @@ class HermesBoardReader:
         return [Card(**dict(row)) for row in rows]
 
     def read_items(self, board: str) -> list[Item]:
-        """The cards of the board with their runs, links and comments, read in one short read transaction."""
+        """The cards of the board with their full state, runs, links, comments and events, read in one short read
+        transaction."""
         with self.open_board(board) as db:
             try:
                 db.execute("BEGIN")
                 try:
-                    cards = _select_cards(db)
-                    runs = db.execute(f"SELECT {', '.join(RUN_COLUMNS)} FROM task_runs ORDER BY id").fetchall()
+                    cards = db.execute(
+                        f"SELECT {', '.join(ITEM_CARD_COLUMNS)} FROM tasks ORDER BY created_at, id"
+                    ).fetchall()
+                    runs = db.execute(f"SELECT {', '.join(ITEM_RUN_COLUMNS)} FROM task_runs ORDER BY id").fetchall()
                     links = db.execute(f"SELECT {', '.join(LINK_COLUMNS)} FROM task_links ORDER BY 1, 2").fetchall()
                     comments = db.execute(
                         f"SELECT {', '.join(COMMENT_COLUMNS)} FROM task_comments ORDER BY id"
                     ).fetchall()
+                    events = db.execute(f"SELECT {', '.join(EVENT_COLUMNS)} FROM task_events ORDER BY id").fetchall()
                 finally:
                     db.execute("COMMIT")
             except sqlite3.Error as error:
                 raise BoardUnavailableError(board, str(error)) from error
 
         by_card: dict[str, dict[str, list]] = {
-            row["id"]: {"runs": [], "parents": [], "children": [], "comments": []} for row in cards
+            row["id"]: {"runs": [], "parents": [], "children": [], "comments": [], "events": []} for row in cards
         }
         for row in runs:
             if row["task_id"] in by_card:
-                by_card[row["task_id"]]["runs"].append({k: row[k] for k in RUN_COLUMNS if k != "task_id"})
+                fields = {k: row[k] for k in ITEM_RUN_COLUMNS if k != "task_id"}
+                by_card[row["task_id"]]["runs"].append({**fields, "metadata": _json_object(row["metadata"])})
         for row in links:
             if row["child_id"] in by_card:
                 by_card[row["child_id"]]["parents"].append(row["parent_id"])
@@ -148,7 +165,11 @@ class HermesBoardReader:
         for row in comments:
             if row["task_id"] in by_card:
                 by_card[row["task_id"]]["comments"].append({k: row[k] for k in COMMENT_COLUMNS if k != "task_id"})
-        return [Item(**dict(row), **by_card[row["id"]]) for row in cards]
+        for row in events:
+            if row["task_id"] in by_card:
+                fields = {k: row[k] for k in EVENT_COLUMNS if k != "task_id"}
+                by_card[row["task_id"]]["events"].append({**fields, "payload": _json_object(row["payload"])})
+        return [Item(**{**dict(row), "skills": _string_list(row["skills"])}, **by_card[row["id"]]) for row in cards]
 
     def diagnosis_sources(self, environ: dict[str, str] | None = None) -> HermesDiagnosisSources:
         """The other sources of the diagnosis under the same Hermès home: sessions, journals, configurations,

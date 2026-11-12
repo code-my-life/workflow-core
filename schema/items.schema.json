@@ -1,0 +1,399 @@
+{
+  "$defs": {
+    "CardEvent": {
+      "description": "One event of a card's life (created, claimed, blocked...): its payload a JSON object, empty when absent or\nunreadable. Dates are Unix seconds.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Run Id"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "run_id",
+        "kind",
+        "payload",
+        "created_at"
+      ],
+      "title": "CardEvent",
+      "type": "object"
+    },
+    "Comment": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "author": {
+          "title": "Author",
+          "type": "string"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "author",
+        "body",
+        "created_at"
+      ],
+      "title": "Comment",
+      "type": "object"
+    },
+    "Item": {
+      "description": "What a workflow moves forward, with its full state. At this stage, each card is its own item (ADR 0016).",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "body": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Body"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "assignee": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Assignee"
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "integer"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Started At"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Completed At"
+        },
+        "block_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Block Kind"
+        },
+        "idempotency_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Idempotency Key"
+        },
+        "workspace_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Workspace Path"
+        },
+        "current_run_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Current Run Id"
+        },
+        "last_heartbeat_at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Heartbeat At"
+        },
+        "model_override": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Model Override"
+        },
+        "provider_override": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Provider Override"
+        },
+        "skills": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skills",
+          "type": "array"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/Run"
+          },
+          "title": "Runs",
+          "type": "array"
+        },
+        "parents": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Parents",
+          "type": "array"
+        },
+        "children": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Children",
+          "type": "array"
+        },
+        "comments": {
+          "items": {
+            "$ref": "#/$defs/Comment"
+          },
+          "title": "Comments",
+          "type": "array"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/CardEvent"
+          },
+          "title": "Events",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "body",
+        "status",
+        "assignee",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "block_kind",
+        "idempotency_key",
+        "workspace_path",
+        "current_run_id",
+        "last_heartbeat_at",
+        "model_override",
+        "provider_override",
+        "skills",
+        "runs",
+        "parents",
+        "children",
+        "comments",
+        "events"
+      ],
+      "title": "Item",
+      "type": "object"
+    },
+    "Run": {
+      "description": "One run of a card: who worked on it, how it ended. Dates are Unix seconds.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Profile"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Outcome"
+        },
+        "started_at": {
+          "title": "Started At",
+          "type": "integer"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ended At"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Summary"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "profile",
+        "status",
+        "outcome",
+        "started_at",
+        "ended_at",
+        "summary",
+        "metadata"
+      ],
+      "title": "Run",
+      "type": "object"
+    }
+  },
+  "description": "GET /api/workflows/<key>/items: every item of the workflow with its full state.",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "cursor": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cursor"
+    },
+    "workflow": {
+      "title": "Workflow",
+      "type": "string"
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/Item"
+      },
+      "title": "Items",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "workflow",
+    "items"
+  ],
+  "title": "ItemsResponse",
+  "type": "object"
+}

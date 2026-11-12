@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel
 
@@ -31,6 +31,19 @@ class Run(BaseModel):
     started_at: int
     ended_at: int | None
     summary: str | None
+    # The run's metadata, a JSON object (branch, pull request...); empty when absent or unreadable.
+    metadata: dict[str, Any]
+
+
+class CardEvent(BaseModel):
+    """One event of a card's life (created, claimed, blocked...): its payload a JSON object, empty when absent or
+    unreadable. Dates are Unix seconds."""
+
+    id: int
+    run_id: int | None
+    kind: str
+    payload: dict[str, Any]
+    created_at: int
 
 
 class Comment(BaseModel):
@@ -43,11 +56,22 @@ class Comment(BaseModel):
 class Item(Card):
     """What a workflow moves forward, with its full state. At this stage, each card is its own item (ADR 0016)."""
 
+    # The key the intake set (it ties the card to its issue when the title does not), and the card's working folder.
+    idempotency_key: str | None
+    workspace_path: str | None
+    # The run in progress, and the last sign of life of its agent (Unix seconds).
+    current_run_id: int | None
+    last_heartbeat_at: int | None
+    model_override: str | None
+    provider_override: str | None
+    skills: list[str]
     runs: list[Run]
     # The ids of the cards this one waits for, and of the cards waiting for it.
     parents: list[str]
     children: list[str]
     comments: list[Comment]
+    # The card's events, by id.
+    events: list[CardEvent]
 
 
 class BoardUnavailableError(Exception):

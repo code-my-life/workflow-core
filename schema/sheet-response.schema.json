@@ -1,0 +1,253 @@
+{
+  "$defs": {
+    "SheetEdge": {
+      "properties": {
+        "from": {
+          "minLength": 1,
+          "title": "From",
+          "type": "string"
+        },
+        "to": {
+          "minLength": 1,
+          "title": "To",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "line",
+            "return",
+            "branch",
+            "fan"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "kind"
+      ],
+      "title": "SheetEdge",
+      "type": "object"
+    },
+    "SheetGroup": {
+      "properties": {
+        "key": {
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "icon": {
+          "title": "Icon",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "icon"
+      ],
+      "title": "SheetGroup",
+      "type": "object"
+    },
+    "SheetItem": {
+      "properties": {
+        "type": {
+          "minLength": 1,
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "label"
+      ],
+      "title": "SheetItem",
+      "type": "object"
+    },
+    "SheetStation": {
+      "properties": {
+        "key": {
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "icon": {
+          "title": "Icon",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "ai",
+            "script",
+            "github",
+            "owner",
+            "end"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "col": {
+          "ge": 0,
+          "title": "Col",
+          "type": "integer"
+        },
+        "row": {
+          "ge": 0,
+          "title": "Row",
+          "type": "integer"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Group"
+        },
+        "types": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Types"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "icon",
+        "kind",
+        "col",
+        "row"
+      ],
+      "title": "SheetStation",
+      "type": "object"
+    },
+    "WorkflowSheet": {
+      "properties": {
+        "item": {
+          "$ref": "#/$defs/SheetItem"
+        },
+        "groups": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/SheetGroup"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Groups"
+        },
+        "stations": {
+          "items": {
+            "$ref": "#/$defs/SheetStation"
+          },
+          "title": "Stations",
+          "type": "array"
+        },
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/SheetEdge"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "models": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Models",
+          "type": "array"
+        }
+      },
+      "required": [
+        "item",
+        "stations",
+        "edges",
+        "models"
+      ],
+      "title": "WorkflowSheet",
+      "type": "object"
+    }
+  },
+  "description": "GET /api/workflows/<key>/sheet: the workflow's sheet, judged.",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "workflow": {
+      "title": "Workflow",
+      "type": "string"
+    },
+    "sheet": {
+      "$ref": "#/$defs/WorkflowSheet"
+    }
+  },
+  "required": [
+    "schema_version",
+    "workflow",
+    "sheet"
+  ],
+  "title": "SheetResponse",
+  "type": "object"
+}
