@@ -77,3 +77,54 @@ def test_the_comments_are_read_across_every_page(tmp_path):
     assert comments[149].body == "commentaire 150"
     assert (comments[0].author, comments[0].url) == ("code-my-life-factory[bot]", "u1")
     assert comments[1].author == "inconnu"
+
+
+class IssueListGitHub(FakeGitHub):
+    """Serves the issue list by pages of 2 with GitHub's `Link` header, and records each query."""
+
+    queries: ClassVar[list[dict]] = []
+    ISSUES: ClassVar[list[dict]] = [
+        {"number": n, "user": {"login": "code-my-life-factory[bot]"}, "body": "", "state": "open"} for n in range(1, 6)
+    ] + [{"number": 9, "pull_request": {}, "user": {"login": "code-my-life-factory[bot]"}}]
+
+    def do_GET(self) -> None:
+        url = urlparse(self.path)
+        if not url.path.endswith("/issues"):
+            super().do_GET()
+            return
+        query = {key: values[0] for key, values in parse_qs(url.query).items()}
+        IssueListGitHub.queries.append(query)
+        page = int(query.get("page", "1"))
+        base = f"http://{self.headers['Host']}{url.path}?{url.query.split('&page=')[0]}"
+        more = page * 2 < len(self.ISSUES)
+        self._answer(self.ISSUES[(page - 1) * 2 : page * 2], f'<{base}&page={page + 1}>; rel="next"' if more else None)
+
+
+def test_list_issues_filters_by_creator_and_since_and_follows_every_page(tmp_path):
+    key = tmp_path / "key.pem"
+    subprocess.run(["openssl", "genrsa", "-out", str(key), "2048"], check=True, capture_output=True)
+    env_file = tmp_path / "core.env"
+    env_file.write_text(f"GITHUB_APP_ID=1\nGITHUB_APP_PRIVATE_KEY_PATH={key}\n", encoding="utf-8")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), IssueListGitHub)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    IssueListGitHub.queries = []
+    now = 1794500000.0
+    try:
+        tokens = AppTokens(
+            environ={},
+            env_file=env_file,
+            cache_dir=tmp_path / "state",
+            api_url=f"http://127.0.0.1:{server.server_address[1]}",
+            clock=lambda: now,
+        )
+        issues = GitHubClient(tokens).list_issues("code-my-life/workflow-core")
+    finally:
+        server.shutdown()
+
+    opened = [q for q in IssueListGitHub.queries if q.get("state") == "open"]
+    closed = [q for q in IssueListGitHub.queries if q.get("state") == "closed"]
+    assert [q.get("page", "1") for q in opened] == ["1", "2", "3"]
+    assert [q.get("page", "1") for q in closed] == ["1", "2", "3"]
+    assert all(q["creator"] == "code-my-life-factory[bot]" and "since" not in q for q in opened)
+    assert all(q["since"] == "2026-11-11T16:13:20Z" and "creator" not in q for q in closed)
+    assert sorted(issue["number"] for issue in issues) == [1, 2, 3, 4, 5]

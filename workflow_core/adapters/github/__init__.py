@@ -19,8 +19,9 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 from workflow_core.events import state_dir
 
@@ -251,11 +252,27 @@ class GitHubClient:
             raise
         return True
 
-    def list_issues(self, repo: str) -> list[dict]:
-        """The repository's issues, open and closed, most recently updated first (one page of 100), without pull
-        requests."""
-        answer, _ = self._call(f"/repos/{repo}/issues?state=all&sort=updated&direction=desc&per_page=100")
-        return [issue for issue in answer or [] if isinstance(issue, dict) and "pull_request" not in issue]
+    def list_issues(self, repo: str, closed_within: timedelta = timedelta(hours=24)) -> list[dict]:
+        """The issues the core may take up again, without pull requests: the open ones the App created, and those
+        closed and updated within `closed_within` (24 hours), each list read page by page to the last one. However
+        many issues the repository has, an incident issue is found (code-my-life/workflow-core#131)."""
+        since = datetime.fromtimestamp(self.tokens.clock() - closed_within.total_seconds(), UTC)
+        queries = (
+            f"state=open&creator={quote(APP_BOT)}",
+            f"state=closed&since={since.strftime('%Y-%m-%dT%H:%M:%SZ')}",
+        )
+        found: dict[int, dict] = {}
+        for query in queries:
+            url: str | None = (
+                f"{self.tokens.api_url}/repos/{repo}/issues?{query}&sort=updated&direction=desc&per_page={PAGE_SIZE}"
+            )
+            while url:
+                answer, headers = request(url, authorization=f"token {self.tokens.token()}")
+                for issue in answer if isinstance(answer, list) else []:
+                    if isinstance(issue, dict) and "pull_request" not in issue:
+                        found.setdefault(issue.get("number"), issue)
+                url = next_page(headers)
+        return list(found.values())
 
     def create_issue(self, repo: str, title: str, body: str) -> int:
         """Open an issue; its number."""
