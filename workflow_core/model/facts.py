@@ -91,6 +91,12 @@ class RuntimeTerms(BaseModel):
     # The terminal's tool name, and the runtime's sentence when it retries a worker that exits without a kanban call.
     terminal_tool: str
     nudge_marker: str
+    # The runtime's tool that hands a card back, and the minutes a rate-limited provider cools down.
+    complete_tool: str
+    rate_limit_cooldown_minutes: float
+    # How a held card's and a cooling provider's events read, quoted as proofs.
+    held_quote: str
+    cooldown_quote: str
 
 
 class CardFactsReader(Protocol):
@@ -305,4 +311,17 @@ class RuntimeTexts(Protocol):
 
     def is_workspace_error(self, error: str) -> bool:
         """A spawn failure's error is about the card's work folder."""
+        ...
+
+    def provider_failure_of(self, output: str | None) -> tuple[str, int | None] | None:
+        """The provider no longer answers (`stalled`, with its seconds), or the whole fallback chain fails
+        (`failing`)."""
+        ...
+
+    def lacks_required_checks(self, detail: str) -> bool:
+        """A pull request acceptance detail says the repository has no required check."""
+        ...
+
+    def relay_command(self, board: str, card: str, relay: str, owner: str) -> str:
+        """The command that hands a held card to the relay agent, then back to its agent."""
         ...

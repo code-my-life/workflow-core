@@ -32,6 +32,14 @@ TERMINAL_TIMEOUT_DEFAULT = 180
 TOOL_DEADLINE_SUGGESTED = 900
 TERMINAL_TOOL = "terminal"
 NUDGE_MARKER = "Kanban worker tried to exit without a terminal board call"
+COMPLETE_TOOL = "kanban_complete"
+# A provider in 429 cools down this long before the card starts again.
+RATE_LIMIT_COOLDOWN_MINUTES = 5
+HELD_QUOTE = 'respawn_guarded {"reason": "active_pr"}'
+COOLDOWN_QUOTE = 'respawn_guarded {"reason": "rate_limit_cooldown"}'
+STALLED = js_regex(r"Turn made no progress for (\d+)s")
+FAILING = js_regex(r"fallback chain kept failing over|No reply: every provider in the fallback chain kept failing over")
+NO_REQUIRED_CHECKS = js_regex(r"No repository-required checks are configured")
 
 TERMS = RuntimeTerms(
     runtime_limit_key="max_runtime_seconds",
@@ -46,6 +54,10 @@ TERMS = RuntimeTerms(
     tool_deadline_suggested=TOOL_DEADLINE_SUGGESTED,
     terminal_tool=TERMINAL_TOOL,
     nudge_marker=NUDGE_MARKER,
+    complete_tool=COMPLETE_TOOL,
+    rate_limit_cooldown_minutes=RATE_LIMIT_COOLDOWN_MINUTES,
+    held_quote=HELD_QUOTE,
+    cooldown_quote=COOLDOWN_QUOTE,
 )
 
 # A tool's refusal when a `pre_tool_call` hook passes its delay, or has not finished.
@@ -179,6 +191,23 @@ class HermesTexts:
 
     def is_workspace_error(self, error: str) -> bool:
         return error.startswith("workspace:")
+
+    def provider_failure_of(self, output: str | None) -> tuple[str, int | None] | None:
+        if not output:
+            return None
+        stalled = STALLED.search(output)
+        if stalled:
+            return ("stalled", int(stalled[1]))
+        return ("failing", None) if FAILING.search(output) else None
+
+    def lacks_required_checks(self, detail: str) -> bool:
+        return NO_REQUIRED_CHECKS.search(detail) is not None
+
+    def relay_command(self, board: str, card: str, relay: str, owner: str) -> str:
+        return (
+            f'hermes kanban --board {board} reassign {card} {relay} --reason "relais active_pr" && '
+            f'hermes kanban --board {board} reassign {card} {owner} --reason "reprise sur la PR"'
+        )
 
     def plugin_of_module(self, module: str | None) -> str | None:
         """A plugin's name from its Python module (`hermes_plugins.my_plugin` gives `my-plugin`)."""
