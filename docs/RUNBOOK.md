@@ -58,6 +58,12 @@ Toutes les 30 secondes, une passe lit les cartes des workflows dont l'entrée de
 `<!-- workflow-core:attente <clé> -->`, et sa clé est notée dans `~/.local/state/workflow-core/alerts.db` : une clé
 notée n'est jamais repostée.
 
+Avant de poster une clé que le registre ne connaît pas, le notificateur lit tous les commentaires de l'issue (pages de
+100) : si un commentaire de `code-my-life-factory[bot]` porte déjà sa marque, il ne poste rien et note la clé. Une
+marque écrite par un autre compte ne compte pas. Une issue qui ne se lit pas en entier ne reçoit rien à cette passe.
+Ainsi, registre perdu ou journal des événements reconstruit, aucune alerte n'est republiée. Un registre illisible est
+mis de côté (`alerts.db.illisible-<horodatage>`) et recréé vide ; le journal du service le dit.
+
 Rien n'est posté interrupteur éteint, ni en mode observateur (test de contrat échoué, ADR 0019). Un commentaire
 refusé par GitHub est écrit au journal et réessayé à la passe suivante. Une carte sans issue est dite une fois au
 journal.
