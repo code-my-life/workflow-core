@@ -123,3 +123,36 @@ def test_a_tool_deadline_and_a_command_timeout_are_recognised():
         "seconds": 900,
     }
     assert classify('{"output": "", "exit_code": 124, "error": null}') == {"kind": "command_timeout"}
+
+
+def test_a_silent_provider_or_a_failing_fallback_chain_is_recognised():
+    assert TEXTS.provider_failure_of("Sending after interrupt: 'Turn made no progress for 669s; aborting") == (
+        "stalled",
+        669,
+    )
+    assert TEXTS.provider_failure_of("every provider in the fallback chain kept failing over, so the turn stopped") == (
+        "failing",
+        None,
+    )
+    assert TEXTS.provider_failure_of("Duration: 35m 37s") is None
+    assert TEXTS.provider_failure_of(None) is None
+
+
+def test_the_pr_acceptance_lines_are_recognised_by_the_declared_prefix():
+    missing = (
+        '{"error": "PR acceptance missing: No repository-required checks are configured; '
+        'explicitly use a local-only contract."}'
+    )
+    assert classify(missing) == {
+        "kind": "pr_acceptance",
+        "classification": "missing",
+        "detail": "No repository-required checks are configured; explicitly use a local-only contract.",
+    }
+    assert classify('{"error": "PR acceptance infra: gh: Could not resolve host"}') == {
+        "kind": "pr_acceptance",
+        "classification": "infra",
+        "detail": "gh: Could not resolve host",
+    }
+    # Another prefix, or none declared: an ordinary error.
+    assert TEXTS.classify_tool_result(missing, FACTORY.guard_suffixes, "Contrôle de PR").kind == "error"
+    assert TEXTS.classify_tool_result(missing, FACTORY.guard_suffixes, None).kind == "error"

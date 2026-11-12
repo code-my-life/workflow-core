@@ -18,6 +18,14 @@ from workflow_core.diagnosis.rules_guards import (
     guard_refusals,
     plugin_load_failed,
 )
+from workflow_core.diagnosis.rules_provider_work import (
+    held_active_pr,
+    pr_acceptance,
+    provider_quota,
+    provider_terminal,
+    provider_unavailable,
+    triage_loop,
+)
 from workflow_core.diagnosis.rules_runs import (
     command_timeout,
     iteration_budget,
@@ -31,7 +39,7 @@ from workflow_core.diagnosis.rules_runs import (
 
 Rule = Callable[[Episode], list[RawFinding]]
 
-# In factory-live's order (`RULES`). The rules of the provider and of the work come with the next story.
+# In factory-live's order (`RULES`): every rule of factory-live is ported.
 RULES: tuple[Rule, ...] = (
     guard_hook_timeout,
     guard_hook_hung,
@@ -45,7 +53,13 @@ RULES: tuple[Rule, ...] = (
     tool_deadline,
     command_timeout,
     guard_refusals,
+    provider_quota,
+    provider_terminal,
+    provider_unavailable,
     spawn_failed,
+    pr_acceptance,
+    held_active_pr,
+    triage_loop,
 )
 
 

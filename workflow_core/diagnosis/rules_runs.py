@@ -31,7 +31,7 @@ from workflow_core.model.diagnosis import message
 from workflow_core.text import quote
 
 
-def _text(value: Any) -> str:
+def text_of(value: Any) -> str:
     """A text field of a runtime payload; anything else counts as empty."""
     return value if isinstance(value, str) else ""
 
@@ -178,7 +178,7 @@ def protocol_breaker(episode: Episode) -> list[RawFinding]:
         event
         for event in episode.events_of("gave_up")
         if js_number(event.payload.get("protocol_violations")) > 0
-        or episode.texts.is_breaker_error(_text(event.payload.get("error")))
+        or episode.texts.is_breaker_error(text_of(event.payload.get("error")))
     ]
     if not breakers:
         return []
@@ -200,7 +200,7 @@ def protocol_breaker(episode: Episode) -> list[RawFinding]:
                     "kanban",
                     gave_up.created_at,
                     message("diagnosis.evidence.breaker", count=count),
-                    quote=quote(_text(gave_up.payload.get("error"))),
+                    quote=quote(text_of(gave_up.payload.get("error"))),
                 )
             ],
             steps=[],
@@ -213,7 +213,7 @@ def iteration_budget(episode: Episode) -> list[RawFinding]:
     sources = [
         (run.ended_at if run.ended_at is not None else episode.until, run.id, run.error) for run in episode.runs
     ] + [
-        (event.created_at, event.run_id, _text(event.payload.get("error")))
+        (event.created_at, event.run_id, text_of(event.payload.get("error")))
         for event in episode.events
         if event.kind in ("timed_out", "gave_up")
     ]
@@ -463,7 +463,7 @@ def spawn_failed(episode: Episode) -> list[RawFinding]:
     if not failures:
         return []
     last = failures[-1]
-    error = _text(last.payload.get("error"))
+    error = text_of(last.payload.get("error"))
     return [
         RawFinding(
             code="spawn_failed",
