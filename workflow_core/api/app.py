@@ -16,8 +16,11 @@ from starlette.exceptions import HTTPException
 
 from workflow_core.clock import utc_now
 from workflow_core.config import Workflow
+from workflow_core.diagnosis import diagnose
 from workflow_core.events import BoardWatcher, EventHub
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
+from workflow_core.model.diagnosis import diagnosis_json
+from workflow_core.model.facts import CardFactsReader
 from workflow_core.model.state import CoreState
 from workflow_core.sheets import InvalidSheetError, SheetUnavailableError, read_sheet, sheet_json
 
@@ -28,6 +31,11 @@ SCHEMA_VERSION = 1
 class UnknownWorkflowError(Exception):
     def __init__(self, key: str) -> None:
         super().__init__(f'workflow "{key}" is not declared in the configuration')
+
+
+class UnknownItemError(Exception):
+    def __init__(self, board: str, item: str) -> None:
+        super().__init__(f'card "{item}" is not on board "{board}"')
 
 
 def error(status: int, code: str, detail: str) -> JSONResponse:
@@ -44,15 +52,18 @@ def create_app(
     secret: str,
     workflows: dict[str, Workflow],
     boards: BoardReader,
+    facts: CardFactsReader | None = None,
     state: CoreState | None = None,
     watcher: BoardWatcher | None = None,
     journal_path: Path | None = None,
     clock: Callable[[], float] = time.time,
     spy: Callable[[str], Any] | None = None,
 ) -> FastAPI:
-    """The API. With a board watcher and a journal path, it also probes the boards and serves GET /api/events."""
+    """The API. With a board watcher and a journal path, it also probes the boards and serves GET /api/events. The
+    facts of a card, for its diagnosis, are read by `facts`, by default the board reader itself."""
     if not secret:
         raise ValueError("the shared secret is empty")
+    card_facts: CardFactsReader = facts if facts is not None else boards
     expected = secret.encode("utf-8")
     hub: EventHub | None = None
 
@@ -112,6 +123,10 @@ def create_app(
     async def unknown_workflow(request: Request, exc: UnknownWorkflowError) -> JSONResponse:
         return error(404, "unknown_workflow", str(exc))
 
+    @app.exception_handler(UnknownItemError)
+    async def unknown_item(request: Request, exc: UnknownItemError) -> JSONResponse:
+        return error(404, "unknown_item", str(exc))
+
     @app.exception_handler(BoardUnavailableError)
     async def board_unavailable(request: Request, exc: BoardUnavailableError) -> JSONResponse:
         return error(503, "board_unavailable", str(exc))
@@ -165,6 +180,21 @@ def create_app(
             "items": [item.model_dump() for item in read_items(workflow.board)],
         }
         return with_cursor(payload, cursor)
+
+    @app.get("/api/workflows/{key}/items/{item}/diagnosis")
+    def diagnosis(key: str, item: str) -> dict:
+        # Computed on demand, from the card's facts read in one short read transaction (ADR 0012).
+        workflow = declared(key)
+        found = card_facts.read_card_facts(workflow.board, item)
+        if found is None:
+            raise UnknownItemError(workflow.board, item)
+        computed = diagnose(found, card_facts.terms, clock())
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "workflow": workflow.key,
+            "item": item,
+            "diagnosis": diagnosis_json(computed) if computed is not None else None,
+        }
 
     @app.get("/api/events")
     async def events(request: Request, cursor: str | None = None) -> StreamingResponse:
