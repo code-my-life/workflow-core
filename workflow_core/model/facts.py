@@ -332,6 +332,14 @@ class RuntimeTexts(Protocol):
         """The command that hands a held card to the relay agent, then back to its agent."""
         ...
 
+    def show_command(self, board: str, card: str) -> str:
+        """The command that shows a card."""
+        ...
+
+    def reassign_unblock_command(self, board: str, card: str, agent: str) -> str:
+        """The command that hands a card after a passing failure to the agent, then unblocks it."""
+        ...
+
 
 class ProfilesPort(Protocol):
     def facts(self, agent: str, workflow: Any) -> ProfileFacts | None:

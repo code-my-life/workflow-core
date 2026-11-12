@@ -1,0 +1,175 @@
+{
+  "$defs": {
+    "BoardRead": {
+      "properties": {
+        "last_read_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Read At"
+        }
+      },
+      "required": [
+        "last_read_at"
+      ],
+      "title": "BoardRead",
+      "type": "object"
+    },
+    "ContractVerdict": {
+      "properties": {
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "checked_at": {
+          "title": "Checked At",
+          "type": "string"
+        },
+        "problems": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Problems",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok",
+        "checked_at",
+        "problems"
+      ],
+      "title": "ContractVerdict",
+      "type": "object"
+    },
+    "MachineCheck": {
+      "description": "One tile of the machine's state.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "group": {
+          "title": "Group",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "degraded",
+            "down",
+            "unknown"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "metrics": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Metrics",
+          "type": "object"
+        },
+        "checked_at": {
+          "title": "Checked At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "group",
+        "status",
+        "detail",
+        "checked_at"
+      ],
+      "title": "MachineCheck",
+      "type": "object"
+    }
+  },
+  "description": "GET /api/machine: what the core holds about itself.",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "cursor": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cursor"
+    },
+    "runtime_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Runtime Version"
+    },
+    "contract": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContractVerdict"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "mode": {
+      "enum": [
+        "observer",
+        "normal"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "boards": {
+      "additionalProperties": {
+        "$ref": "#/$defs/BoardRead"
+      },
+      "title": "Boards",
+      "type": "object"
+    },
+    "checks": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/MachineCheck"
+      },
+      "title": "Checks",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "runtime_version",
+    "contract",
+    "mode",
+    "boards"
+  ],
+  "title": "MachineResponse",
+  "type": "object"
+}

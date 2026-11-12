@@ -16,6 +16,8 @@ main_red_reason = 'main rouge|workflows? de main|watch-main'
 repo = "~/perso/hermes-software-factory"
 profiles = "profiles"
 plugins = "plugins"
+# Its manifest, which declares its agents and their skills (served by GET /api/workflows/factory/agents).
+manifest = "factory.yaml"
 guard_suffixes = ["-guard", "-readonly"]
 default_agent = "coder"
 relay_agent = "scribe"
@@ -29,8 +31,152 @@ notify_skip_assignees = ["factory-gate", "factory-release"]
 # A card held by the active pull request guard is relaunched through a relay agent, then given back to its assignee.
 notify_relay_agents = ["scribe", "coder"]
 
+# The data the factory shows besides its cards (ADR 0011), read by the core at these paths until the factory's command
+# renders them (epic of the factory on the core). A path starts with its root ({runtime}: the runtime's home, {board}:
+# the board's folder, {workflow}: the repository above, {claude}: Claude Code's projects) and names the subject's
+# parameters ({repo} and {pr} of a pull request, {card}, {run} and its {card} and {agent}, {agent}). The twins' streams
+# carry a password: only the fields listed here are read.
+[[workflow.data]]
+name = "twins"
+subject = "pr"
+label = "Jumeaux"
+path = "{board}/twins/{repo}-{pr}.json"
+reader = "json"
+
+[[workflow.data.fields]]
+key = "state"
+label = "État"
+kind = "status"
+statuses = { ready = "ok", starting = "running", stopped = "unknown" }
+
+[[workflow.data.fields]]
+key = "divergence"
+label = "Divergence"
+kind = "text"
+
+[[workflow.data.fields]]
+key = "surfaces"
+label = "Surfaces"
+kind = "table"
+# Each surface, with the commit and the still image of its base and its head (dotted keys). A twin's `stream` (its
+# Neko session, with the viewers' password, and its port on this machine) is never read: no secret leaves the core.
+columns = ["id", "label", "kind", "changed", "differences", "base.sha", "base.poster", "head.sha", "head.poster"]
+headers = [
+  "Identifiant",
+  "Surface",
+  "Sorte",
+  "Touchée",
+  "Différences",
+  "Commit de base",
+  "Image de base",
+  "Commit de tête",
+  "Image de tête",
+]
+
+# The mirror's port on this machine, where factory-live asks a viewer's session (a port is not a secret).
+[[workflow.data.fields]]
+key = "mirror"
+label = "Miroir"
+kind = "text"
+
+# The gate's proofs of a card: one text per rule, NN-<rule>.txt, of its newest pass; in the card's work folder, else in
+# the copy the board keeps.
+[[workflow.data]]
+name = "gate-proofs"
+subject = "card"
+label = "Preuves de la gate"
+path = ["{board}/workspaces/{card}/evidence/gate/*", "{board}/evidence/{card}/gate/*"]
+reader = "texts"
+
+[[workflow.data]]
+name = "agent-session"
+subject = "run"
+label = "Session de l'agent"
+path = "{runtime}/profiles/{agent}/state.db"
+reader = "session"
+
+[[workflow.data]]
+name = "claude-sessions"
+subject = "run"
+label = "Sessions de Claude Code"
+path = "{claude}"
+reader = "claude"
+
+[[workflow.data]]
+name = "card-log"
+subject = "run"
+label = "Journal de la carte"
+path = "{board}/logs/{card}.log"
+reader = "log"
+
+# The drift of an agent: its configuration in service against the repository's, the plugins as factory.yaml lists them.
+[[workflow.data]]
+name = "drift"
+subject = "agent"
+label = "Dérive de la configuration"
+path = "{runtime}/profiles/{agent}/config.yaml"
+compare = "{workflow}/profiles/{agent}/config.yaml"
+plugins_from = "{workflow}/factory.yaml"
+plugins_key = "profiles.{agent}.plugins"
+reader = "drift"
+
+# The gestures the factory declares (ADR 0010): the owner's answers factory-live posts in the owner's name. Until the
+# manifests, only the unblocking: `/factory unblock [note]` on the issue of a blocked card.
+[[workflow.gestures]]
+name = "unblock"
+kind = "comment"
+
 [[workflow]]
 key = "studio"
 board = "studio"
 sheet = "~/perso/video-factory/hermes/workflow.json"
 repo = "~/perso/video-factory"
+
+# The checks of the machine besides the runtime's own (ADR 0008): one [[check]] table each, with its id, its label,
+# its group on the screen (hermes, models, tools, intake), its kind (http: the address answers below 500; tcp: the port
+# listens; vram: nvidia-smi; funnel: tailscale funnel status) and optionally its target and its cadence in seconds
+# (30 at least, the default). No secret is read: freellmapi answers 401 without a key, which says it runs.
+
+[[check]]
+id = "dashboard"
+label = "Dashboard Hermès"
+group = "hermes"
+kind = "http"
+target = "http://127.0.0.1:9119/api/status"
+
+[[check]]
+id = "vram"
+label = "VRAM"
+group = "models"
+kind = "vram"
+# Under WSL, nvidia-smi comes with the Windows driver in this folder, out of a service's PATH.
+target = "/usr/lib/wsl/lib/nvidia-smi"
+every_seconds = 60
+
+[[check]]
+id = "freellmapi"
+label = "freellmapi"
+group = "models"
+kind = "http"
+target = "http://127.0.0.1:3001/v1/models"
+
+[[check]]
+id = "graphify"
+label = "MCP graphify"
+group = "tools"
+kind = "tcp"
+target = "8081"
+
+[[check]]
+id = "webhook"
+label = "Écouteur webhook"
+group = "intake"
+kind = "tcp"
+target = "8644"
+
+[[check]]
+id = "funnel"
+label = "Tailscale Funnel"
+group = "intake"
+kind = "funnel"
+every_seconds = 300

@@ -15,6 +15,7 @@ from workflow_core.api.app import create_app
 from workflow_core.clock import utc_now
 from workflow_core.config import Workflow
 from workflow_core.events import JOURNAL_FILE, state_dir
+from workflow_core.model.checks import CHECK_EVERY_SECONDS, DeclaredCheck
 from workflow_core.model.contract import ContractVerdict
 from workflow_core.model.state import CoreState
 from workflow_core.notify import Notifier, NotifierRunner, NotifySettings
@@ -38,6 +39,8 @@ def build_service(
     adapter: ModuleType,
     clock: Callable[[], float] = time.time,
     spy: Callable[[str], Any] | None = None,
+    checks: list[DeclaredCheck] | None = None,
+    checks_every: float = CHECK_EVERY_SECONDS,
     environ: dict[str, str] | None = None,
     post_comment: Callable[[str, int, str], str] | None = None,
     read_comments: Callable[[str, int], list] | None = None,
@@ -98,9 +101,14 @@ def build_service(
         boards=reader,
         state=state,
         watcher=adapter.make_board_watcher(),
+        live=adapter.make_live_reader(),
+        live_watcher=adapter.make_live_watcher(),
         journal_path=state_dir(environ) / JOURNAL_FILE,
         clock=clock,
         spy=spy,
+        runtime_checks=adapter.make_machine_checks(),
+        checks=checks,
+        checks_every=checks_every,
         background=[ContractIssueTask(report), NotifierRunner(notifier)],
     )
     app.state.notifier = notifier

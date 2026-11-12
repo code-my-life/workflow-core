@@ -1,0 +1,19 @@
+{
+  "description": "Every error of the API: a stable code and a sentence.",
+  "properties": {
+    "error": {
+      "title": "Error",
+      "type": "string"
+    },
+    "detail": {
+      "title": "Detail",
+      "type": "string"
+    }
+  },
+  "required": [
+    "error",
+    "detail"
+  ],
+  "title": "ErrorResponse",
+  "type": "object"
+}

@@ -28,7 +28,7 @@ INPUT_MAX = 500
 SESSION_START_SLACK = 120
 
 # The tables and columns read, declared for the contract test (contract.py).
-SESSION_COLUMNS = ("id", "started_at", "ended_at")
+SESSION_COLUMNS = ("id", "model", "started_at", "ended_at")
 MESSAGE_COLUMNS = ("id", "session_id", "role", "content", "tool_call_id", "tool_calls", "tool_name", "timestamp")
 # The JSON fields read in each element of `messages.tool_calls`.
 TOOL_CALL_FIELDS = ("id", "call_id", "function.name", "function.arguments")
@@ -116,6 +116,23 @@ def open_session_base(path: Path) -> sqlite3.Connection:
     return db
 
 
+def run_session(db: sqlite3.Connection, card: str, run: RunFact) -> str | None:
+    """A run's session, never guessed: the one Hermès noted, else the one of `hermes --resume`, else the only
+    session launched with the run whose first message is « work kanban task <card> »."""
+    noted = _trimmed(run.metadata.get("worker_session_id"))
+    resumed = resume_session_of(run.error) or resume_session_of(_trimmed(run.metadata.get("worker_output")))
+    for session in (noted, resumed):
+        if session and db.execute("SELECT 1 FROM sessions WHERE id = ?", (session,)).fetchone():
+            return session
+    if not CARD.fullmatch(card):
+        return None
+    prompt = f"work kanban task {card}"
+    rows = db.execute(
+        FIRST_PROMPT_SQL, (run.started_at - 5, run.started_at + SESSION_START_SLACK, len(prompt), prompt)
+    ).fetchall()
+    return str(rows[0]["id"]) if len(rows) == 1 else None
+
+
 class SessionReader:
     """Reads the agents' session bases under Hermès' home, read-only. Each reading opens its own connection and
     closes it: the API serves its requests from several threads, and a SQLite connection belongs to its thread."""
@@ -140,20 +157,7 @@ class SessionReader:
             db.close()
 
     def _session_of(self, db: sqlite3.Connection, card: str, run: RunFact) -> str | None:
-        """A run's session, never guessed: the one Hermès noted, else the one of `hermes --resume`, else the only
-        session launched with the run whose first message is « work kanban task <card> »."""
-        noted = _trimmed(run.metadata.get("worker_session_id"))
-        resumed = resume_session_of(run.error) or resume_session_of(_trimmed(run.metadata.get("worker_output")))
-        for session in (noted, resumed):
-            if session and db.execute("SELECT 1 FROM sessions WHERE id = ?", (session,)).fetchone():
-                return session
-        if not CARD.fullmatch(card):
-            return None
-        prompt = f"work kanban task {card}"
-        rows = db.execute(
-            FIRST_PROMPT_SQL, (run.started_at - 5, run.started_at + SESSION_START_SLACK, len(prompt), prompt)
-        ).fetchall()
-        return str(rows[0]["id"]) if len(rows) == 1 else None
+        return run_session(db, card, run)
 
     def run_facts(self, agent: str, card: str, runs: list[RunFact]) -> list[SessionFacts] | None:
         with self._db(agent) as db:

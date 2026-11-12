@@ -205,6 +205,15 @@ class HermesTexts:
             f'hermes kanban --board {board} reassign {card} {owner} --reason "reprise sur la PR"'
         )
 
+    def show_command(self, board: str, card: str) -> str:
+        return f"hermes kanban --board {board} show {card}"
+
+    def reassign_unblock_command(self, board: str, card: str, agent: str) -> str:
+        return (
+            f'hermes kanban --board {board} reassign {card} {agent} --reason "échec passager de la lane" && '
+            f"hermes kanban --board {board} unblock {card}"
+        )
+
     def plugin_of_module(self, module: str | None) -> str | None:
         """A plugin's name from its Python module (`hermes_plugins.my_plugin` gives `my-plugin`)."""
         if not module:

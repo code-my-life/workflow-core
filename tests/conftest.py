@@ -146,8 +146,9 @@ def _without_task(rows: list[dict]) -> list[dict]:
     return [{key: value for key, value in row.items() if key != "task_id"} for row in rows]
 
 
-# The items the API serves for the factory board: each card with its runs, links and comments.
-FACTORY_ITEMS = [
+# The items the API served for the factory board before the full card state: each card with its runs, links and
+# comments. Their fields keep these names and values.
+FACTORY_ITEMS_BEFORE = [
     {**FACTORY_CARDS[0], "runs": _without_task(FACTORY_RUNS), "parents": [], "children": ["t_0002"], "comments": []},
     {
         **FACTORY_CARDS[1],
@@ -157,7 +158,29 @@ FACTORY_ITEMS = [
         "comments": _without_task(FACTORY_COMMENTS),
     },
 ]
-STUDIO_ITEMS = [{**STUDIO_CARDS[0], "runs": _without_task(STUDIO_RUNS), "parents": [], "children": [], "comments": []}]
+STUDIO_ITEMS_BEFORE = [
+    {**STUDIO_CARDS[0], "runs": _without_task(STUDIO_RUNS), "parents": [], "children": [], "comments": []}
+]
+# The full state of a card these bases leave empty, and of a run without metadata.
+EMPTY_CARD_STATE = {
+    "idempotency_key": None,
+    "workspace_path": None,
+    "current_run_id": None,
+    "last_heartbeat_at": None,
+    "model_override": None,
+    "provider_override": None,
+    "skills": [],
+    "events": [],
+}
+
+
+def _full(items: list[dict]) -> list[dict]:
+    return [{**item, **EMPTY_CARD_STATE, "runs": [{**run, "metadata": {}} for run in item["runs"]]} for item in items]
+
+
+# The items the API serves for each board: the fields above, and the full state of each card.
+FACTORY_ITEMS = _full(FACTORY_ITEMS_BEFORE)
+STUDIO_ITEMS = _full(STUDIO_ITEMS_BEFORE)
 
 # The first line of the runtime's version output, as Hermès 0.22.2 prints it.
 VERSION_LINE = "Hermes Agent v0.22.2 (2026.9.24) · stable · local d923a5eb487a"
@@ -284,13 +307,13 @@ def runtime_schema(name: str, tables: list[str]) -> str:
 
 
 def make_session_base(home: Path, agent: str) -> sqlite3.Connection:
-    """Create `<home>/profiles/<agent>/state.db` in WAL mode with the runtime's `sessions` and `messages` tables, and
-    return a writing connection for the test to fill."""
+    """Create `<home>/profiles/<agent>/state.db` in WAL mode with the runtime's `sessions`, `messages` and
+    `session_model_usage` tables, and return a writing connection for the test to fill."""
     folder = home / "profiles" / agent
     folder.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(folder / "state.db", isolation_level=None)
     db.execute("PRAGMA journal_mode=wal")
-    db.executescript(runtime_schema("state", ["sessions", "messages"]))
+    db.executescript(runtime_schema("state", ["sessions", "messages", "session_model_usage"]))
     return db
 
 

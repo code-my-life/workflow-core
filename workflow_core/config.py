@@ -8,10 +8,25 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from workflow_core.model.checks import DeclaredCheck
+from workflow_core.model.data import DataDeclaration
+
+__all__ = ["DEFAULT_CONFIG", "DataDeclaration", "Gesture", "Workflow", "load_checks", "load_workflows"]
+
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "workflows.toml"
+
+
+class Gesture(BaseModel):
+    """A gesture the workflow declares (`[[workflow.gestures]]`, ADR 0010): `comment` posts `/<key> <name> [note]` on
+    the issue of an item, `issue` opens an issue in the declared `repo`. The core publishes them; it never posts one."""
+
+    name: str = Field(min_length=1, pattern=r"^[a-z][a-z0-9-]*$")
+    kind: Literal["comment", "issue"]
+    repo: str | None = None
 
 
 class Workflow(BaseModel):
@@ -42,6 +57,14 @@ class Workflow(BaseModel):
     pr_acceptance: str | None = None
     # How a card's body names its branch, as a regular expression whose first group is the branch (multiline).
     body_branch: str | None = None
+    # The data the workflow shows besides its cards (`[[workflow.data]]`, ADR 0011): read by the runtime's adapter at
+    # the declared paths, served as generic values. None by default.
+    data: list[DataDeclaration] = Field(default_factory=list)
+    # The gestures the workflow declares (`[[workflow.gestures]]`), until the manifests. None by default.
+    gestures: list[Gesture] = Field(default_factory=list)
+    # The workflow's own manifest of its agents, relative to its repository (`profiles.<agent>.skills`): the agents it
+    # declares and their skills (#129). Without it, its agents are those of its board's runs.
+    manifest: str | None = None
     # The notifier (optional): whether the workflow's waits are alerted in their issues, and the assignees whose
     # blocked cards are not (lanes run by scripts that publish their own message).
     notify: bool = False
@@ -69,3 +92,15 @@ def load_workflows(path: Path = DEFAULT_CONFIG) -> dict[str, Workflow]:
             raise ValueError(f'{path}: workflow "{workflow.key}" is declared twice')
         workflows[workflow.key] = workflow
     return workflows
+
+
+def load_checks(path: Path = DEFAULT_CONFIG) -> list[DeclaredCheck]:
+    """The declared checks of the machine (`[[check]]`), in their order. An id declared twice is refused."""
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    checks: list[DeclaredCheck] = []
+    for entry in data.get("check", []):
+        check = DeclaredCheck.model_validate(entry)
+        if any(known.id == check.id for known in checks):
+            raise ValueError(f'{path}: check "{check.id}" is declared twice')
+        checks.append(check)
+    return checks

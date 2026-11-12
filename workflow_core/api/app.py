@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import secrets
 import time
 from collections.abc import Callable
@@ -9,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.exceptions import HTTPException
@@ -19,9 +21,16 @@ from workflow_core.config import Workflow
 from workflow_core.diagnosis import diagnose_board, diagnose_card
 from workflow_core.diagnosis.service import run_verdicts
 from workflow_core.events import BoardWatcher, EventHub
+from workflow_core.interventions import interventions_of
+from workflow_core.machine import MachineChecks
+from workflow_core.model.agents import AgentsReader
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
+from workflow_core.model.checks import CHECK_EVERY_SECONDS, DeclaredCheck, RuntimeChecks
+from workflow_core.model.data import ID_FORMS, SUBJECTS, DeclaredDataReader
 from workflow_core.model.diagnosis import diagnosis_json
 from workflow_core.model.facts import CardFactsReader, DiagnosisSources
+from workflow_core.model.interventions import Intervention
+from workflow_core.model.live import LiveReader, LiveWatcher
 from workflow_core.model.state import CoreState
 from workflow_core.model.triggers import Trigger
 from workflow_core.sheets import InvalidSheetError, SheetUnavailableError, read_sheet, sheet_json
@@ -33,6 +42,16 @@ SCHEMA_VERSION = 1
 class UnknownWorkflowError(Exception):
     def __init__(self, key: str) -> None:
         super().__init__(f'workflow "{key}" is not declared in the configuration')
+
+
+class UnknownSubjectError(Exception):
+    def __init__(self, subject: str) -> None:
+        super().__init__(f'subject "{subject}" is not one of {", ".join(SUBJECTS)}')
+
+
+class InvalidIdError(Exception):
+    def __init__(self, subject: str, item: str) -> None:
+        super().__init__(f'"{item}" is not an id of a {subject}')
 
 
 class UnknownItemError(Exception):
@@ -61,6 +80,13 @@ def create_app(
     journal_path: Path | None = None,
     clock: Callable[[], float] = time.time,
     spy: Callable[[str], Any] | None = None,
+    live: LiveReader | None = None,
+    live_watcher: LiveWatcher | None = None,
+    runtime_checks: RuntimeChecks | None = None,
+    checks: list[DeclaredCheck] | None = None,
+    checks_every: float = CHECK_EVERY_SECONDS,
+    data: DeclaredDataReader | None = None,
+    agents: AgentsReader | None = None,
     background: list[Any] = (),
 ) -> FastAPI:
     """The API. With a board watcher and a journal path, it also probes the boards and serves GET /api/events. The
@@ -71,8 +97,31 @@ def create_app(
         raise ValueError("the shared secret is empty")
     card_facts: CardFactsReader = facts if facts is not None else boards
     diagnosis_sources: DiagnosisSources = sources if sources is not None else card_facts.diagnosis_sources()
+    # The agents' live state, activity and usage: by default, the board reader's.
+    live_reader: LiveReader | None = live if live is not None else getattr(boards, "live_reader", lambda: None)()
+    # The data the workflows declare: by default, the board reader's.
+    data_reader: DeclaredDataReader | None = (
+        data if data is not None else getattr(boards, "data_reader", lambda: None)()
+    )
+    # The agents of the workflows and their configuration (#129): by default, the board reader's.
+    agents_reader: AgentsReader | None = (
+        agents if agents is not None else getattr(boards, "agents_reader", lambda: None)()
+    )
     expected = secret.encode("utf-8")
     hub: EventHub | None = None
+    # The machine's checks run apart from the routes: /api/machine serves their last results (ADR 0008).
+    machine_checks = (
+        MachineChecks(runtime=runtime_checks, declared=list(checks or []), clock=clock, every_seconds=checks_every)
+        if runtime_checks is not None or checks
+        else None
+    )
+
+    async def watch_machine() -> None:
+        # The first round is done at startup; then a check whose status changes is announced once.
+        while True:
+            await asyncio.sleep(min(1.0, checks_every / 2))
+            if await asyncio.to_thread(machine_checks.run_due) and hub is not None and hub.journal is not None:
+                hub.publish("machine", [check.model_dump() for check in machine_checks.current()])
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -80,9 +129,18 @@ def create_app(
             await hub.start()
         for task in background:
             await task.start()
+        watching = None
+        if machine_checks is not None:
+            await asyncio.to_thread(machine_checks.run_due)
+            watching = asyncio.create_task(watch_machine(), name="workflow-core machine checks")
         try:
             yield
         finally:
+            if watching is not None:
+                watching.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await watching
+                machine_checks.close()
             for task in reversed(background):
                 await task.stop()
             if hub is not None:
@@ -106,9 +164,22 @@ def create_app(
         core.last_read_at[board] = utc_now()
         return items
 
+    def open_interventions(workflow: Workflow) -> list[Intervention]:
+        # The interventions of the workflow's board, computed from its cards' facts (ADR 0012).
+        cards = card_facts.read_board_facts(workflow.board)
+        return interventions_of(cards, workflow, clock(), card_facts.texts)
+
     if watcher is not None and journal_path is not None:
         hub = EventHub(
-            workflows=workflows, watcher=watcher, read_items=read_items, journal_path=journal_path, clock=clock, spy=spy
+            workflows=workflows,
+            watcher=watcher,
+            read_items=read_items,
+            journal_path=journal_path,
+            clock=clock,
+            spy=spy,
+            live=live_reader,
+            live_watcher=live_watcher,
+            interventions=open_interventions,
         )
     app.state.events = hub
 
@@ -133,6 +204,14 @@ def create_app(
     @app.exception_handler(UnknownWorkflowError)
     async def unknown_workflow(request: Request, exc: UnknownWorkflowError) -> JSONResponse:
         return error(404, "unknown_workflow", str(exc))
+
+    @app.exception_handler(UnknownSubjectError)
+    async def unknown_subject(request: Request, exc: UnknownSubjectError) -> JSONResponse:
+        return error(422, "unknown_subject", str(exc))
+
+    @app.exception_handler(InvalidIdError)
+    async def invalid_id(request: Request, exc: InvalidIdError) -> JSONResponse:
+        return error(422, "invalid_id", str(exc))
 
     @app.exception_handler(UnknownItemError)
     async def unknown_item(request: Request, exc: UnknownItemError) -> JSONResponse:
@@ -173,7 +252,14 @@ def create_app(
                 valid = True
             except (InvalidSheetError, SheetUnavailableError):
                 valid = False
-            listed.append({"key": workflow.key, "board": workflow.board, "sheet_valid": valid})
+            listed.append(
+                {
+                    "key": workflow.key,
+                    "board": workflow.board,
+                    "sheet_valid": valid,
+                    "gestures": [gesture.model_dump(exclude_none=True) for gesture in workflow.gestures],
+                }
+            )
         return with_cursor({"schema_version": SCHEMA_VERSION, "workflows": listed}, cursor)
 
     @app.get("/api/workflows/{key}/sheet")
@@ -248,6 +334,74 @@ def create_app(
             ],
         }
 
+    def reading_live() -> LiveReader:
+        if live_reader is None:
+            raise HTTPException(404, "the live state is not read")
+        return live_reader
+
+    @app.get("/api/workflows/{key}/live")
+    def live_state(key: str) -> dict:
+        # What each agent holding a card in progress does now; the stream's `live` events carry the same state.
+        workflow = declared(key)
+        agents = reading_live().live(workflow)
+        return {"schema_version": SCHEMA_VERSION, "workflow": workflow.key, "agents": [a.model_dump() for a in agents]}
+
+    @app.get("/api/workflows/{key}/activity")
+    def activity(key: str, limit: int = Query(50, ge=1, le=200)) -> dict:
+        workflow = declared(key)
+        facts = reading_live().activity(workflow, limit, clock())
+        return {"schema_version": SCHEMA_VERSION, "workflow": workflow.key, "facts": [f.model_dump() for f in facts]}
+
+    @app.get("/api/workflows/{key}/usage")
+    def usage(key: str, days: int = Query(7, ge=1, le=90)) -> dict:
+        workflow = declared(key)
+        report = reading_live().usage(workflow, days, clock())
+        return {"schema_version": SCHEMA_VERSION, "workflow": workflow.key, **report.model_dump()}
+
+    @app.get("/api/workflows/{key}/interventions")
+    def interventions(key: str) -> dict:
+        # The open interventions of the workflow's board, by opening time; the core posts no gesture (ADR 0011).
+        workflow = declared(key)
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "workflow": workflow.key,
+            "interventions": [found.model_dump(mode="json") for found in open_interventions(workflow)],
+        }
+
+    @app.get("/api/workflows/{key}/data")
+    def declared_data(key: str, subject: str, id: str) -> dict:
+        # The data the workflow declares for this subject, read at the request (ADR 0011): an absent one has no
+        # value, an unreadable one a status that says so; the answer never fails for one of them.
+        workflow = declared(key)
+        if subject not in SUBJECTS:
+            raise UnknownSubjectError(subject)
+        if not ID_FORMS[subject].fullmatch(id):
+            raise InvalidIdError(subject, id)
+        found = data_reader.read(workflow, subject, id) if data_reader is not None and workflow.data else []
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "workflow": workflow.key,
+            "subject": subject,
+            "id": id,
+            "data": [entry.model_dump() for entry in found],
+        }
+
+    @app.get("/api/workflows/{key}/agents")
+    def workflow_agents(key: str, days: int = Query(30, ge=1, le=90)) -> dict:
+        # The workflow's agents and their configuration in service, without a secret (#129); the hook timeouts of
+        # their plugins are counted over the last `days` days.
+        workflow = declared(key)
+        kanban, found, risks = (
+            agents_reader.agents(workflow, days, clock()) if agents_reader is not None else (None, [], [])
+        )
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "workflow": workflow.key,
+            "kanban": kanban.model_dump() if kanban is not None else None,
+            "agents": [agent.model_dump() for agent in found],
+            "guard_risks": [risk.model_dump() for risk in risks],
+        }
+
     @app.get("/api/events")
     async def events(request: Request, cursor: str | None = None) -> StreamingResponse:
         if hub is None:
@@ -269,6 +423,9 @@ def create_app(
             "mode": core.mode,
             "boards": {board: {"last_read_at": at} for board, at in sorted(core.last_read_at.items())},
         }
+        # The machine's checks, when the core runs any (ADR 0018: an optional field).
+        if machine_checks is not None:
+            payload["checks"] = [check.model_dump() for check in machine_checks.current()]
         return with_cursor(payload, cursor)
 
     return app

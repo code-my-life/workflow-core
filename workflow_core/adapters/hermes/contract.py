@@ -24,8 +24,12 @@ from workflow_core.adapters.hermes.board import (
     HermesBoardReader,
     make_board_reader,
 )
+from workflow_core.adapters.hermes.data import TRANSCRIPT_MESSAGE_COLUMNS
+from workflow_core.adapters.hermes.live import LIVE_LOG_PATTERNS, USAGE_COLUMNS
+from workflow_core.adapters.hermes.machine import CRON_JOBS, ESTOP, HEARTBEAT_COLUMNS, LLAMA_SERVER, cron_jobs
 from workflow_core.adapters.hermes.profiles import (
     CONFIG_KEYS,
+    CONFIG_LISTS,
     CONFIG_TABLES,
     MAX_CONFIG_BYTES,
     config_path,
@@ -92,11 +96,13 @@ def pragma_problems(db) -> list[str]:
 # The version output is part of the contract too: its first line must keep the form VERSION_LINE reads.
 
 # The agents' configurations: the YAML keys read (profiles.py), declared here with the tables that hold them.
-CONFIG_DECLARATION = {"tables": CONFIG_TABLES, "keys": CONFIG_KEYS}
+CONFIG_DECLARATION = {"tables": CONFIG_TABLES, "keys": CONFIG_KEYS, "lists": CONFIG_LISTS}
 
 # The agents' journals: the header of a line, and the nine kinds of lines the diagnosis reads (agent_log.py).
 JOURNAL_LINE = LOG_LINE
 JOURNAL_KINDS = tuple(kind for kind, _, _ in LOG_PATTERNS)
+# The lines the live state and the usage read besides: a model named by a call or a fallback, a failed call (live.py).
+JOURNAL_LIVE_KINDS = tuple(kind for kind, _ in LIVE_LOG_PATTERNS)
 # The tail of each journal checked: its last dated lines, within its last bytes.
 JOURNAL_TAIL_BYTES = 64 * 1024
 JOURNAL_TAIL_LINES = 20
@@ -104,9 +110,11 @@ _DATED = re.compile(r"^\d{4}-\d{2}-\d{2} ", re.ASCII)
 
 
 # The agents' session bases: the tables and columns read, and the JSON fields read in each tool call (sessions.py).
+# The transcript of a run's session (data.py) reads the reasoning too.
 SESSION_CONTRACT: dict[str, Table] = {
     "sessions": Table(columns=SESSION_COLUMNS),
-    "messages": Table(columns=MESSAGE_COLUMNS),
+    "messages": Table(columns=tuple(dict.fromkeys(MESSAGE_COLUMNS + TRANSCRIPT_MESSAGE_COLUMNS))),
+    "session_model_usage": Table(columns=USAGE_COLUMNS),
 }
 # The last tool calls checked in each base: each must still carry the fields read.
 SESSION_CALLS_CHECKED = 50
@@ -171,17 +179,24 @@ def configs(home: Path) -> list[tuple[str, Path]]:
     return [(agent, path) for agent, path in found if path is not None]
 
 
+def _dotted(config: dict, key: str) -> object:
+    value: object = config
+    for part in key.split("."):
+        value = value.get(part) if isinstance(value, dict) else None
+    return value
+
+
 def _config_gaps(config: dict) -> list[str]:
-    gaps = []
-    for key in CONFIG_TABLES:
-        value: object = config
-        for part in key.split("."):
-            value = value.get(part) if isinstance(value, dict) else None
-        if value is not None and not isinstance(value, dict):
-            gaps.append(f"{key} n'est plus une table")
-    enabled = config.get("plugins", {}).get("enabled") if isinstance(config.get("plugins"), dict) else None
-    if enabled is not None and not isinstance(enabled, list):
-        gaps.append("plugins.enabled n'est plus une liste")
+    gaps = [
+        f"{key} n'est plus une table"
+        for key in CONFIG_TABLES
+        if (value := _dotted(config, key)) is not None and not isinstance(value, dict)
+    ]
+    gaps += [
+        f"{key} n'est plus une liste"
+        for key in CONFIG_LISTS
+        if (value := _dotted(config, key)) is not None and not isinstance(value, list)
+    ]
     return gaps
 
 
@@ -243,6 +258,44 @@ def _table_problems(db: sqlite3.Connection, name: str, table: Table) -> list[str
     return problems
 
 
+# The machine's checks (machine.py): the gateway's heartbeats in the root base, and three files of the home. A file
+# that is absent is no problem (no pause, no scheduled job, no local router); one that is there must keep its form.
+MACHINE_CONTRACT: dict[str, Table] = {"gateway_heartbeats": Table(columns=HEARTBEAT_COLUMNS)}
+MACHINE_FILES = (ESTOP, CRON_JOBS, LLAMA_SERVER)
+
+
+def machine_problems(home: Path) -> list[str]:
+    """Every gap between the declared reading of the machine's checks and Hermès' home."""
+    problems = []
+    base = home / "state.db"
+    if base.is_file():
+        try:
+            db = sqlite3.connect(f"file:{base}?mode=ro", uri=True)
+            try:
+                for name, table in MACHINE_CONTRACT.items():
+                    problems += [f"state.db : {problem}" for problem in _table_problems(db, name, table)]
+            finally:
+                db.close()
+        except sqlite3.Error as error:
+            problems.append(f"state.db illisible ({error})")
+    jobs = home / CRON_JOBS
+    if jobs.is_file():
+        try:
+            if cron_jobs(json.loads(jobs.read_text(encoding="utf-8"))) is None:
+                problems.append(f"{CRON_JOBS} : plus de liste jobs")
+        except (OSError, ValueError):
+            problems.append(f"{CRON_JOBS} : JSON illisible")
+    server = home / LLAMA_SERVER
+    if server.is_file():
+        try:
+            data = json.loads(server.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or not isinstance(data.get("base_url"), str):
+                problems.append(f"{LLAMA_SERVER} : plus de base_url")
+        except (OSError, ValueError):
+            problems.append(f"{LLAMA_SERVER} : JSON illisible")
+    return problems
+
+
 def payload_problems(db: sqlite3.Connection) -> list[str]:
     """Every kind of event whose payload is not a JSON object with the declared text keys, with its count."""
     problems = []
@@ -273,13 +326,30 @@ def board_problems(reader: HermesBoardReader, board: str) -> list[str]:
     return [f"{board}: {problem}" for problem in problems]
 
 
+# The folder of a board where the cards' raw logs are, one `<card>.log` each (data.py reads them as declared data).
+CARD_LOG_FOLDER = "logs"
+
+
+def card_log_problems(reader: HermesBoardReader, board: str) -> list[str]:
+    """The cards' logs of a board, when present, are in a folder."""
+    try:
+        folder = reader.base_path(board).parent / CARD_LOG_FOLDER
+    except BoardUnavailableError:
+        return []
+    if folder.exists() and not folder.is_dir():
+        return [f"{board}: {CARD_LOG_FOLDER} n'est pas un dossier"]
+    return []
+
+
 def check_contract(boards: list[str], environ: dict[str, str] | None = None) -> ContractVerdict:
     """Check the contract against the base of each named board, read-only, and against the version output."""
     reader = make_board_reader(environ)
     problems = [problem for board in boards for problem in board_problems(reader, board)]
+    problems += [problem for board in boards for problem in card_log_problems(reader, board)]
     problems += session_problems(reader.home)
     problems += config_problems(reader.home)
     problems += journal_problems(reader.home)
+    problems += machine_problems(reader.home)
     _, version_problem = read_runtime_version()
     if version_problem is not None:
         problems.append(version_problem)

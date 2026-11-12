@@ -1,0 +1,298 @@
+{
+  "$defs": {
+    "Agent": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "skills": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skills",
+          "type": "array"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentModel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fallbacks": {
+          "items": {
+            "$ref": "#/$defs/AgentModel"
+          },
+          "title": "Fallbacks",
+          "type": "array"
+        },
+        "effort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Effort"
+        },
+        "toolsets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Toolsets",
+          "type": "array"
+        },
+        "plugins": {
+          "items": {
+            "$ref": "#/$defs/AgentPlugin"
+          },
+          "title": "Plugins",
+          "type": "array"
+        },
+        "mcp": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Mcp",
+          "type": "array"
+        },
+        "limits": {
+          "items": {
+            "$ref": "#/$defs/AgentLimit"
+          },
+          "title": "Limits",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "skills",
+        "model",
+        "fallbacks",
+        "effort",
+        "toolsets",
+        "plugins",
+        "mcp",
+        "limits"
+      ],
+      "title": "Agent",
+      "type": "object"
+    },
+    "AgentLimit": {
+      "properties": {
+        "key": {
+          "enum": [
+            "hook_callback_timeout",
+            "tool_deadline",
+            "terminal_timeout",
+            "max_turns"
+          ],
+          "title": "Key",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        },
+        "default": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Default"
+        },
+        "unit": {
+          "enum": [
+            "seconds",
+            "turns"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "value",
+        "default",
+        "unit"
+      ],
+      "title": "AgentLimit",
+      "type": "object"
+    },
+    "AgentModel": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "provider"
+      ],
+      "title": "AgentModel",
+      "type": "object"
+    },
+    "AgentPlugin": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "longest_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Longest Seconds"
+        },
+        "hook_timeouts": {
+          "title": "Hook Timeouts",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "longest_seconds",
+        "hook_timeouts"
+      ],
+      "title": "AgentPlugin",
+      "type": "object"
+    },
+    "GuardRisk": {
+      "description": "A guard whose code can wait at least the delay of its hook, on one or more agents (issue #137): a plugin\nplugged to a hook, whose longest command lasts at least the hook's effective delay.",
+      "properties": {
+        "plugin": {
+          "title": "Plugin",
+          "type": "string"
+        },
+        "agents": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Agents",
+          "type": "array"
+        },
+        "longest_seconds": {
+          "title": "Longest Seconds",
+          "type": "number"
+        },
+        "limit_seconds": {
+          "title": "Limit Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "plugin",
+        "agents",
+        "longest_seconds",
+        "limit_seconds"
+      ],
+      "title": "GuardRisk",
+      "type": "object"
+    },
+    "KanbanSettings": {
+      "description": "The runtime's settings of the kanban that bound the cards in progress.",
+      "properties": {
+        "max_in_progress": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Max In Progress"
+        },
+        "max_in_progress_per_profile": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Max In Progress Per Profile"
+        }
+      },
+      "required": [
+        "max_in_progress",
+        "max_in_progress_per_profile"
+      ],
+      "title": "KanbanSettings",
+      "type": "object"
+    }
+  },
+  "description": "GET /api/workflows/<key>/agents?days=<n>: the workflow's agents and their configuration in service, without a\nsecret, and the runtime's settings of the kanban (None when its configuration is unreadable).",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "workflow": {
+      "title": "Workflow",
+      "type": "string"
+    },
+    "kanban": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/KanbanSettings"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "agents": {
+      "items": {
+        "$ref": "#/$defs/Agent"
+      },
+      "title": "Agents",
+      "type": "array"
+    },
+    "guard_risks": {
+      "items": {
+        "$ref": "#/$defs/GuardRisk"
+      },
+      "title": "Guard Risks",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "workflow",
+    "kanban",
+    "agents",
+    "guard_risks"
+  ],
+  "title": "AgentsResponse",
+  "type": "object"
+}

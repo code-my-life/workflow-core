@@ -1,0 +1,103 @@
+{
+  "$defs": {
+    "ListedGesture": {
+      "description": "A gesture the workflow declares: `comment` posts `/<key> <name> [note]` on an item's issue, `issue` opens an\nissue in `repo` (given for that kind only).",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "comment",
+            "issue"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "repo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repo"
+        }
+      },
+      "required": [
+        "name",
+        "kind"
+      ],
+      "title": "ListedGesture",
+      "type": "object"
+    },
+    "ListedWorkflow": {
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "board": {
+          "title": "Board",
+          "type": "string"
+        },
+        "sheet_valid": {
+          "title": "Sheet Valid",
+          "type": "boolean"
+        },
+        "gestures": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ListedGesture"
+          },
+          "title": "Gestures",
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "board",
+        "sheet_valid"
+      ],
+      "title": "ListedWorkflow",
+      "type": "object"
+    }
+  },
+  "description": "GET /api/workflows: the declared workflows.",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "cursor": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cursor"
+    },
+    "workflows": {
+      "items": {
+        "$ref": "#/$defs/ListedWorkflow"
+      },
+      "title": "Workflows",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "workflows"
+  ],
+  "title": "WorkflowsResponse",
+  "type": "object"
+}

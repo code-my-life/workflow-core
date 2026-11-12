@@ -1,0 +1,221 @@
+{
+  "$defs": {
+    "AgentUsage": {
+      "properties": {
+        "agent": {
+          "title": "Agent",
+          "type": "string"
+        },
+        "tokens": {
+          "title": "Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "agent",
+        "tokens"
+      ],
+      "title": "AgentUsage",
+      "type": "object"
+    },
+    "DayUsage": {
+      "properties": {
+        "day": {
+          "title": "Day",
+          "type": "string"
+        },
+        "tokens": {
+          "title": "Tokens",
+          "type": "integer"
+        },
+        "rate_limited": {
+          "title": "Rate Limited",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "day",
+        "tokens",
+        "rate_limited"
+      ],
+      "title": "DayUsage",
+      "type": "object"
+    },
+    "ModelUsage": {
+      "properties": {
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "calls": {
+          "title": "Calls",
+          "type": "integer"
+        },
+        "input_tokens": {
+          "title": "Input Tokens",
+          "type": "integer"
+        },
+        "output_tokens": {
+          "title": "Output Tokens",
+          "type": "integer"
+        },
+        "cost_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cost Usd"
+        },
+        "rate_limited": {
+          "title": "Rate Limited",
+          "type": "integer"
+        },
+        "errors": {
+          "title": "Errors",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "model",
+        "provider",
+        "calls",
+        "input_tokens",
+        "output_tokens",
+        "cost_usd",
+        "rate_limited",
+        "errors"
+      ],
+      "title": "ModelUsage",
+      "type": "object"
+    },
+    "UsageRow": {
+      "description": "The usage of one model by one agent on one day: summed, the rows give `models`, `agents` and `daily`.",
+      "properties": {
+        "day": {
+          "title": "Day",
+          "type": "string"
+        },
+        "agent": {
+          "title": "Agent",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "calls": {
+          "title": "Calls",
+          "type": "integer"
+        },
+        "input_tokens": {
+          "title": "Input Tokens",
+          "type": "integer"
+        },
+        "output_tokens": {
+          "title": "Output Tokens",
+          "type": "integer"
+        },
+        "cost_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cost Usd"
+        },
+        "rate_limited": {
+          "title": "Rate Limited",
+          "type": "integer"
+        },
+        "errors": {
+          "title": "Errors",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "day",
+        "agent",
+        "model",
+        "provider",
+        "calls",
+        "input_tokens",
+        "output_tokens",
+        "cost_usd",
+        "rate_limited",
+        "errors"
+      ],
+      "title": "UsageRow",
+      "type": "object"
+    }
+  },
+  "description": "GET /api/workflows/<key>/usage?days=<n>: usage and costs over n days (90 at most).",
+  "properties": {
+    "days": {
+      "title": "Days",
+      "type": "integer"
+    },
+    "models": {
+      "items": {
+        "$ref": "#/$defs/ModelUsage"
+      },
+      "title": "Models",
+      "type": "array"
+    },
+    "agents": {
+      "items": {
+        "$ref": "#/$defs/AgentUsage"
+      },
+      "title": "Agents",
+      "type": "array"
+    },
+    "daily": {
+      "items": {
+        "$ref": "#/$defs/DayUsage"
+      },
+      "title": "Daily",
+      "type": "array"
+    },
+    "rows": {
+      "items": {
+        "$ref": "#/$defs/UsageRow"
+      },
+      "title": "Rows",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "workflow": {
+      "title": "Workflow",
+      "type": "string"
+    }
+  },
+  "required": [
+    "days",
+    "models",
+    "agents",
+    "daily",
+    "rows",
+    "schema_version",
+    "workflow"
+  ],
+  "title": "UsageResponse",
+  "type": "object"
+}
