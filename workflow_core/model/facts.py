@@ -128,3 +128,42 @@ class AgentLogPort(Protocol):
     when the agent has no journal."""
 
     def facts(self, agent: str, since: float, until: float) -> list[LogFact] | None: ...
+
+
+class ToolCallFact(BaseModel):
+    """A tool call of a session: the terminal's command, else the path or the name given to the tool."""
+
+    at: float
+    tool: str
+    input: str | None
+    call_id: str | None
+
+
+class ToolResultFact(BaseModel):
+    """A tool's result: the content's first 1 500 and last 500 characters when it is longer, secrets masked."""
+
+    at: float
+    tool: str
+    call_id: str | None
+    content: str
+
+
+class SessionFacts(BaseModel):
+    """A session's calls and results, in the order of its messages; `run_id`: the run it was attached to."""
+
+    id: str
+    run_id: int | None
+    calls: list[ToolCallFact]
+    results: list[ToolResultFact]
+
+
+class SessionsPort(Protocol):
+    """Reads an agent's sessions. `None` when its base cannot be read: never an empty list."""
+
+    def run_facts(self, agent: str, card: str, runs: list[RunFact]) -> list[SessionFacts] | None:
+        """The sessions of these runs of a card, each found without guessing, at most once."""
+        ...
+
+    def open_sessions(self, agent: str, at: float) -> list[str] | None:
+        """The agent's sessions started before this instant (Unix seconds) and not yet ended."""
+        ...

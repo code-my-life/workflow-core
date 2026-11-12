@@ -327,8 +327,13 @@ class AgentLogReader:
 def make_agent_log_reader(
     environ: dict[str, str] | None = None, open_sessions: OpenSessions | None = None
 ) -> AgentLogReader:
-    """The journal reader of the Hermès home named by `HERMES_HOME`, in the zone named by `HERMES_TZ`."""
+    """The journal reader of the Hermès home named by `HERMES_HOME`, in the zone named by `HERMES_TZ`. Without
+    another source, the open sessions come from the agents' session bases."""
     from workflow_core.adapters.hermes.board import hermes_home
+    from workflow_core.adapters.hermes.sessions import SessionReader
 
     env = os.environ if environ is None else environ
-    return AgentLogReader(hermes_home(env), env.get(TIME_ZONE_VARIABLE) or DEFAULT_TIME_ZONE, open_sessions)
+    home = hermes_home(env)
+    if open_sessions is None:
+        open_sessions = SessionReader(home).open_sessions
+    return AgentLogReader(home, env.get(TIME_ZONE_VARIABLE) or DEFAULT_TIME_ZONE, open_sessions)
