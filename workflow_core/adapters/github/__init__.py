@@ -207,3 +207,18 @@ class GitHubClient:
                 return False
             raise
         return True
+
+    def list_issues(self, repo: str) -> list[dict]:
+        """The repository's issues, open and closed, most recently updated first (one page of 100), without pull
+        requests."""
+        answer, _ = self._call(f"/repos/{repo}/issues?state=all&sort=updated&direction=desc&per_page=100")
+        return [issue for issue in answer or [] if isinstance(issue, dict) and "pull_request" not in issue]
+
+    def create_issue(self, repo: str, title: str, body: str) -> int:
+        """Open an issue; its number."""
+        answer, _ = self._call(f"/repos/{repo}/issues", method="POST", body={"title": title, "body": body})
+        return int(answer["number"])
+
+    def set_issue_state(self, repo: str, number: int, state: str) -> None:
+        """Reopen (`open`) or close (`closed`) an issue."""
+        self._call(f"/repos/{repo}/issues/{number}", method="PATCH", body={"state": state})
