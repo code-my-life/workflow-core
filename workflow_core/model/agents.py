@@ -46,6 +46,19 @@ class Agent(BaseModel):
     limits: list[AgentLimit]
 
 
+class GuardRisk(BaseModel):
+    """A guard whose code can wait at least the delay of its hook, on one or more agents (issue #137): a plugin
+    plugged to a hook, whose longest command lasts at least the hook's effective delay."""
+
+    plugin: str
+    # The agents concerned, in the order of the workflow's agents.
+    agents: list[str]
+    # The longest command its code can run (seconds).
+    longest_seconds: float
+    # The effective delay of its hook on these agents (seconds).
+    limit_seconds: float
+
+
 class KanbanSettings(BaseModel):
     """The runtime's settings of the kanban that bound the cards in progress."""
 
@@ -54,6 +67,9 @@ class KanbanSettings(BaseModel):
 
 
 class AgentsReader(Protocol):
-    """Reads the agents of a workflow over the last `days` days. `now`: Unix seconds."""
+    """Reads the agents of a workflow over the last `days` days, and the guards at risk among them. `now`: Unix
+    seconds."""
 
-    def agents(self, workflow: Workflow, days: int, now: float) -> tuple[KanbanSettings | None, list[Agent]]: ...
+    def agents(
+        self, workflow: Workflow, days: int, now: float
+    ) -> tuple[KanbanSettings | None, list[Agent], list[GuardRisk]]: ...

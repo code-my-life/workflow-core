@@ -298,3 +298,66 @@ def test_the_repo_step_follows_the_declared_profiles_folder():
     assert of_code(found(input, studio), "guard_hook_timeout")["steps"][1]["text"]["params"]["path"] == (
         "hermes/profiles/coder/config.yaml"
     )
+
+
+def _guard_facts(profile: str, **patch) -> ProfileFacts:
+    """The facts of factory-live's `coderProfile` (packages/domain/src/diagnosis/, file
+    incidents.fixture-builder.test-helpers.ts at release/0.12.0), with the longest commands of `guards.test.ts`."""
+    hooks = [
+        PluginHook(plugin=plugin, hook=hook, callback=callback, source=f'ctx.register_hook("{hook}", {callback})')
+        for plugin, hook, callback in (
+            ("coder-guard", "pre_tool_call", "pre_tool"),
+            ("coder-guard", "post_tool_call", "post_tool"),
+            ("coder-guard", "pre_llm_call", "inject"),
+            ("comment-guard", "pre_tool_call", "guard"),
+            ("gate-readonly", "pre_tool_call", "guard"),
+            ("merge-guard", "pre_tool_call", "guard"),
+        )
+    ]
+    fields = {
+        "profile": profile,
+        "hook_timeout": None,
+        "tool_deadline": None,
+        "terminal_timeout": 900,
+        "max_turns": 400,
+        "changed_at": None,
+        "repo_read": False,
+        "repo_hook_timeout": None,
+        "plugins": ["coder-guard", "comment-guard", "factory-notify"],
+        "hooks": hooks,
+        "longest_commands": {"coder-guard": 900, "merge-guard": 30},
+    }
+    return ProfileFacts(**{**fields, **patch})
+
+
+def test_guard_risks_match_the_cases_of_factory_live():
+    from workflow_core.adapters.hermes.texts import TERMS
+    from workflow_core.diagnosis.guards import guard_risks
+
+    def risks(profiles):
+        return [risk.model_dump() for risk in guard_risks(profiles, TERMS)]
+
+    # « signale, avant tout incident, coder-guard à 900 s sous un hook de 30 s »
+    assert risks([_guard_facts("coder")]) == [
+        {"plugin": "coder-guard", "agents": ["coder"], "longest_seconds": 900.0, "limit_seconds": 30.0}
+    ]
+
+    # « regroupe les agents d'une même garde aux mêmes délais, une ligne par garde et par délai »
+    release = _guard_facts("release", plugins=["comment-guard", "merge-guard"])
+    fixed = [_guard_facts(name, hook_timeout=600) for name in ("coder", "coder-claude", "scribe")]
+    assert risks([*fixed, release, _guard_facts("gate")]) == [
+        {"plugin": "coder-guard", "agents": ["gate"], "longest_seconds": 900.0, "limit_seconds": 30.0},
+        {
+            "plugin": "coder-guard",
+            "agents": ["coder", "coder-claude", "scribe"],
+            "longest_seconds": 900.0,
+            "limit_seconds": 420.0,
+        },
+        {"plugin": "merge-guard", "agents": ["release"], "longest_seconds": 30.0, "limit_seconds": 30.0},
+    ]
+
+    # « ignore une garde sans hook, sans délai connu, ou qui tient dans le délai »
+    assert risks([_guard_facts("coder", hooks=[])]) == []
+    assert risks([_guard_facts("coder", longest_commands={})]) == []
+    assert risks([_guard_facts("coder", hook_timeout=0, tool_deadline=0)]) == []
+    assert risks([_guard_facts("release", hook_timeout=60, plugins=["merge-guard"])]) == []

@@ -6,6 +6,7 @@ from the adapter's terms.
 
 from __future__ import annotations
 
+from workflow_core.model.agents import GuardRisk
 from workflow_core.model.facts import LogFact, ProfileFacts, RuntimeTerms
 
 
@@ -25,6 +26,32 @@ def effective_hook_limit(profile: ProfileFacts, terms: RuntimeTerms) -> float | 
     if hook is None:
         return tool
     return hook if tool is None else min(hook, tool)
+
+
+def guard_risks(profiles: list[ProfileFacts], terms: RuntimeTerms) -> list[GuardRisk]:
+    """The guards at risk (ported from factory-live's `guardRisks`, release/0.12.0): an active plugin plugged to a hook
+    whose code runs a command of at least the hook's effective delay. Grouped by guard and delays, one line each, the
+    agents in the order given; sorted by guard, then by longest command (longest first), then by delay."""
+    risks: dict[tuple[str, float, float], GuardRisk] = {}
+    for profile in profiles:
+        limit = effective_hook_limit(profile, terms)
+        if limit is None:
+            continue
+        for plugin in profile.plugins:
+            longest = profile.longest_commands.get(plugin)
+            if longest is None or longest < limit:
+                continue
+            if not any(hook.plugin == plugin for hook in profile.hooks):
+                continue
+            key = (plugin, float(longest), float(limit))
+            known = risks.get(key)
+            if known is not None:
+                known.agents.append(profile.profile)
+            else:
+                risks[key] = GuardRisk(
+                    plugin=plugin, agents=[profile.profile], longest_seconds=longest, limit_seconds=limit
+                )
+    return sorted(risks.values(), key=lambda risk: (risk.plugin, -risk.longest_seconds, risk.limit_seconds))
 
 
 def hook_timeouts_by_plugin(logs: list[LogFact], profile: ProfileFacts) -> dict[str, int]:
