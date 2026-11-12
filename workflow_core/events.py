@@ -127,8 +127,9 @@ class EventJournal:
         )
         return event
 
-    def note(self, kind: str, workflow: str, item: str | None, state: dict) -> dict:
-        """One `live` or `activity` event: the live state of an agent, or a new fact of the board."""
+    def note(self, kind: str, workflow: str | None, item: str | None, state: dict | list) -> dict:
+        """One `live`, `activity` or `machine` event: the live state of an agent, a new fact of the board, or the
+        machine's checks."""
         return self._append(kind, workflow, item, state)
 
     def record(self, workflow: str, items: list[dict]) -> list[dict]:
@@ -311,6 +312,13 @@ class EventHub:
             for queue in self._subscribers:
                 queue.put_nowait(event)
         return events
+
+    def publish(self, kind: str, state: list) -> dict:
+        """An event of the core itself, outside any workflow (the machine's checks), sent to every open stream."""
+        event = self.journal.note(kind, None, None, state)
+        for queue in self._subscribers:
+            queue.put_nowait(event)
+        return event
 
     async def _probe(self) -> None:
         while True:

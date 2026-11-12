@@ -29,6 +29,7 @@ PUBLISHED = (
     "live.schema.json",
     "activity.schema.json",
     "usage.schema.json",
+    "declared-data.schema.json",
 )
 
 

@@ -179,6 +179,13 @@ class HermesBoardReader:
         env = os.environ if environ is None else environ
         return HermesLiveReader(self.home, env.get(TIME_ZONE_VARIABLE) or DEFAULT_TIME_ZONE, self)
 
+    def data_reader(self, environ: dict[str, str] | None = None):
+        """The data the workflows declare, read under the same Hermès home and Claude Code's projects
+        (`DeclaredDataReader`, ADR 0011)."""
+        from workflow_core.adapters.hermes.data import HermesDataReader, claude_projects
+
+        return HermesDataReader(self.home, self, claude_projects(environ))
+
     def diagnosis_sources(self, environ: dict[str, str] | None = None) -> HermesDiagnosisSources:
         """The other sources of the diagnosis under the same Hermès home: sessions, journals, configurations,
         proofs. The journals are dated in the zone named by `HERMES_TZ`."""

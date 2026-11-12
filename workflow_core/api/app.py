@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import secrets
 import time
 from collections.abc import Callable
@@ -19,7 +21,10 @@ from workflow_core.config import Workflow
 from workflow_core.diagnosis import diagnose_board, diagnose_card
 from workflow_core.diagnosis.service import run_verdicts
 from workflow_core.events import BoardWatcher, EventHub
+from workflow_core.machine import MachineChecks
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
+from workflow_core.model.checks import CHECK_EVERY_SECONDS, DeclaredCheck, RuntimeChecks
+from workflow_core.model.data import ID_FORMS, SUBJECTS, DeclaredDataReader
 from workflow_core.model.diagnosis import diagnosis_json
 from workflow_core.model.facts import CardFactsReader, DiagnosisSources
 from workflow_core.model.live import LiveReader, LiveWatcher
@@ -34,6 +39,16 @@ SCHEMA_VERSION = 1
 class UnknownWorkflowError(Exception):
     def __init__(self, key: str) -> None:
         super().__init__(f'workflow "{key}" is not declared in the configuration')
+
+
+class UnknownSubjectError(Exception):
+    def __init__(self, subject: str) -> None:
+        super().__init__(f'subject "{subject}" is not one of {", ".join(SUBJECTS)}')
+
+
+class InvalidIdError(Exception):
+    def __init__(self, subject: str, item: str) -> None:
+        super().__init__(f'"{item}" is not an id of a {subject}')
 
 
 class UnknownItemError(Exception):
@@ -64,6 +79,10 @@ def create_app(
     spy: Callable[[str], Any] | None = None,
     live: LiveReader | None = None,
     live_watcher: LiveWatcher | None = None,
+    runtime_checks: RuntimeChecks | None = None,
+    checks: list[DeclaredCheck] | None = None,
+    checks_every: float = CHECK_EVERY_SECONDS,
+    data: DeclaredDataReader | None = None,
 ) -> FastAPI:
     """The API. With a board watcher and a journal path, it also probes the boards and serves GET /api/events. The
     facts of a card, for its diagnosis, are read by `facts`, by default the board reader itself, and the other
@@ -74,16 +93,42 @@ def create_app(
     diagnosis_sources: DiagnosisSources = sources if sources is not None else card_facts.diagnosis_sources()
     # The agents' live state, activity and usage: by default, the board reader's.
     live_reader: LiveReader | None = live if live is not None else getattr(boards, "live_reader", lambda: None)()
+    # The data the workflows declare: by default, the board reader's.
+    data_reader: DeclaredDataReader | None = (
+        data if data is not None else getattr(boards, "data_reader", lambda: None)()
+    )
     expected = secret.encode("utf-8")
     hub: EventHub | None = None
+    # The machine's checks run apart from the routes: /api/machine serves their last results (ADR 0008).
+    machine_checks = (
+        MachineChecks(runtime=runtime_checks, declared=list(checks or []), clock=clock, every_seconds=checks_every)
+        if runtime_checks is not None or checks
+        else None
+    )
+
+    async def watch_machine() -> None:
+        # The first round is done at startup; then a check whose status changes is announced once.
+        while True:
+            await asyncio.sleep(min(1.0, checks_every / 2))
+            if await asyncio.to_thread(machine_checks.run_due) and hub is not None and hub.journal is not None:
+                hub.publish("machine", [check.model_dump() for check in machine_checks.current()])
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if hub is not None:
             await hub.start()
+        watching = None
+        if machine_checks is not None:
+            await asyncio.to_thread(machine_checks.run_due)
+            watching = asyncio.create_task(watch_machine(), name="workflow-core machine checks")
         try:
             yield
         finally:
+            if watching is not None:
+                watching.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await watching
+                machine_checks.close()
             if hub is not None:
                 await hub.stop()
 
@@ -139,6 +184,14 @@ def create_app(
     @app.exception_handler(UnknownWorkflowError)
     async def unknown_workflow(request: Request, exc: UnknownWorkflowError) -> JSONResponse:
         return error(404, "unknown_workflow", str(exc))
+
+    @app.exception_handler(UnknownSubjectError)
+    async def unknown_subject(request: Request, exc: UnknownSubjectError) -> JSONResponse:
+        return error(422, "unknown_subject", str(exc))
+
+    @app.exception_handler(InvalidIdError)
+    async def invalid_id(request: Request, exc: InvalidIdError) -> JSONResponse:
+        return error(422, "invalid_id", str(exc))
 
     @app.exception_handler(UnknownItemError)
     async def unknown_item(request: Request, exc: UnknownItemError) -> JSONResponse:
@@ -278,6 +331,24 @@ def create_app(
         report = reading_live().usage(workflow, days, clock())
         return {"schema_version": SCHEMA_VERSION, "workflow": workflow.key, **report.model_dump()}
 
+    @app.get("/api/workflows/{key}/data")
+    def declared_data(key: str, subject: str, id: str) -> dict:
+        # The data the workflow declares for this subject, read at the request (ADR 0011): an absent one has no
+        # value, an unreadable one a status that says so; the answer never fails for one of them.
+        workflow = declared(key)
+        if subject not in SUBJECTS:
+            raise UnknownSubjectError(subject)
+        if not ID_FORMS[subject].fullmatch(id):
+            raise InvalidIdError(subject, id)
+        found = data_reader.read(workflow, subject, id) if data_reader is not None and workflow.data else []
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "workflow": workflow.key,
+            "subject": subject,
+            "id": id,
+            "data": [entry.model_dump() for entry in found],
+        }
+
     @app.get("/api/events")
     async def events(request: Request, cursor: str | None = None) -> StreamingResponse:
         if hub is None:
@@ -299,6 +370,9 @@ def create_app(
             "mode": core.mode,
             "boards": {board: {"last_read_at": at} for board, at in sorted(core.last_read_at.items())},
         }
+        # The machine's checks, when the core runs any (ADR 0018: an optional field).
+        if machine_checks is not None:
+            payload["checks"] = [check.model_dump() for check in machine_checks.current()]
         return with_cursor(payload, cursor)
 
     return app
