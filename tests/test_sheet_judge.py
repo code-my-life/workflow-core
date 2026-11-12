@@ -177,3 +177,19 @@ def test_a_hostile_input_gets_a_verdict_not_an_exception(data):
     assert not verdict.ok
     assert verdict.rule == "form"
     assert verdict.detail
+
+
+def test_two_stations_naming_one_agent_break_the_shared_agent_rule():
+    sheet = load("studio")
+    sheet["stations"][1]["agents"] = ["scriptwriter"]
+    sheet["stations"][2]["agents"] = ["approbateur", "scriptwriter"]
+
+    verdict = judge_sheet(sheet)
+
+    assert verdict.ok is False
+    assert verdict.rule == "shared-agent"
+    assert "scriptwriter" in verdict.detail
+
+    # One agent per station, and a station without `agents`, are both valid.
+    sheet["stations"][2]["agents"] = ["approbateur"]
+    assert judge_sheet(sheet).ok

@@ -171,6 +171,7 @@ EMPTY_CARD_STATE = {
     "provider_override": None,
     "skills": [],
     "events": [],
+    "station": None,
 }
 
 

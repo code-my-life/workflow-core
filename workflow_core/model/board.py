@@ -72,6 +72,8 @@ class Item(Card):
     comments: list[Comment]
     # The card's events, by id.
     events: list[CardEvent]
+    # The key of the station of the workflow's sheet where the item stands, or None (#140, workflow_core/stations.py).
+    station: str | None = None
 
 
 class BoardUnavailableError(Exception):
