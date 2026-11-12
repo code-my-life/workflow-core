@@ -28,16 +28,12 @@ from workflow_core.diagnosis.findings import (
 )
 from workflow_core.diagnosis.support import is_refusal, run_ids_of, runs_at, tools_summary
 from workflow_core.model.diagnosis import message
-from workflow_core.text import quote
+from workflow_core.text import quote, whole
 
 
 def text_of(value: Any) -> str:
     """A text field of a runtime payload; anything else counts as empty."""
     return value if isinstance(value, str) else ""
-
-
-def _whole(value: float) -> float:
-    return int(value) if isinstance(value, float) and value.is_integer() else value
 
 
 def js_number(value: Any) -> float:
@@ -47,13 +43,13 @@ def js_number(value: Any) -> float:
     if isinstance(value, bool):
         return int(value)
     if isinstance(value, int | float):
-        return _whole(float(value)) if math.isfinite(value) else 0
+        return whole(float(value)) if math.isfinite(value) else 0
     if isinstance(value, str):
         try:
             number = float(value.strip() or 0)
         except ValueError:
             return 0
-        return _whole(number) if math.isfinite(number) else 0
+        return whole(number) if math.isfinite(number) else 0
     return 0
 
 
@@ -283,7 +279,7 @@ def runtime_limit(episode: Episode) -> list[RawFinding]:
         limit = event.payload.get("limit_seconds")
         if isinstance(limit, int | float) and not isinstance(limit, bool):
             hits.append(
-                (event.created_at, event.run_id, (js_number(event.payload.get("elapsed_seconds")), _whole(limit)))
+                (event.created_at, event.run_id, (js_number(event.payload.get("elapsed_seconds")), whole(limit)))
             )
     if not hits:
         return []

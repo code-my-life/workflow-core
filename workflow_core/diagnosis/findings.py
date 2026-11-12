@@ -28,6 +28,7 @@ from workflow_core.model.diagnosis import (
     Subject,
     Text,
 )
+from workflow_core.text import whole
 
 
 class _Raw(BaseModel):
@@ -112,9 +113,7 @@ def _positive(value: float | None) -> int | None:
 
 def _number(value: float | None) -> float | int | None:
     """A number as JSON holds it: an integral value is written without decimals, `inf` is `null`."""
-    if value is None or not math.isfinite(value):
-        return None
-    return int(value) if float(value).is_integer() else value
+    return None if value is None or not math.isfinite(value) else whole(float(value))
 
 
 def finding_view(finding: RawFinding) -> Finding:

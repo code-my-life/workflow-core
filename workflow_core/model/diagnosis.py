@@ -247,6 +247,7 @@ class RunVerdicts(_Contract):
 
     model_config = ConfigDict(json_schema_extra={"x-diagnosis-version": DIAGNOSIS_VERSION})
 
+    # The API's own key, as in every answer: without the alias, the contract's camelCase would write `schemaVersion`.
     schema_version: Literal[1] = Field(alias="schema_version")
     verdicts: list[RunVerdict]
 

@@ -92,7 +92,6 @@ class HermesBoardReader:
 
     def __init__(self, home: Path) -> None:
         self.home = home
-        self.terms = TEXTS.terms
         self.texts = TEXTS
 
     def base_path(self, board: str) -> Path:

@@ -12,12 +12,10 @@ import sqlite3
 from pathlib import Path
 from urllib.parse import quote as url_quote
 
-from workflow_core.adapters.hermes.agent_log import safe_file
+from workflow_core.adapters.hermes.paths import CARD, NAME, safe_file
 from workflow_core.model.facts import RunFact, SessionFacts, ToolCallFact, ToolResultFact
 from workflow_core.text import js_regex, js_trim, redact_secrets, utf16_slice
 
-_NAME = js_regex(r"^[\w-]+$")
-_CARD = js_regex(r"^t_[0-9a-f]{8}$")
 # The session `hermes --resume` names in a run's error or output.
 RESUME = js_regex(r"hermes --resume (\d{8}_\d{6}_[0-9a-f]{6}) -p (\S+)")
 # Of a tool's result, the diagnosis keeps the start (the refusal) and the end (the exit code).
@@ -106,7 +104,7 @@ def _result_fact(row: sqlite3.Row) -> ToolResultFact:
 
 def session_base(home: Path, agent: str) -> Path | None:
     """The agent's session base, for a safe name and without a symbolic link on the way."""
-    return safe_file(home / "profiles", agent, "state.db") if _NAME.fullmatch(agent) else None
+    return safe_file(home / "profiles", agent, "state.db") if NAME.fullmatch(agent) else None
 
 
 def open_session_base(path: Path) -> sqlite3.Connection:
@@ -145,7 +143,7 @@ class SessionReader:
         for session in (noted, resumed):
             if session and db.execute("SELECT 1 FROM sessions WHERE id = ?", (session,)).fetchone():
                 return session
-        if not _CARD.fullmatch(card):
+        if not CARD.fullmatch(card):
             return None
         prompt = f"work kanban task {card}"
         rows = db.execute(

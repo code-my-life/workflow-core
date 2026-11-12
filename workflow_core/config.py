@@ -1,4 +1,5 @@
-"""The core's configuration: the declared workflows, each with its key, its board and the path of its sheet.
+"""The core's configuration: the declared workflows, each with its key, its board, the path of its sheet, and the
+optional values its diagnosis needs (its triggers' settings, its sources, its own words).
 
 Until the manifests (engine epic), `config/workflows.toml` lists them, one `[[workflow]]` table each.
 """

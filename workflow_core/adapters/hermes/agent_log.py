@@ -13,7 +13,6 @@ that follows it closely, else the only open session of the agent at that time.
 from __future__ import annotations
 
 import calendar
-import math
 import os
 import re
 from collections.abc import Callable
@@ -22,8 +21,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from workflow_core.adapters.hermes.paths import NAME, safe_file
 from workflow_core.model.facts import LogFact, LogFactKind
-from workflow_core.text import js_regex, quote
+from workflow_core.text import js_regex, js_round_text, quote
 
 TIME_ZONE_VARIABLE = "HERMES_TZ"
 DEFAULT_TIME_ZONE = "Europe/Paris"
@@ -46,17 +46,6 @@ LOG_LINE = js_regex(
     r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),(\d{3}) (DEBUG|INFO|WARNING|ERROR|CRITICAL)(?: \[([^\]]+)\])? (\S+): (.*)$"
 )
 _WALL_CLOCK = js_regex(r"^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$")
-_NAME = js_regex(r"^[\w-]+$")
-
-
-def _js_round(text: str) -> int | None:
-    """JavaScript's `Math.round(Number(text))`: halves go up; what is not a number (`1.2.3`) gives `None`, as
-    JavaScript's `NaN` is written `null` in JSON."""
-    try:
-        value = float(text)
-    except ValueError:
-        return None
-    return math.floor(value + 0.5) if math.isfinite(value) else None
 
 
 @dataclass(frozen=True)
@@ -83,7 +72,7 @@ LOG_PATTERNS: tuple[tuple[LogFactKind, re.Pattern[str], Callable[[re.Match[str]]
     (
         "hook_timeout",
         js_regex(r"^Hook '(\w+)' callback (\S+) timed out after ([\d.]+)s"),
-        lambda m: {"hook": m[1], "callback": m[2], "seconds": _js_round(m[3])},
+        lambda m: {"hook": m[1], "callback": m[2], "seconds": js_round_text(m[3])},
     ),
     (
         "hook_abandoned",
@@ -114,7 +103,7 @@ LOG_PATTERNS: tuple[tuple[LogFactKind, re.Pattern[str], Callable[[re.Match[str]]
     (
         "tool_deadline",
         js_regex(r"^sequential tool (\S+) timed out after ([\d.]+)s$"),
-        lambda m: {"detail": m[1], "seconds": _js_round(m[2])},
+        lambda m: {"detail": m[1], "seconds": js_round_text(m[2])},
     ),
     (
         "api_failed",
@@ -183,23 +172,9 @@ def zoned_epoch(wall_clock: str, millis: int, time_zone: str, not_before: float 
     return (chosen + millis) / 1000
 
 
-def safe_file(root: Path, *parts: str) -> Path | None:
-    """A file under its root, without a symbolic link on the way: its real path must be the path built. A link laid
-    in a profile thus makes nothing else readable."""
-    path = root.joinpath(*parts)
-    try:
-        if not path.is_relative_to(root) or path == root:
-            return None
-        if path.is_symlink() or not path.is_file():
-            return None
-        return path if path.resolve() == root.resolve().joinpath(*parts) else None
-    except OSError:
-        return None
-
-
 def journal_paths(home: Path, agent: str) -> list[Path]:
     """The agent's journal: the previous file (rotation) first, then the current one; nothing for an unsafe name."""
-    if not _NAME.fullmatch(agent):
+    if not NAME.fullmatch(agent):
         return []
     found = (safe_file(home / "profiles", agent, "logs", name) for name in JOURNAL_FILES)
     return [path for path in found if path is not None]

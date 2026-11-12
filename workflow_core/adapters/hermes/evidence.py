@@ -10,32 +10,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from workflow_core.adapters.hermes.agent_log import safe_file
+from workflow_core.adapters.hermes.paths import CARD, NAME, safe_entry
 from workflow_core.model.facts import EvidenceFile
-from workflow_core.text import js_regex
 
 EVIDENCE_MAX_FILES = 50
 EVIDENCE_MAX_DEPTH = 3
-_NAME = js_regex(r"^[\w-]+$")
-_CARD = js_regex(r"^t_[0-9a-f]{8}$")
-
-
-def safe_entry(root: Path, parts: list[str], kind: Literal["file", "dir"]) -> Path | None:
-    """A file or folder under its root, without a symbolic link on the way."""
-    if kind == "file":
-        return safe_file(root, *parts)
-    path = root.joinpath(*parts)
-    try:
-        if not path.is_relative_to(root) or path == root or path.is_symlink() or not path.is_dir():
-            return None
-        return path if path.resolve() == root.resolve().joinpath(*parts) else None
-    except OSError:
-        return None
 
 
 def evidence_dir(home: Path, board: str, card: str) -> Path | None:
     """`evidence/` of the card's work folder, else the copy the board keeps of it, which outlives the work folder."""
-    if not _NAME.fullmatch(board) or not _CARD.fullmatch(card):
+    if not NAME.fullmatch(board) or not CARD.fullmatch(card):
         return None
     root = home / "kanban" / "boards" / board
     return safe_entry(root, ["workspaces", card, "evidence"], "dir") or safe_entry(root, ["evidence", card], "dir")
