@@ -26,6 +26,23 @@ class Workflow(BaseModel):
     # card, the block reason of a red main. Without them, every blocked card is diagnosed.
     approval_card_title: str | None = None
     main_red_reason: str | None = None
+    # The diagnosis' sources and words of the workflow (optional). A value left out leaves the rule that needs it
+    # without it, never with another workflow's. `repo`: the workflow's repository (`~` accepted); `profiles` and
+    # `plugins`: the folders of its agents' profiles and of its plugins in that repository (the runtime's adapter
+    # knows the default folder of the profiles).
+    repo: Path | None = None
+    profiles: str | None = None
+    plugins: str | None = None
+    # The name endings of the workflow's guard plugins, its default agent, its relay agent, and the text of its pull
+    # request acceptance check.
+    guard_suffixes: list[str] = Field(default_factory=list)
+    default_agent: str | None = None
+    relay_agent: str | None = None
+    pr_acceptance: str | None = None
+
+    @property
+    def repo_path(self) -> Path | None:
+        return self.repo.expanduser() if self.repo is not None else None
 
     @property
     def sheet_path(self) -> Path:
