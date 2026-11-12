@@ -12,11 +12,13 @@ import base64
 import fcntl
 import json
 import os
+import re
 import subprocess
 import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -32,6 +34,17 @@ TOKEN_LOCK = "app-token.lock"
 # A cached token with less than this left is renewed.
 MIN_LEFT_SECONDS = 600
 TIMEOUT_SECONDS = 30
+
+
+# The login of the App's comments.
+APP_BOT = "code-my-life-factory[bot]"
+
+
+@dataclass(frozen=True)
+class IssueComment:
+    author: str
+    body: str
+    url: str
 
 
 class AppConfigError(Exception):
@@ -183,6 +196,17 @@ class AppTokens:
         return self.current()["token"]
 
 
+PAGE_SIZE = 100
+NEXT_LINK = re.compile(r'<([^>]+)>;\s*rel="next"')
+
+
+def next_page(headers: dict[str, str]) -> str | None:
+    """The address of the next page named by GitHub's `Link` header, or `None` on the last page."""
+    link = next((value for name, value in headers.items() if name.lower() == "link"), "")
+    found = NEXT_LINK.search(link)
+    return found[1] if found else None
+
+
 class GitHubClient:
     """The calls the core makes to GitHub, under the App's installation token."""
 
@@ -198,6 +222,24 @@ class GitHubClient:
         """Comment an issue; the comment's address."""
         answer, _ = self._call(f"/repos/{repo}/issues/{number}/comments", method="POST", body={"body": body})
         return answer.get("html_url", "") if isinstance(answer, dict) else ""
+
+    def list_comments(self, repo: str, number: int) -> list[IssueComment]:
+        """Every comment of an issue, read page by page (100 a page), following GitHub's `Link` header to the last
+        page. A page that cannot be read fails the whole reading."""
+        found: list[IssueComment] = []
+        url: str | None = f"{self.tokens.api_url}/repos/{repo}/issues/{number}/comments?per_page={PAGE_SIZE}"
+        while url:
+            answer, headers = request(url, authorization=f"token {self.tokens.token()}")
+            for item in answer if isinstance(answer, list) else []:
+                found.append(
+                    IssueComment(
+                        author=(item.get("user") or {}).get("login") or "",
+                        body=item.get("body") or "",
+                        url=item.get("html_url") or "",
+                    )
+                )
+            url = next_page(headers)
+        return found
 
     def repository_readable(self, repo: str) -> bool:
         try:

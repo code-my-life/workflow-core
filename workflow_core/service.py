@@ -38,6 +38,7 @@ def build_service(
     spy: Callable[[str], Any] | None = None,
     environ: dict[str, str] | None = None,
     post_comment: Callable[[str, int, str], str] | None = None,
+    read_comments: Callable[[str, int], list] | None = None,
 ) -> FastAPI:
     """The API, with the core's state after the contract check. A broken contract keeps the observer mode and is
     written to the journal; the service still answers."""
@@ -57,31 +58,36 @@ def build_service(
     settings = NotifySettings.from_environ(environ)
     for line in settings.describe():
         journal(INFO if settings.on or settings.problem is None else ERROR, line)
-    if post_comment is None:
+    if post_comment is None or read_comments is None:
         from workflow_core.adapters.github import AppTokens, GitHubClient
 
-        post_comment = GitHubClient(AppTokens(environ=environ)).post_comment
+        github = GitHubClient(AppTokens(environ=environ))
+        post_comment = post_comment or github.post_comment
+        read_comments = read_comments or github.list_comments
     notifier = Notifier(
         workflows=workflows,
         reader=reader,
         state=state,
         settings=settings,
         post_comment=post_comment,
+        read_comments=read_comments,
         register_path=state_dir(environ) / REGISTER_FILE,
         clock=clock,
     )
 
-    return create_app(
+    app = create_app(
         secret=secret,
         workflows=workflows,
         boards=reader,
         state=state,
         watcher=adapter.make_board_watcher(),
-        journal_path=state_dir() / JOURNAL_FILE,
+        journal_path=state_dir(environ) / JOURNAL_FILE,
         clock=clock,
         spy=spy,
         background=[NotifierRunner(notifier)],
     )
+    app.state.notifier = notifier
+    return app
 
 
 # Seconds uvicorn waits for open connections at a stop: an SSE client never closes its own, so the core ends them.

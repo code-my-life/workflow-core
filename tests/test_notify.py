@@ -4,12 +4,13 @@ notifier's epic), behind a switch, its list of repositories and its switch-on ti
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from workflow_core.adapters import runtime_adapter
-from workflow_core.adapters.github import GitHubError
+from workflow_core.adapters.github import GitHubError, IssueComment
 from workflow_core.config import Workflow
 from workflow_core.model.contract import ContractVerdict
 from workflow_core.model.state import CoreState
@@ -53,18 +54,45 @@ def blocked(id: int, task: str, at: float, reason: str = "Faut-il garder l'ancie
     return {"id": id, "task_id": task, "run_id": None, "kind": "blocked", "payload": payload, "created_at": int(at)}
 
 
+BOT = "code-my-life-factory[bot]"
+
+
 class FakeGitHub:
-    """Records the comments posted; can refuse them."""
+    """Records the comments posted and keeps every issue's comments, served by pages of 100; can refuse a comment or
+    fail on a page."""
 
     def __init__(self) -> None:
         self.posted: list[tuple[str, int, str]] = []
         self.refuse: int | None = None
+        self.comments: dict[tuple[str, int], list[IssueComment]] = {}
+        self.pages_served = 0
+        self.failing_page: int | None = None
 
     def post_comment(self, repo: str, number: int, body: str) -> str:
         if self.refuse is not None:
             raise GitHubError(self.refuse, "Resource not accessible by integration")
         self.posted.append((repo, number, body))
-        return f"https://github.com/{repo}/issues/{number}#issuecomment-{len(self.posted)}"
+        kept = self.comments.setdefault((repo, number), [])
+        url = f"https://github.com/{repo}/issues/{number}#issuecomment-{len(kept) + 1}"
+        kept.append(IssueComment(author=BOT, body=body, url=url))
+        return url
+
+    def add(self, repo: str, number: int, author: str, body: str) -> None:
+        kept = self.comments.setdefault((repo, number), [])
+        kept.append(IssueComment(author=author, body=body, url=f"https://github.com/{repo}#c{len(kept) + 1}"))
+
+    def list_comments(self, repo: str, number: int) -> list[IssueComment]:
+        kept = self.comments.get((repo, number), [])
+        found: list[IssueComment] = []
+        page = 1
+        while True:
+            if page == self.failing_page:
+                raise GitHubError(502, "Bad Gateway")
+            self.pages_served += 1
+            found += kept[(page - 1) * 100 : page * 100]
+            if page * 100 >= len(kept):
+                return found
+            page += 1
 
 
 @pytest.fixture
@@ -91,6 +119,7 @@ def notifier(tmp_path, github, env=None, *, mode_ok=True, now=NOON + 600, log=No
         state=CoreState(contract=verdict),
         settings=NotifySettings.from_environ(environ() if env is None else env),
         post_comment=github.post_comment,
+        read_comments=github.list_comments,
         register_path=tmp_path / "state" / "alerts.db",
         clock=lambda: now,
         log=(log.append if log is not None else lambda line: None),
@@ -242,3 +271,155 @@ def test_a_wait_opened_before_the_switch_on_time_is_never_alerted(home, tmp_path
         other = FakeGitHub()
         notifier(tmp_path / "other", other, env).run_pass()
         assert other.posted == []
+
+
+MARKER = "<!-- workflow-core:attente factory:needs_input:t_00000001:1 -->"
+WORKFLOW_CORE = "code-my-life/workflow-core"
+
+
+def one_blocked_card(home) -> None:
+    make_board(home, "factory", [card("t_00000001", body=ISSUE)], events=[blocked(1, "t_00000001", NOON + 60)])
+    make_board(home, "studio", [])
+
+
+def test_an_alert_already_in_the_issue_is_not_posted_again(home, tmp_path):
+    one_blocked_card(home)
+    github = FakeGitHub()
+    github.add(WORKFLOW_CORE, 99, BOT, f"### ⏸ Décision attendue\n\n{MARKER}")
+    log: list[str] = []
+    alerts = notifier(tmp_path, github, log=log)
+
+    alerts.run_pass()
+
+    assert github.posted == []
+    assert any("existait déjà" in line and "#c1" in line for line in log)
+    # The key is noted: the next pass does not read the issue again.
+    served = github.pages_served
+    alerts.run_pass()
+    assert github.pages_served == served
+    assert github.posted == []
+
+
+def test_the_marker_is_found_past_the_first_hundred_comments(home, tmp_path):
+    one_blocked_card(home)
+    github = FakeGitHub()
+    for n in range(1, 231):
+        github.add(WORKFLOW_CORE, 99, BOT if n == 150 else "visiteur", MARKER if n == 150 else f"commentaire {n}")
+
+    notifier(tmp_path, github).run_pass()
+
+    assert github.posted == []
+    assert github.pages_served == 3
+
+
+def test_a_marker_written_by_another_account_does_not_count(home, tmp_path):
+    one_blocked_card(home)
+    github = FakeGitHub()
+    github.add(WORKFLOW_CORE, 99, "inconnu", MARKER)
+
+    notifier(tmp_path, github).run_pass()
+
+    assert len(github.posted) == 1
+    assert github.posted[0][2].endswith(MARKER)
+
+
+def test_nothing_is_posted_until_every_page_of_comments_is_read(home, tmp_path):
+    one_blocked_card(home)
+    github = FakeGitHub()
+    for n in range(1, 151):
+        github.add(WORKFLOW_CORE, 99, "visiteur", f"commentaire {n}")
+    github.failing_page = 2
+    log: list[str] = []
+    alerts = notifier(tmp_path, github, log=log)
+
+    alerts.run_pass()
+    assert github.posted == []
+    assert len([line for line in log if "502" in line]) == 1
+
+    github.failing_page = None
+    alerts.run_pass()
+    alerts.run_pass()
+    assert len(github.posted) == 1
+
+
+def test_a_card_blocked_again_gets_a_new_alert(home, tmp_path):
+    make_board(home, "factory", [card("t_00000001", body=ISSUE)], events=[blocked(10, "t_00000001", NOON + 60)])
+    make_board(home, "studio", [])
+    github = FakeGitHub()
+    alerts = notifier(tmp_path, github)
+    alerts.run_pass()
+
+    with sqlite3.connect(home / "kanban" / "boards" / "factory" / "kanban.db") as db:
+        db.execute(
+            "INSERT INTO task_events (id, task_id, kind, payload, created_at) VALUES (12, 't_00000001', 'unblocked', "
+            "'{}', ?)",
+            (int(NOON) + 120,),
+        )
+        event = blocked(14, "t_00000001", NOON + 180, reason="Et maintenant ?")
+        db.execute(
+            "INSERT INTO task_events (id, task_id, run_id, kind, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            tuple(event.values()),
+        )
+    db.close()
+    alerts.run_pass()
+    alerts.run_pass()
+
+    assert [body.splitlines()[-1] for _, _, body in github.posted] == [
+        "<!-- workflow-core:attente factory:needs_input:t_00000001:10 -->",
+        "<!-- workflow-core:attente factory:needs_input:t_00000001:14 -->",
+    ]
+
+
+def test_a_lost_or_unreadable_register_posts_nothing_again(home, tmp_path):
+    one_blocked_card(home)
+    github = FakeGitHub()
+    register = tmp_path / "state" / "alerts.db"
+    notifier(tmp_path, github).run_pass()
+    assert len(github.posted) == 1
+
+    # Register deleted, service recreated on the same bases and the same GitHub.
+    register.unlink()
+    notifier(tmp_path, github).run_pass()
+    assert len(github.posted) == 1
+
+    # Register replaced by a file that is not a SQLite base: set aside, recreated, nothing posted again.
+    register.write_bytes(b"ceci n'est pas une base")
+    log: list[str] = []
+    alerts = notifier(tmp_path, github, log=log)
+    alerts.run_pass()
+    assert len(github.posted) == 1
+    aside = list(register.parent.glob("alerts.db.illisible-*"))
+    assert len(aside) == 1
+    assert aside[0].read_bytes() == b"ceci n'est pas une base"
+    assert any("illisible" in line for line in log)
+    with sqlite3.connect(register) as db:
+        assert db.execute("SELECT count(*) FROM alerts").fetchone() == (1,)
+    db.close()
+
+
+def test_a_rebuilt_event_journal_posts_nothing_again(home, tmp_path):
+    one_blocked_card(home)
+    github = FakeGitHub()
+    alerts = notifier(tmp_path, github)
+    alerts.run_pass()
+    assert len(github.posted) == 1
+
+    # The service's event journal deleted, then the service recreated: a new epoch, and no new alert.
+    from fastapi.testclient import TestClient
+    from workflow_core.service import build_service
+
+    journal = tmp_path / "state" / "events.db"
+    for _ in range(2):
+        app = build_service(
+            secret="s",
+            workflows=WORKFLOWS,
+            adapter=runtime_adapter(),
+            environ={**environ(), "WORKFLOW_CORE_STATE_DIR": str(tmp_path / "state")},
+            post_comment=github.post_comment,
+            read_comments=github.list_comments,
+            clock=lambda: NOON + 600,
+        )
+        with TestClient(app):
+            app.state.notifier.run_pass()
+        journal.unlink(missing_ok=True)
+    assert len(github.posted) == 1
