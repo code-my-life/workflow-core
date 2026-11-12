@@ -28,7 +28,7 @@ INPUT_MAX = 500
 SESSION_START_SLACK = 120
 
 # The tables and columns read, declared for the contract test (contract.py).
-SESSION_COLUMNS = ("id", "started_at", "ended_at")
+SESSION_COLUMNS = ("id", "model", "started_at", "ended_at")
 MESSAGE_COLUMNS = ("id", "session_id", "role", "content", "tool_call_id", "tool_calls", "tool_name", "timestamp")
 # The JSON fields read in each element of `messages.tool_calls`.
 TOOL_CALL_FIELDS = ("id", "call_id", "function.name", "function.arguments")

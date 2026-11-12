@@ -21,11 +21,14 @@ from typing import Any, Protocol
 from workflow_core.clock import utc_now
 from workflow_core.config import Workflow
 from workflow_core.model.board import BoardUnavailableError, Item
+from workflow_core.model.live import LiveReader, LiveWatcher
 
 STATE_DIR_VARIABLE = "WORKFLOW_CORE_STATE_DIR"
 JOURNAL_FILE = "events.db"
 PROBE_SECONDS = 0.3
 KEEPALIVE_SECONDS = 15.0
+# The facts of a board's activity compared at each probe: the most recent.
+ACTIVITY_KEPT = 200
 
 SCHEMA = (
     "CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL)",
@@ -124,6 +127,10 @@ class EventJournal:
         )
         return event
 
+    def note(self, kind: str, workflow: str, item: str | None, state: dict) -> dict:
+        """One `live` or `activity` event: the live state of an agent, or a new fact of the board."""
+        return self._append(kind, workflow, item, state)
+
     def record(self, workflow: str, items: list[dict]) -> list[dict]:
         """Compare a fresh read of a workflow's items with the last known states; one `changed` event per item that
         differs or appears, in the order read."""
@@ -184,8 +191,15 @@ class EventHub:
         probe_seconds: float = PROBE_SECONDS,
         keepalive_seconds: float = KEEPALIVE_SECONDS,
         spy: Callable[[str], Any] | None = None,
+        live: LiveReader | None = None,
+        live_watcher: LiveWatcher | None = None,
     ) -> None:
         self.workflows = workflows
+        self.live = live
+        self.live_watcher = live_watcher
+        # The last live state of each agent and the last facts sent, per workflow: only what differs goes out.
+        self._live_known: dict[str, dict[tuple[str, str], dict]] = {}
+        self._activity_known: dict[str, dict[str, dict]] = {}
         self.watcher = watcher
         self.read_items = read_items
         self.journal_path = journal_path
@@ -214,8 +228,49 @@ class EventHub:
             self.journal = EventJournal.rebuild(self.journal_path, int(self.clock()), self._current_items())
             return True
 
+    def _read_live(self, key: str, workflow: Workflow) -> tuple[dict, dict] | None:
+        try:
+            agents = self.live.live(workflow)
+            facts = self.live.activity(workflow, ACTIVITY_KEPT, self.clock())
+        except Exception:  # a source that cannot be read leaves the live state as it was, never stops the probe
+            return None
+        return (
+            {(agent.agent, agent.item): agent.model_dump() for agent in agents},
+            {fact.id: fact.model_dump() for fact in facts},
+        )
+
+    def seed_live(self) -> None:
+        """What the agents do now, known without an event: a client reads it by the routes."""
+        if self.live is None:
+            return
+        for key, workflow in self.workflows.items():
+            read = self._read_live(key, workflow)
+            if read is not None:
+                self._live_known[key], self._activity_known[key] = read
+
+    def _live_events(self, key: str, workflow: Workflow) -> list[dict]:
+        read = self._read_live(key, workflow)
+        if read is None:
+            return []
+        agents, facts = read
+        known_agents = self._live_known.get(key, {})
+        known_facts = self._activity_known.get(key, {})
+        events = [
+            self.journal.note("live", key, agent_key[1], state)
+            for agent_key, state in agents.items()
+            if known_agents.get(agent_key) != state
+        ]
+        events += [
+            self.journal.note("activity", key, fact["item"], fact)
+            for fact_id, fact in facts.items()
+            if known_facts.get(fact_id) != fact
+        ]
+        self._live_known[key], self._activity_known[key] = agents, facts
+        return events
+
     async def start(self) -> None:
         self.open_journal()
+        self.seed_live()
         self._task = asyncio.create_task(self._probe(), name="workflow-core probe")
 
     async def stop(self) -> None:
@@ -226,21 +281,32 @@ class EventHub:
         for queue in list(self._subscribers):
             queue.put_nowait(None)
         self.watcher.close()
+        if self.live_watcher is not None:
+            self.live_watcher.close()
         if self.journal is not None:
             self.journal.close()
 
     def probe_once(self) -> list[dict]:
         events: list[dict] = []
         for key, workflow in self.workflows.items():
+            board_changed = False
             try:
-                if not self.watcher.changed(workflow.board):
-                    continue
-                items = self.read_items(workflow.board)
+                if self.watcher.changed(workflow.board):
+                    items = self.read_items(workflow.board)
+                    board_changed = True
+                    if self.spy is not None:
+                        self.spy(workflow.board)
+                    events += self.journal.record(key, [item.model_dump() for item in items])
             except BoardUnavailableError:
+                pass
+            if self.live is None:
                 continue
-            if self.spy is not None:
-                self.spy(workflow.board)
-            events += self.journal.record(key, [item.model_dump() for item in items])
+            try:
+                live_changed = self.live_watcher is not None and self.live_watcher.changed(workflow.board)
+            except Exception:  # an unreadable session base is no change
+                live_changed = False
+            if board_changed or live_changed:
+                events += self._live_events(key, workflow)
         for event in events:
             for queue in self._subscribers:
                 queue.put_nowait(event)
