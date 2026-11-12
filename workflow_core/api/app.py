@@ -23,6 +23,7 @@ from workflow_core.diagnosis.service import run_verdicts
 from workflow_core.events import BoardWatcher, EventHub
 from workflow_core.interventions import interventions_of
 from workflow_core.machine import MachineChecks
+from workflow_core.model.agents import AgentsReader
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
 from workflow_core.model.checks import CHECK_EVERY_SECONDS, DeclaredCheck, RuntimeChecks
 from workflow_core.model.data import ID_FORMS, SUBJECTS, DeclaredDataReader
@@ -85,6 +86,7 @@ def create_app(
     checks: list[DeclaredCheck] | None = None,
     checks_every: float = CHECK_EVERY_SECONDS,
     data: DeclaredDataReader | None = None,
+    agents: AgentsReader | None = None,
 ) -> FastAPI:
     """The API. With a board watcher and a journal path, it also probes the boards and serves GET /api/events. The
     facts of a card, for its diagnosis, are read by `facts`, by default the board reader itself, and the other
@@ -98,6 +100,10 @@ def create_app(
     # The data the workflows declare: by default, the board reader's.
     data_reader: DeclaredDataReader | None = (
         data if data is not None else getattr(boards, "data_reader", lambda: None)()
+    )
+    # The agents of the workflows and their configuration (#129): by default, the board reader's.
+    agents_reader: AgentsReader | None = (
+        agents if agents is not None else getattr(boards, "agents_reader", lambda: None)()
     )
     expected = secret.encode("utf-8")
     hub: EventHub | None = None
@@ -372,6 +378,19 @@ def create_app(
             "subject": subject,
             "id": id,
             "data": [entry.model_dump() for entry in found],
+        }
+
+    @app.get("/api/workflows/{key}/agents")
+    def workflow_agents(key: str, days: int = Query(30, ge=1, le=90)) -> dict:
+        # The workflow's agents and their configuration in service, without a secret (#129); the hook timeouts of
+        # their plugins are counted over the last `days` days.
+        workflow = declared(key)
+        kanban, found = agents_reader.agents(workflow, days, clock()) if agents_reader is not None else (None, [])
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "workflow": workflow.key,
+            "kanban": kanban.model_dump() if kanban is not None else None,
+            "agents": [agent.model_dump() for agent in found],
         }
 
     @app.get("/api/events")

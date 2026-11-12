@@ -30,8 +30,20 @@ DEFAULT_REPO_PROFILES = "hermes/profiles"
 REGISTER_HOOK = js_regex(r"""register_hook\(\s*["'](\w+)["']\s*,\s*(\w+)""")
 # A delay written in a plugin's Python code: `timeout=120`, `timeout: int = 900`.
 TIMEOUT_LITERAL = js_regex(r"\btimeout\s*(?::\s*(?:int|float)\s*)?=\s*(\d{1,6}(?:\.\d{1,3})?)\b")
-# The YAML keys read in config.yaml, declared for the contract test: each must stay a table when present.
-CONFIG_TABLES = ("plugins", "timeouts", "timeouts.tools", "terminal", "agent")
+# The YAML keys read in config.yaml, declared for the contract test: each table must stay a table when present, and
+# each list a list. The agents' configuration served by the core (#129) reads the model, its fallbacks, the effort,
+# the CLI's toolsets and the names of the MCP servers besides the diagnosis' keys; never a base_url, a key or the
+# settings of an MCP server.
+CONFIG_TABLES = (
+    "plugins",
+    "timeouts",
+    "timeouts.tools",
+    "terminal",
+    "agent",
+    "model",
+    "platform_toolsets",
+    "mcp_servers",
+)
 CONFIG_KEYS = (
     "plugins.hook_callback_timeout",
     "plugins.enabled",
@@ -39,7 +51,14 @@ CONFIG_KEYS = (
     "timeouts.tools.concurrent_batch",
     "terminal.timeout",
     "agent.max_turns",
+    "model.default",
+    "model.provider",
+    "fallback_providers",
+    "agent.reasoning_effort",
+    "platform_toolsets.cli",
+    "mcp_servers",
 )
+CONFIG_LISTS = ("plugins.enabled", "fallback_providers", "platform_toolsets.cli")
 
 # JavaScript's `Number(text)` for a trimmed text: a decimal, `0x`, `0o` or `0b` literal, or `Infinity`.
 _JS_DECIMAL = re.compile(r"[+-]?(?:\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?|Infinity)", re.ASCII)

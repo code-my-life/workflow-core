@@ -394,3 +394,28 @@ def test_the_session_and_card_log_formats_are_in_the_contract(runtime_home):
     base.execute("DROP TABLE messages")
     base.close()
     assert "agent coder : table messages absente" in check().problems
+
+
+def test_the_agent_config_keys_are_in_the_contract(runtime_home):
+    from workflow_core.adapters.hermes.contract import CONFIG_KEYS, CONFIG_LISTS, CONFIG_TABLES
+
+    assert {"model", "platform_toolsets", "mcp_servers"} <= set(CONFIG_TABLES)
+    assert {
+        "model.default",
+        "model.provider",
+        "fallback_providers",
+        "agent.reasoning_effort",
+        "platform_toolsets.cli",
+        "mcp_servers",
+    } <= set(CONFIG_KEYS)
+    assert {"fallback_providers", "platform_toolsets.cli", "plugins.enabled"} <= set(CONFIG_LISTS)
+    profile = runtime_home / "profiles" / "coder"
+    profile.mkdir(parents=True)
+    (profile / "config.yaml").write_text(
+        "model:\n  default: glm-5.3\nfallback_providers:\n  - {model: qwen-3.6, provider: nvidia}\n"
+    )
+    assert check().ok is True
+
+    (profile / "config.yaml").write_text("fallback_providers: {model: qwen-3.6}\n")
+
+    assert check().problems == ["agent coder : config.yaml : fallback_providers n'est plus une liste"]

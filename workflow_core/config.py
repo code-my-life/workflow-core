@@ -62,6 +62,9 @@ class Workflow(BaseModel):
     data: list[DataDeclaration] = Field(default_factory=list)
     # The gestures the workflow declares (`[[workflow.gestures]]`), until the manifests. None by default.
     gestures: list[Gesture] = Field(default_factory=list)
+    # The workflow's own manifest of its agents, relative to its repository (`profiles.<agent>.skills`): the agents it
+    # declares and their skills (#129). Without it, its agents are those of its board's runs.
+    manifest: str | None = None
 
     @property
     def repo_path(self) -> Path | None:

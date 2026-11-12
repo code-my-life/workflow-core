@@ -186,6 +186,16 @@ class HermesBoardReader:
 
         return HermesDataReader(self.home, self, claude_projects(environ))
 
+    def agents_reader(self, environ: dict[str, str] | None = None):
+        """The agents of the workflows and their configuration, read under the same Hermès home, their journals in the
+        zone named by `HERMES_TZ` (`AgentsReader`, issue #129)."""
+        from workflow_core.adapters.hermes.agent_log import make_agent_log_reader
+        from workflow_core.adapters.hermes.agents import HermesAgentsReader
+
+        env = dict(os.environ if environ is None else environ)
+        env[HOME_VARIABLE] = str(self.home)
+        return HermesAgentsReader(self.home, self, make_agent_log_reader(env))
+
     def diagnosis_sources(self, environ: dict[str, str] | None = None) -> HermesDiagnosisSources:
         """The other sources of the diagnosis under the same Hermès home: sessions, journals, configurations,
         proofs. The journals are dated in the zone named by `HERMES_TZ`."""
