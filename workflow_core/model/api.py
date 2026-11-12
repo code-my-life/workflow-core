@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from workflow_core.model.board import Item
 from workflow_core.model.checks import MachineCheck
 from workflow_core.model.contract import ContractVerdict, Mode
+from workflow_core.model.data import DeclaredData, Subject
 from workflow_core.model.live import ActivityFact, AgentLive, Usage
 from workflow_core.model.sheet import WorkflowSheet
 
@@ -115,6 +116,16 @@ class ErrorResponse(BaseModel):
     detail: str
 
 
+class DeclaredDataResponse(_Response):
+    """GET /api/workflows/<key>/data?subject=<subject>&id=<id>: every data the workflow declares for this subject,
+    read at the request, in the order declared."""
+
+    workflow: str
+    subject: Subject
+    id: str
+    data: list[DeclaredData]
+
+
 def _schema_text(model: type[BaseModel]) -> Callable[[], str]:
     def text() -> str:
         return json.dumps(model.model_json_schema(by_alias=True), indent=2, ensure_ascii=False) + "\n"
@@ -133,4 +144,5 @@ API_SCHEMAS: dict[str, Callable[[], str]] = {
     "live.schema.json": _schema_text(LiveResponse),
     "activity.schema.json": _schema_text(ActivityResponse),
     "usage.schema.json": _schema_text(UsageResponse),
+    "declared-data.schema.json": _schema_text(DeclaredDataResponse),
 }
