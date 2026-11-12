@@ -87,13 +87,32 @@ class DayUsage(BaseModel):
     rate_limited: int
 
 
+class UsageRow(BaseModel):
+    """The usage of one model by one agent on one day: summed, the rows give `models`, `agents` and `daily`."""
+
+    # YYYY-MM-DD, UTC.
+    day: str
+    agent: str
+    model: str
+    provider: str
+    calls: int
+    input_tokens: int
+    output_tokens: int
+    # The actual cost when known, else the estimated one (USD); None for a line of failed calls only.
+    cost_usd: float | None
+    rate_limited: int
+    errors: int
+
+
 class Usage(BaseModel):
-    """Usage and costs over `days` days, per model, per agent and per day."""
+    """Usage and costs over `days` days, per model, per agent and per day, and in detail per day, model and agent
+    (`rows`)."""
 
     days: int
     models: list[ModelUsage]
     agents: list[AgentUsage]
     daily: list[DayUsage]
+    rows: list[UsageRow]
 
 
 class LiveReader(Protocol):

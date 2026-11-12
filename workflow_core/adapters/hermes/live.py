@@ -43,6 +43,7 @@ from workflow_core.model.live import (
     LiveModel,
     ModelUsage,
     Usage,
+    UsageRow,
 )
 from workflow_core.text import js_regex, js_trim, redact_secrets, utf16_slice
 
@@ -462,6 +463,26 @@ class HermesLiveReader:
         models: dict[tuple[str, str], ModelUsage] = {}
         by_agent: dict[str, int] = {}
         by_day: dict[str, list[int]] = {}
+        # The detail, by (day, agent, model, provider): the same figures as the three sums, never others.
+        detail: dict[tuple[str, str, str, str], UsageRow] = {}
+
+        def row_of(day: str, agent: str, model: str, provider: str, cost: float | None) -> UsageRow:
+            return detail.setdefault(
+                (day, agent, model, provider),
+                UsageRow(
+                    day=day,
+                    agent=agent,
+                    model=model,
+                    provider=provider,
+                    calls=0,
+                    input_tokens=0,
+                    output_tokens=0,
+                    cost_usd=cost,
+                    rate_limited=0,
+                    errors=0,
+                ),
+            )
+
         for agent in sorted(agents):
             with self._session_db(agent) as db:
                 rows = []
@@ -490,6 +511,11 @@ class HermesLiveReader:
                 usage.cost_usd = round((usage.cost_usd or 0.0) + _number(row["cost"]), 6)
                 by_agent[agent] = by_agent.get(agent, 0) + tokens_in + tokens_out
                 by_day.setdefault(str(row["day"]), [0, 0])[0] += tokens_in + tokens_out
+                line = row_of(str(row["day"]), agent, key[0], key[1], 0.0)
+                line.calls += int(_number(row["calls"]))
+                line.input_tokens += tokens_in
+                line.output_tokens += tokens_out
+                line.cost_usd = round((line.cost_usd or 0.0) + _number(row["cost"]), 6)
             for entry in self.journal.entries(agent):
                 if entry.kind != "api_failed" or entry.at < since:
                     continue
@@ -509,11 +535,15 @@ class HermesLiveReader:
                             errors=0,
                         ),
                     )
+                # The line of the model as `models` counts it: its provider is that of the model's usage.
+                line = row_of(_day(entry.at), agent, usage.model, usage.provider, None)
                 if entry.rate_limited:
                     usage.rate_limited += 1
+                    line.rate_limited += 1
                     by_day.setdefault(_day(entry.at), [0, 0])[1] += 1
                 else:
                     usage.errors += 1
+                    line.errors += 1
         return Usage(
             days=days,
             models=sorted(
@@ -521,6 +551,7 @@ class HermesLiveReader:
             ),
             agents=[AgentUsage(agent=agent, tokens=tokens) for agent, tokens in sorted(by_agent.items())],
             daily=[DayUsage(day=day, tokens=t, rate_limited=r) for day, (t, r) in sorted(by_day.items())],
+            rows=[detail[key] for key in sorted(detail)],
         )
 
 

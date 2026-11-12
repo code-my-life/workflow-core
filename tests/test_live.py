@@ -241,3 +241,154 @@ def test_a_guard_refusal_is_a_blocked_activity_fact(runtime_home, working):
     assert (refused.kind, refused.status, refused.agent, refused.item) == ("guard", "blocked", "coder", CARD)
     assert "rm -rf /tmp/x" in refused.text
     assert refused.at == "2026-11-12T10:00:40.000Z"
+
+
+DAY = 86_400
+# Three days: 2026-11-10, 2026-11-11 and 2026-11-12 (the day of STARTED), UTC.
+DAYS = ("2026-11-10", "2026-11-11", "2026-11-12")
+
+
+def usage_row(base: sqlite3.Connection, model: str, provider: str, at: int, *values) -> None:
+    """One line of the runtime's usage table: calls, input and output tokens, estimated and actual cost."""
+    calls, tokens_in, tokens_out, estimated, actual = values
+    base.execute(
+        "INSERT INTO session_model_usage (session_id, model, billing_provider, api_call_count, input_tokens,"
+        " output_tokens, estimated_cost_usd, actual_cost_usd, first_seen, last_seen)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (f"s-{model}-{at}", model, provider, calls, tokens_in, tokens_out, estimated, actual, at, at),
+    )
+
+
+@pytest.fixture
+def two_agents(runtime_home, working) -> dict[str, sqlite3.Connection]:
+    """`coder` (the working agent) and `gate`, which holds a card of the board too, each with its usage over three
+    days: two models, an actual cost and estimated ones."""
+    write(
+        board_base(runtime_home, "factory"),
+        "INSERT INTO tasks (id, title, status, assignee, created_at)"
+        " VALUES ('t_gate0001', 'La gate', 'todo', 'gate', ?)",
+        STARTED,
+    )
+    gate = make_session_base(runtime_home, "gate")
+    usage_row(working, "glm-5.3", "freellmapi", STARTED + 3600, 4, 1000, 200, 0.5, 0.7)
+    usage_row(working, "glm-5.3", "freellmapi", STARTED - 2 * DAY, 1, 100, 10, 0.1, 0.0)
+    usage_row(working, "claude-opus", "anthropic", STARTED - DAY, 2, 300, 100, 0.2, 0.0)
+    usage_row(gate, "glm-5.3", "freellmapi", STARTED - 2 * DAY + 60, 3, 500, 50, 0.3, 0.4)
+    yield {"coder": working, "gate": gate}
+    gate.close()
+
+
+def failed_call(at: str, error: str, model: str, summary: str) -> str:
+    return (
+        f"{at},000 WARNING [{SESSION}] agent.conversation_loop: API call failed (attempt 1/3) error_type={error}"
+        f" thread=Thread-4 provider=freellmapi base_url=http://127.0.0.1:3001/v1/ model={model} summary={summary}"
+    )
+
+
+def rows_of(usage) -> list[dict]:
+    return [row.model_dump() for row in usage.rows]
+
+
+def row(day, agent, model, provider, calls, tokens_in, tokens_out, cost, rate_limited=0, errors=0) -> dict:
+    return {
+        "day": day,
+        "agent": agent,
+        "model": model,
+        "provider": provider,
+        "calls": calls,
+        "input_tokens": tokens_in,
+        "output_tokens": tokens_out,
+        "cost_usd": cost,
+        "rate_limited": rate_limited,
+        "errors": errors,
+    }
+
+
+def test_usage_rows_per_day_model_and_agent(runtime_home, two_agents):
+    usage = runtime_adapter().make_live_reader().usage(FACTORY, days=7, now=STARTED + 3600 + 60)
+
+    assert rows_of(usage) == [
+        row(DAYS[0], "coder", "glm-5.3", "freellmapi", 1, 100, 10, 0.1),
+        row(DAYS[0], "gate", "glm-5.3", "freellmapi", 3, 500, 50, 0.4),
+        row(DAYS[1], "coder", "claude-opus", "anthropic", 2, 300, 100, 0.2),
+        row(DAYS[2], "coder", "glm-5.3", "freellmapi", 4, 1000, 200, 0.7),
+    ]
+
+
+def test_usage_rows_count_refused_and_failed_calls(runtime_home, two_agents):
+    journal(
+        runtime_home,
+        "coder",
+        [
+            # A 429 and a failed call on a day and a model the agent has usage for.
+            failed_call("2026-11-12 10:30:00", "RateLimitError", "glm-5.3", "HTTP 429: All models rate-limited"),
+            failed_call("2026-11-12 10:31:00", "APIConnectionError", "glm-5.3", "Connection error"),
+            # A 429 on a model without any usage line: it has its own line, without calls or cost.
+            failed_call("2026-11-11 09:00:00", "RateLimitError", "qwen-x", "HTTP 429: rate-limited"),
+        ],
+    )
+
+    usage = runtime_adapter().make_live_reader().usage(FACTORY, days=7, now=STARTED + 3600 + 60)
+
+    rows = rows_of(usage)
+    assert row(DAYS[2], "coder", "glm-5.3", "freellmapi", 4, 1000, 200, 0.7, rate_limited=1, errors=1) in rows
+    assert row(DAYS[1], "coder", "qwen-x", "freellmapi", 0, 0, 0, None, rate_limited=1) in rows
+    assert len(rows) == 5
+
+
+def test_usage_rows_sum_to_the_aggregates(runtime_home, two_agents):
+    journal(
+        runtime_home,
+        "coder",
+        [
+            failed_call("2026-11-12 10:30:00", "RateLimitError", "glm-5.3", "HTTP 429: All models rate-limited"),
+            failed_call("2026-11-11 09:00:00", "RateLimitError", "qwen-x", "HTTP 429: rate-limited"),
+            failed_call("2026-11-10 09:00:00", "APIConnectionError", "claude-opus", "Connection error"),
+        ],
+    )
+    journal(
+        runtime_home,
+        "gate",
+        [failed_call("2026-11-10 12:00:00", "RateLimitError", "glm-5.3", "HTTP 429: rate-limited")],
+    )
+
+    for days in (1, 2, 7):
+        usage = runtime_adapter().make_live_reader().usage(FACTORY, days=days, now=STARTED + 3600 + 60)
+        assert usage.rows, days
+
+        models: dict[tuple[str, str], dict] = {}
+        agents: dict[str, int] = {}
+        daily: dict[str, list[int]] = {}
+        for line in usage.rows:
+            total = models.setdefault(
+                (line.model, line.provider),
+                {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cost": None, "rate_limited": 0, "errors": 0},
+            )
+            for field in ("calls", "input_tokens", "output_tokens", "rate_limited", "errors"):
+                total[field] += getattr(line, field)
+            if line.cost_usd is not None:
+                total["cost"] = (total["cost"] or 0.0) + line.cost_usd
+            tokens = line.input_tokens + line.output_tokens
+            if line.calls or tokens:
+                agents[line.agent] = agents.get(line.agent, 0) + tokens
+            if tokens or line.rate_limited:
+                day = daily.setdefault(line.day, [0, 0])
+                day[0] += tokens
+                day[1] += line.rate_limited
+
+        assert {
+            (usage_.model, usage_.provider): {
+                "calls": usage_.calls,
+                "input_tokens": usage_.input_tokens,
+                "output_tokens": usage_.output_tokens,
+                "cost": None if usage_.cost_usd is None else round(usage_.cost_usd, 6),
+                "rate_limited": usage_.rate_limited,
+                "errors": usage_.errors,
+            }
+            for usage_ in usage.models
+        } == {
+            key: {**total, "cost": None if total["cost"] is None else round(total["cost"], 6)}
+            for key, total in models.items()
+        }, days
+        assert {agent.agent: agent.tokens for agent in usage.agents} == agents, days
+        assert {day.day: [day.tokens, day.rate_limited] for day in usage.daily} == daily, days
