@@ -14,6 +14,7 @@ import re
 from typing import Any
 
 from workflow_core.adapters.hermes.profiles import DEFAULT_REPO_PROFILES
+from workflow_core.adapters.hermes.sessions import resume_session_of
 from workflow_core.model.facts import RuntimeTerms, ToolOutcome
 from workflow_core.text import js_regex, js_trim
 
@@ -24,6 +25,13 @@ HOOK_TIMEOUT_MAX = 600
 TOOL_DEADLINE_DEFAULT = 420
 HOOK_KEY = "plugins.hook_callback_timeout"
 DEADLINE_KEY = "timeouts.tools.sequential_call"
+MAX_TURNS_KEY = "agent.max_turns"
+# `terminal.timeout` by default: the delay of a terminal command.
+TERMINAL_TIMEOUT_DEFAULT = 180
+# The ceiling of a tool call the diagnosis suggests when a tool passed it.
+TOOL_DEADLINE_SUGGESTED = 900
+TERMINAL_TOOL = "terminal"
+NUDGE_MARKER = "Kanban worker tried to exit without a terminal board call"
 
 TERMS = RuntimeTerms(
     runtime_limit_key="max_runtime_seconds",
@@ -33,6 +41,11 @@ TERMS = RuntimeTerms(
     hook_timeout_max=HOOK_TIMEOUT_MAX,
     tool_deadline_default=TOOL_DEADLINE_DEFAULT,
     repo_profiles_default=DEFAULT_REPO_PROFILES,
+    max_turns_key=MAX_TURNS_KEY,
+    terminal_timeout_default=TERMINAL_TIMEOUT_DEFAULT,
+    tool_deadline_suggested=TOOL_DEADLINE_SUGGESTED,
+    terminal_tool=TERMINAL_TOOL,
+    nudge_marker=NUDGE_MARKER,
 )
 
 # A tool's refusal when a `pre_tool_call` hook passes its delay, or has not finished.
@@ -40,6 +53,14 @@ HOOK_TIMEOUT_MESSAGE = "pre_tool_call plugin callback timed out or is still runn
 HOOK_RAISED = js_regex(r"^pre_tool_call plugin callback (\S+) raised ([\w.]+): ([\s\S]*)$")
 TOOL_DEADLINE = js_regex(r"^Error executing tool '([^']+)': timed out after ([\d.]+)s")
 COMMAND_TIMEOUT = js_regex(r"timed out after (\d+)\s*s", re.IGNORECASE)
+# The errors and outputs of the runs (`task_runs.error`, events' payloads). The em dash is part of Hermès' text: it is
+# written by its code point.
+PROTOCOL_VIOLATION = js_regex(
+    r"^worker exited cleanly \(rc=0\) without kanban_complete, kanban_block or kanban_request_review "
+    "\u2014 protocol violation"
+)
+BUDGET = js_regex(r"Iteration budget exhausted \((\d+)\/(\d+)\)")
+RUNTIME = js_regex(r"^elapsed (\d+)s > limit (\d+)s$")
 TRUNCATED_ERROR = js_regex(r'^\{\s*"error"\s*:\s*"((?:[^"\\]|\\.)*)')
 TRUNCATED_EXIT = js_regex(r'"exit_code"\s*:\s*(-?\d+)')
 
@@ -135,6 +156,29 @@ class HermesTexts:
 
     def set_command(self, agent: str, key: str, value: float) -> str:
         return f"hermes -p {agent} config set {key} {_number_text(value)}"
+
+    def is_protocol_violation(self, error: str | None) -> bool:
+        return bool(error) and PROTOCOL_VIOLATION.search(error) is not None
+
+    def was_nudged(self, output: str | None) -> bool:
+        return bool(output) and NUDGE_MARKER in output
+
+    def budget_of(self, text: str | None) -> tuple[int, int] | None:
+        match = BUDGET.search(text) if text else None
+        return (int(match[1]), int(match[2])) if match else None
+
+    def runtime_of(self, text: str | None) -> tuple[int, int] | None:
+        match = _full(RUNTIME, js_trim(text)) if text else None
+        return (int(match[1]), int(match[2])) if match else None
+
+    def resume_session_of(self, text: str | None) -> str | None:
+        return resume_session_of(text)
+
+    def is_breaker_error(self, error: str) -> bool:
+        return "protocol violation" in error
+
+    def is_workspace_error(self, error: str) -> bool:
+        return error.startswith("workspace:")
 
     def plugin_of_module(self, module: str | None) -> str | None:
         """A plugin's name from its Python module (`hermes_plugins.my_plugin` gives `my-plugin`)."""

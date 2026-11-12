@@ -67,7 +67,11 @@ def guard_hook_timeout(episode: Episode) -> list[RawFinding]:
     else:
         observed = terms.hook_timeout_default
     call_input = first_hit.call.input if first_hit.call is not None else None
-    if first_hit.call is not None and first_hit.call.tool == "terminal" and GIT_COMMIT.search(call_input or ""):
+    if (
+        first_hit.call is not None
+        and first_hit.call.tool == terms.terminal_tool
+        and GIT_COMMIT.search(call_input or "")
+    ):
         trigger: str | None = "git commit"
     else:
         trigger = first_hit.call.tool if first_hit.call is not None else None

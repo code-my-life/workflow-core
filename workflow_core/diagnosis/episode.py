@@ -146,6 +146,16 @@ class Episode:
     def observations_of_run(self, run_id: int) -> list[Observation]:
         return [item for item in self.observations if item.run_id == run_id]
 
+    def protocol_violations(self) -> list[RunFact]:
+        """The runs that exited without a kanban call (protocol violation), oldest first."""
+        return [
+            run
+            for run in self.runs
+            if self.texts.is_protocol_violation(run.error)
+            or run.metadata.get("protocol_violation") is True
+            or any(event.kind == "protocol_violation" and event.run_id == run.id for event in self.events)
+        ]
+
     def failed_runs(self) -> list[RunFact]:
         return [run for run in self.runs if run.outcome is not None and run.outcome in FAILED]
 
