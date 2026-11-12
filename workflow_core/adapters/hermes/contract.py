@@ -24,6 +24,13 @@ from workflow_core.adapters.hermes.board import (
     HermesBoardReader,
     make_board_reader,
 )
+from workflow_core.adapters.hermes.profiles import (
+    CONFIG_KEYS,
+    CONFIG_TABLES,
+    MAX_CONFIG_BYTES,
+    config_path,
+    parse_capped,
+)
 from workflow_core.adapters.hermes.sessions import (
     MESSAGE_COLUMNS,
     SESSION_COLUMNS,
@@ -80,6 +87,9 @@ def pragma_problems(db) -> list[str]:
 
 
 # The version output is part of the contract too: its first line must keep the form VERSION_LINE reads.
+
+# The agents' configurations: the YAML keys read (profiles.py), declared here with the tables that hold them.
+CONFIG_DECLARATION = {"tables": CONFIG_TABLES, "keys": CONFIG_KEYS}
 
 # The agents' journals: the header of a line, and the nine kinds of lines the diagnosis reads (agent_log.py).
 JOURNAL_LINE = LOG_LINE
@@ -149,6 +159,39 @@ def session_problems(home: Path) -> list[str]:
     return problems
 
 
+def configs(home: Path) -> list[tuple[str, Path]]:
+    """The configuration in service of each agent under Hermès' home, by agent name."""
+    profiles = home / "profiles"
+    if not profiles.is_dir():
+        return []
+    found = ((folder.name, config_path(home, folder.name)) for folder in sorted(profiles.iterdir()))
+    return [(agent, path) for agent, path in found if path is not None]
+
+
+def _config_gaps(config: dict) -> list[str]:
+    gaps = []
+    for key in CONFIG_TABLES:
+        value: object = config
+        for part in key.split("."):
+            value = value.get(part) if isinstance(value, dict) else None
+        if value is not None and not isinstance(value, dict):
+            gaps.append(f"{key} n'est plus une table")
+    enabled = config.get("plugins", {}).get("enabled") if isinstance(config.get("plugins"), dict) else None
+    if enabled is not None and not isinstance(enabled, list):
+        gaps.append("plugins.enabled n'est plus une liste")
+    return gaps
+
+
+def config_problems(home: Path) -> list[str]:
+    """Every gap between the declared configuration reading and each agent's config.yaml, prefixed by the agent."""
+    problems = []
+    for agent, path in configs(home):
+        config = parse_capped(path, MAX_CONFIG_BYTES)
+        found = ["illisible ou trop gros"] if config is None else _config_gaps(config)
+        problems += [f"agent {agent} : config.yaml : {gap}" for gap in found]
+    return problems
+
+
 def journals(home: Path) -> list[tuple[str, Path]]:
     """The current journal of each agent under Hermès' home, by agent name."""
     profiles = home / "profiles"
@@ -215,6 +258,7 @@ def check_contract(boards: list[str], environ: dict[str, str] | None = None) -> 
     reader = make_board_reader(environ)
     problems = [problem for board in boards for problem in board_problems(reader, board)]
     problems += session_problems(reader.home)
+    problems += config_problems(reader.home)
     problems += journal_problems(reader.home)
     _, version_problem = read_runtime_version()
     if version_problem is not None:

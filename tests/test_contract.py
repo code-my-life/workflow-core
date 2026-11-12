@@ -269,3 +269,18 @@ def test_a_tool_call_without_its_read_fields_breaks_the_contract(runtime_home):
     base.close()
 
     assert check().problems == ["agent coder : appel d'outil sans function.name dans messages.tool_calls"]
+
+
+def test_a_config_of_a_modified_format_breaks_the_contract(runtime_home):
+    from workflow_core.adapters.hermes.contract import CONFIG_KEYS, CONFIG_TABLES
+
+    assert "plugins" in CONFIG_TABLES
+    assert "plugins.hook_callback_timeout" in CONFIG_KEYS
+    profile = runtime_home / "profiles" / "coder"
+    profile.mkdir(parents=True)
+    (profile / "config.yaml").write_text("plugins:\n  enabled: [coder-guard]\n  hook_callback_timeout: 600\n")
+    assert check().ok is True
+
+    (profile / "config.yaml").write_text("plugins:\n  - coder-guard\n")
+
+    assert check().problems == ["agent coder : config.yaml : plugins n'est plus une table"]

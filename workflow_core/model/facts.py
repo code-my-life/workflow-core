@@ -167,3 +167,41 @@ class SessionsPort(Protocol):
     def open_sessions(self, agent: str, at: float) -> list[str] | None:
         """The agent's sessions started before this instant (Unix seconds) and not yet ended."""
         ...
+
+
+class PluginHook(BaseModel):
+    """A hook a plugin plugs (`register_hook("<hook>", <callback>)` in its code), with its registration line as is."""
+
+    plugin: str
+    hook: str
+    callback: str
+    source: str
+
+
+class ProfileFacts(BaseModel):
+    """An agent's configuration in service, and the repository's value of its hooks' delay; `None`: the key is
+    absent, the runtime's default applies."""
+
+    profile: str
+    hook_timeout: float | None
+    tool_deadline: float | None
+    terminal_timeout: float | None
+    max_turns: float | None
+    # Unix seconds of the configuration file's last change.
+    changed_at: float | None
+    # False when the workflow's repository configuration cannot be read: then `repo_hook_timeout` says nothing
+    # (factory-live leaves `repoHookTimeout` out).
+    repo_read: bool
+    repo_hook_timeout: float | None
+    plugins: list[str]
+    hooks: list[PluginHook]
+    # Per active plugin, the longest delay written in its code (the longest command it can run).
+    longest_commands: dict[str, float]
+
+
+class EvidenceFile(BaseModel):
+    """A proof file left by the agent in `evidence/` of its work folder; `at` in Unix seconds."""
+
+    name: str
+    bytes: int
+    at: float
