@@ -50,8 +50,26 @@ kind = "text"
 key = "surfaces"
 label = "Surfaces"
 kind = "table"
-columns = ["label", "kind", "changed", "differences"]
-headers = ["Surface", "Sorte", "Touchée", "Différences"]
+# Each surface, with the commit and the still image of its base and its head (dotted keys). A twin's `stream` (its
+# Neko session, with the viewers' password, and its port on this machine) is never read: no secret leaves the core.
+columns = ["id", "label", "kind", "changed", "differences", "base.sha", "base.poster", "head.sha", "head.poster"]
+headers = [
+  "Identifiant",
+  "Surface",
+  "Sorte",
+  "Touchée",
+  "Différences",
+  "Commit de base",
+  "Image de base",
+  "Commit de tête",
+  "Image de tête",
+]
+
+# The mirror's port on this machine, where factory-live asks a viewer's session (a port is not a secret).
+[[workflow.data.fields]]
+key = "mirror"
+label = "Miroir"
+kind = "text"
 
 # The gate's proofs of a card: one text per rule, NN-<rule>.txt, of its newest pass; in the card's work folder, else in
 # the copy the board keeps.

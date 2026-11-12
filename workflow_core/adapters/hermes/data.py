@@ -165,7 +165,11 @@ class HermesDataReader:
         if subject == "pr":
             return ({"repo": form["repo"], "pr": form["pr"]}, None) if NAME.fullmatch(form["repo"]) else None
         if subject == "card":
-            return ({"card": item}, None) if CARD.fullmatch(item) else None
+            card, _, sha = item.partition("@")
+            if not CARD.fullmatch(card):
+                return None
+            # A commit names the pass of the card to read (the gate's `<sha7>` folder); the others take the card.
+            return ({"card": card, "sha": sha[:7]} if sha else {"card": card}), None
         if subject == "agent":
             return ({"agent": item}, None) if NAME.fullmatch(item) else None
         run_id = int(item)
@@ -273,12 +277,13 @@ class HermesDataReader:
         if field.kind == "status":
             text = value if isinstance(value, str) else str(value)
             return StatusValue(label=field.label, status=field.statuses.get(text, "unknown"), text=text)
-        rows = [[_cell(row.get(column)) for column in field.columns] for row in value if isinstance(row, dict)]
+        rows = [[_cell(_dotted(row, column)) for column in field.columns] for row in value if isinstance(row, dict)]
         headers = field.headers if len(field.headers) == len(field.columns) else list(field.columns)
         return TableValue(label=field.label, columns=headers, rows=rows) if isinstance(value, list) else None
 
     def _texts(self, workflow: Workflow, declaration: DataDeclaration, params: dict[str, str]):
-        """A folder of numbered texts, in their order; a path ending in `*` reads its newest subfolder."""
+        """A folder of numbered texts, in their order; a path ending in `*` reads its newest subfolder, or the one of
+        the subject's commit (`sha`) when it names one."""
         newest_of = any(pattern.endswith("/*") for pattern in declaration.paths)
         folder_declaration = declaration.model_copy(
             update={"path": [pattern.removesuffix("/*") for pattern in declaration.paths]}
@@ -286,7 +291,12 @@ class HermesDataReader:
         folder = self._entry(workflow, folder_declaration, params, "dir")
         if folder is None:
             return []
-        if newest_of:
+        if newest_of and params.get("sha"):
+            # The pass of a given commit: its folder, or nothing.
+            folder = safe_entry(folder, [params["sha"]], "dir") if NAME.fullmatch(params["sha"]) else None
+            if folder is None:
+                return []
+        elif newest_of:
             subfolders = []
             for child in folder.iterdir():
                 entry = safe_entry(folder, [child.name], "dir") if NAME.fullmatch(child.name) else None
