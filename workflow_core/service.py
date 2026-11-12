@@ -17,6 +17,8 @@ from workflow_core.config import Workflow
 from workflow_core.events import JOURNAL_FILE, state_dir
 from workflow_core.model.contract import ContractVerdict
 from workflow_core.model.state import CoreState
+from workflow_core.notify import Notifier, NotifierRunner, NotifySettings
+from workflow_core.notify.register import REGISTER_FILE
 
 # journald reads a leading "<n>" on a service's output as the syslog priority of the line.
 ERROR = "<3>"
@@ -34,6 +36,8 @@ def build_service(
     adapter: ModuleType,
     clock: Callable[[], float] = time.time,
     spy: Callable[[str], Any] | None = None,
+    environ: dict[str, str] | None = None,
+    post_comment: Callable[[str, int, str], str] | None = None,
 ) -> FastAPI:
     """The API, with the core's state after the contract check. A broken contract keeps the observer mode and is
     written to the journal; the service still answers."""
@@ -49,15 +53,34 @@ def build_service(
     else:
         journal(ERROR, f"contrat cassé, mode {state.mode} : " + " ; ".join(verdict.problems))
 
+    reader = adapter.make_board_reader()
+    settings = NotifySettings.from_environ(environ)
+    for line in settings.describe():
+        journal(INFO if settings.on or settings.problem is None else ERROR, line)
+    if post_comment is None:
+        from workflow_core.adapters.github import AppTokens, GitHubClient
+
+        post_comment = GitHubClient(AppTokens(environ=environ)).post_comment
+    notifier = Notifier(
+        workflows=workflows,
+        reader=reader,
+        state=state,
+        settings=settings,
+        post_comment=post_comment,
+        register_path=state_dir(environ) / REGISTER_FILE,
+        clock=clock,
+    )
+
     return create_app(
         secret=secret,
         workflows=workflows,
-        boards=adapter.make_board_reader(),
+        boards=reader,
         state=state,
         watcher=adapter.make_board_watcher(),
         journal_path=state_dir() / JOURNAL_FILE,
         clock=clock,
         spy=spy,
+        background=[NotifierRunner(notifier)],
     )
 
 

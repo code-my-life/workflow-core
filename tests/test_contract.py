@@ -284,3 +284,15 @@ def test_a_config_of_a_modified_format_breaks_the_contract(runtime_home):
     (profile / "config.yaml").write_text("plugins:\n  - coder-guard\n")
 
     assert check().problems == ["agent coder : config.yaml : plugins n'est plus une table"]
+
+
+def test_a_base_missing_the_block_events_breaks_the_contract(runtime_home):
+    # The notifier reads each blocked card's last block event: its id, its kind, its payload and its time.
+    with sqlite3.connect(board_base(runtime_home, "factory")) as db:
+        db.execute("ALTER TABLE task_events DROP COLUMN payload")
+    db.close()
+
+    verdict = check()
+
+    assert verdict.ok is False
+    assert verdict.problems == ["factory: task_events.payload absente"]

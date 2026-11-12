@@ -42,6 +42,10 @@ class Workflow(BaseModel):
     pr_acceptance: str | None = None
     # How a card's body names its branch, as a regular expression whose first group is the branch (multiline).
     body_branch: str | None = None
+    # The notifier (optional): whether the workflow's waits are alerted in their issues, and the assignees whose
+    # blocked cards are not (lanes run by scripts that publish their own message).
+    notify: bool = False
+    notify_skip_assignees: list[str] = Field(default_factory=list)
 
     @property
     def repo_path(self) -> Path | None:
