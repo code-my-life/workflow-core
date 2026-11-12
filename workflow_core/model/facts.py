@@ -85,3 +85,7 @@ class CardFactsReader(Protocol):
     terms: RuntimeTerms
 
     def read_card_facts(self, board: str, card: str) -> CardFacts | None: ...
+
+    def read_board_facts(self, board: str) -> list[CardFacts]:
+        """Every card of the board with its runs and its events."""
+        ...

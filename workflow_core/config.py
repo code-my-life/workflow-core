@@ -18,6 +18,14 @@ class Workflow(BaseModel):
     board: str = Field(min_length=1)
     # The path of the workflow's sheet; `~` is accepted.
     sheet: Path
+    # The diagnosis' triggers (optional). Minutes a ready card held by the active pull request guard waits before it
+    # is a trigger.
+    held_after_minutes: int = Field(default=30, ge=0)
+    # The workflow's conventions for the two kinds of interventions that are not diagnosed, as regular expressions,
+    # case-insensitive: the title of a card whose `needs_input` block is a pull request to approve, and, on such a
+    # card, the block reason of a red main. Without them, every blocked card is diagnosed.
+    approval_card_title: str | None = None
+    main_red_reason: str | None = None
 
     @property
     def sheet_path(self) -> Path:
