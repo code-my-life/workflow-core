@@ -234,3 +234,38 @@ def test_a_journal_line_of_a_modified_format_breaks_the_contract(runtime_home):
         journal.write(f"{moved}\n")
 
     assert check().problems == [f"journal de coder : en-tête de ligne inconnu : « {moved[:80]} »"]
+
+
+def test_a_session_base_of_a_modified_schema_breaks_the_contract(runtime_home):
+    from workflow_core.adapters.hermes.contract import SESSION_CONTRACT
+
+    from conftest import make_session_base
+
+    assert set(SESSION_CONTRACT["messages"].columns) >= {"session_id", "role", "content", "tool_calls", "timestamp"}
+    base = make_session_base(runtime_home, "coder")
+    base.execute("INSERT INTO sessions (id, source, started_at) VALUES ('s1', 'kanban', 1)")
+    calls = '[{"id": "c1", "type": "function", "function": {"name": "terminal", "arguments": "{}"}}]'
+    base.execute(
+        "INSERT INTO messages (session_id, role, tool_calls, timestamp) VALUES ('s1', 'assistant', ?, 2)", (calls,)
+    )
+    assert check().ok is True
+
+    base.execute("DROP INDEX idx_messages_assistant_calls_by_session")
+    base.execute("ALTER TABLE messages DROP COLUMN tool_calls")
+    base.close()
+
+    assert check().problems == ["agent coder : messages.tool_calls absente"]
+
+
+def test_a_tool_call_without_its_read_fields_breaks_the_contract(runtime_home):
+    from conftest import make_session_base
+
+    base = make_session_base(runtime_home, "coder")
+    base.execute("INSERT INTO sessions (id, source, started_at) VALUES ('s1', 'kanban', 1)")
+    renamed = '[{"id": "c1", "type": "function", "fn": {"name": "terminal", "arguments": "{}"}}]'
+    base.execute(
+        "INSERT INTO messages (session_id, role, tool_calls, timestamp) VALUES ('s1', 'assistant', ?, 2)", (renamed,)
+    )
+    base.close()
+
+    assert check().problems == ["agent coder : appel d'outil sans function.name dans messages.tool_calls"]

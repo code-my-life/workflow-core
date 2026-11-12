@@ -115,7 +115,7 @@ def _utf16_length(text: str) -> int:
     return len(text.encode("utf-16-le", "surrogatepass")) // 2
 
 
-def _utf16_slice(text: str, units: int) -> str:
+def utf16_slice(text: str, units: int) -> str:
     return text.encode("utf-16-le", "surrogatepass")[: units * 2].decode("utf-16-le", "surrogatepass")
 
 
@@ -124,4 +124,4 @@ def quote(text: str | None) -> str | None:
     if not text:
         return None
     clean = js_trim(redact_secrets(text))
-    return f"{_utf16_slice(clean, 299)}…" if _utf16_length(clean) > 300 else clean
+    return f"{utf16_slice(clean, 299)}…" if _utf16_length(clean) > 300 else clean

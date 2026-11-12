@@ -6,6 +6,7 @@ declaration with the base of each declared board, opened read-only, and names ev
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from dataclasses import dataclass, field
@@ -22,6 +23,12 @@ from workflow_core.adapters.hermes.board import (
     RUN_FACT_COLUMNS,
     HermesBoardReader,
     make_board_reader,
+)
+from workflow_core.adapters.hermes.sessions import (
+    MESSAGE_COLUMNS,
+    SESSION_COLUMNS,
+    open_session_base,
+    session_base,
 )
 from workflow_core.adapters.hermes.version import read_runtime_version
 from workflow_core.clock import utc_now
@@ -81,6 +88,65 @@ JOURNAL_KINDS = tuple(kind for kind, _, _ in LOG_PATTERNS)
 JOURNAL_TAIL_BYTES = 64 * 1024
 JOURNAL_TAIL_LINES = 20
 _DATED = re.compile(r"^\d{4}-\d{2}-\d{2} ", re.ASCII)
+
+
+# The agents' session bases: the tables and columns read, and the JSON fields read in each tool call (sessions.py).
+SESSION_CONTRACT: dict[str, Table] = {
+    "sessions": Table(columns=SESSION_COLUMNS),
+    "messages": Table(columns=MESSAGE_COLUMNS),
+}
+# The last tool calls checked in each base: each must still carry the fields read.
+SESSION_CALLS_CHECKED = 50
+
+
+def session_bases(home: Path) -> list[tuple[str, Path]]:
+    """The session base of each agent under Hermès' home, by agent name."""
+    profiles = home / "profiles"
+    if not profiles.is_dir():
+        return []
+    found = ((folder.name, session_base(home, folder.name)) for folder in sorted(profiles.iterdir()))
+    return [(agent, path) for agent, path in found if path is not None]
+
+
+def _tool_call_problems(db: sqlite3.Connection) -> list[str]:
+    rows = db.execute(
+        "SELECT c.value FROM (SELECT tool_calls FROM messages WHERE role = 'assistant' AND tool_calls IS NOT NULL "
+        "AND json_valid(tool_calls) AND json_type(tool_calls) = 'array' ORDER BY id DESC LIMIT ?) m, "
+        "json_each(m.tool_calls) c",
+        (SESSION_CALLS_CHECKED,),
+    ).fetchall()
+    problems = []
+    for (value,) in rows:
+        try:
+            call = json.loads(value)
+        except (TypeError, ValueError):
+            call = None
+        function = call.get("function") if isinstance(call, dict) else None
+        if not isinstance(function, dict) or not isinstance(function.get("name"), str):
+            problems.append("appel d'outil sans function.name dans messages.tool_calls")
+        elif not isinstance(call.get("id"), str) and not isinstance(call.get("call_id"), str):
+            problems.append("appel d'outil sans id ni call_id dans messages.tool_calls")
+    return sorted(set(problems))
+
+
+def session_problems(home: Path) -> list[str]:
+    """Every gap between the declared session reading and the base of each agent, prefixed by the agent."""
+    problems = []
+    for agent, path in session_bases(home):
+        try:
+            db = open_session_base(path)
+            try:
+                found = [
+                    problem for name, table in SESSION_CONTRACT.items() for problem in _table_problems(db, name, table)
+                ]
+                if not found:
+                    found = _tool_call_problems(db)
+            finally:
+                db.close()
+        except sqlite3.Error as error:
+            found = [f"base illisible ({error})"]
+        problems += [f"agent {agent} : {problem}" for problem in found]
+    return problems
 
 
 def journals(home: Path) -> list[tuple[str, Path]]:
@@ -148,6 +214,7 @@ def check_contract(boards: list[str], environ: dict[str, str] | None = None) -> 
     """Check the contract against the base of each named board, read-only, and against the version output."""
     reader = make_board_reader(environ)
     problems = [problem for board in boards for problem in board_problems(reader, board)]
+    problems += session_problems(reader.home)
     problems += journal_problems(reader.home)
     _, version_problem = read_runtime_version()
     if version_problem is not None:

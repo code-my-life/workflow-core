@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from pathlib import Path
 
@@ -240,3 +241,28 @@ def make_runtime_board(
                 db.execute(f"INSERT INTO {table} ({columns}) VALUES ({', '.join('?' * len(row))})", tuple(row.values()))
     db.close()
     return base
+
+
+def runtime_schema(name: str, tables: list[str]) -> str:
+    """The statements of tests/fixtures/hermes-schema/<name>.sql that create these tables and their indexes, as
+    factory-live's `schemaFor` keeps them: the full schema also holds tables its virtual tables create themselves."""
+    sql = (Path(__file__).resolve().parent / "fixtures" / "hermes-schema" / f"{name}.sql").read_text(encoding="utf-8")
+    kept = []
+    for statement in re.split(r";\s*\n", sql):
+        statement = re.sub(r"^(\s*--.*\n)+", "", statement).strip()
+        table = re.match(r"^CREATE TABLE (\w+)", statement)
+        index = re.match(r"^CREATE INDEX \w+\s+ON (\w+)", statement)
+        if (table and table[1] in tables) or (index and index[1] in tables):
+            kept.append(f"{statement};")
+    return "\n".join(kept)
+
+
+def make_session_base(home: Path, agent: str) -> sqlite3.Connection:
+    """Create `<home>/profiles/<agent>/state.db` in WAL mode with the runtime's `sessions` and `messages` tables, and
+    return a writing connection for the test to fill."""
+    folder = home / "profiles" / agent
+    folder.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(folder / "state.db", isolation_level=None)
+    db.execute("PRAGMA journal_mode=wal")
+    db.executescript(runtime_schema("state", ["sessions", "messages"]))
+    return db

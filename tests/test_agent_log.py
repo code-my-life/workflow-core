@@ -188,3 +188,20 @@ def test_a_skipped_spring_hour_keeps_the_old_offset_and_an_unknown_format_is_ref
     assert zoned_epoch("2026-03-29 02:30:00", 0, PARIS) == utc("2026-03-29T01:30:00Z")
     assert zoned_epoch("2026-07-14 12:00:00", 250, PARIS) == utc("2026-07-14T10:00:00.250Z")
     assert zoned_epoch("29/10/2026 09:46:10", 0, PARIS) is None
+
+
+def test_a_line_without_session_takes_the_only_session_open_in_the_session_base(home, logs):
+    from workflow_core.adapters.hermes.agent_log import make_agent_log_reader
+
+    from conftest import make_session_base
+
+    base = make_session_base(home, "coder")
+    # Open from 08:59 Paris time (07:59 UTC) to 09:30, and nothing at 10:00.
+    for row in ((SESSION, utc("2026-10-29T07:59:00Z"), utc("2026-10-29T08:30:00Z")),):
+        base.execute("INSERT INTO sessions (id, source, started_at, ended_at) VALUES (?, 'kanban', ?, ?)", row)
+    base.close()
+    (logs / "agent.log").write_text(f"{bare('09:00:00')}\n{bare('10:00:00')}\n")
+
+    reader = make_agent_log_reader({"HERMES_HOME": str(home), "HERMES_TZ": PARIS})
+
+    assert [fact.session_id for fact in reader.facts("coder", *ALL)] == [SESSION, None]
