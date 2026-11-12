@@ -87,3 +87,39 @@ def test_a_quote_is_kept_as_is_with_secrets_masked_and_cut_at_300():
     assert quote("") is None
     assert "ghp_ABCDEF" not in quote("jeton ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
     assert len(quote("x" * 400)) == 300
+
+
+def test_an_exit_without_kanban_call_and_the_runtime_retry_are_recognised():
+    assert TEXTS.is_protocol_violation(
+        "worker exited cleanly (rc=0) without kanban_complete, kanban_block or kanban_request_review "
+        "\u2014 protocol violation. If…"
+    )
+    assert not TEXTS.is_protocol_violation(None)
+    assert TEXTS.was_nudged("⚠️ Kanban worker tried to exit without a terminal board call (…) nudging to finish")
+    assert not TEXTS.was_nudged(None)
+
+
+def test_the_turn_budget_the_runtime_limit_and_the_run_session_are_read():
+    assert TEXTS.budget_of(
+        "Iteration budget exhausted (150/150) \u2014 task could not complete within the allowed iterations"
+    ) == (150, 150)
+    assert TEXTS.budget_of(None) is None
+    assert TEXTS.runtime_of("elapsed 7300s > limit 7200s") == (7300, 7200)
+    assert TEXTS.runtime_of("autre chose") is None
+    assert TEXTS.resume_session_of("Resume this session with: hermes --resume 20261029_091353_0a2b3f -p coder") == (
+        "20261029_091353_0a2b3f"
+    )
+    assert TEXTS.resume_session_of(None) is None
+
+
+def test_a_tool_deadline_and_a_command_timeout_are_recognised():
+    assert classify("Error executing tool 'terminal': timed out after 420.0s") == {
+        "kind": "tool_deadline",
+        "tool": "terminal",
+        "seconds": 420,
+    }
+    assert classify('{"output": "[Command timed out after 900s]", "exit_code": 124, "error": null}') == {
+        "kind": "command_timeout",
+        "seconds": 900,
+    }
+    assert classify('{"output": "", "exit_code": 124, "error": null}') == {"kind": "command_timeout"}

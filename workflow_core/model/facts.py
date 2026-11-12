@@ -84,6 +84,13 @@ class RuntimeTerms(BaseModel):
     tool_deadline_default: float
     # Where a workflow's repository keeps its agents' profiles when its entry does not say.
     repo_profiles_default: str
+    # The agent's setting of its turns, the terminal's default delay, and the ceiling of a tool call to suggest.
+    max_turns_key: str
+    terminal_timeout_default: float
+    tool_deadline_suggested: float
+    # The terminal's tool name, and the runtime's sentence when it retries a worker that exits without a kanban call.
+    terminal_tool: str
+    nudge_marker: str
 
 
 class CardFactsReader(Protocol):
@@ -270,4 +277,32 @@ class RuntimeTexts(Protocol):
 
     def plugin_of_module(self, module: str | None) -> str | None:
         """A plugin's name from its Python module, as the runtime names it."""
+        ...
+
+    def is_protocol_violation(self, error: str | None) -> bool:
+        """A run's error says the worker exited without a terminal kanban call."""
+        ...
+
+    def was_nudged(self, output: str | None) -> bool:
+        """The runtime retried the worker so it hands the card back before it exits."""
+        ...
+
+    def budget_of(self, text: str | None) -> tuple[int, int] | None:
+        """The turns used and allowed, from an exhausted budget's text."""
+        ...
+
+    def runtime_of(self, text: str | None) -> tuple[int, int] | None:
+        """The elapsed and allowed seconds, from a run's maximum duration error."""
+        ...
+
+    def resume_session_of(self, text: str | None) -> str | None:
+        """The session a run's output names to resume it."""
+        ...
+
+    def is_breaker_error(self, error: str) -> bool:
+        """A give-up's error says the breaker tripped on protocol violations."""
+        ...
+
+    def is_workspace_error(self, error: str) -> bool:
+        """A spawn failure's error is about the card's work folder."""
         ...

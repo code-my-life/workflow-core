@@ -14,7 +14,7 @@ from workflow_core.adapters.hermes.agent_log import AgentLogReader, zoned_epoch
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "diagnosis"
 PARIS = "Europe/Paris"
 SESSION = "20261029_093652_fc383d"
-DASH = "—"
+DASH = "\u2014"
 
 # The lines of factory-live#2, as the runtime wrote them (Paris time, no time zone).
 TIMEOUT = (
