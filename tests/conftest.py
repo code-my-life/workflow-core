@@ -219,6 +219,18 @@ def own_state_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("WORKFLOW_CORE_STATE_DIR", str(tmp_path / "state"))
 
 
+@pytest.fixture(autouse=True)
+def no_real_github(tmp_path, monkeypatch):
+    """No test ever reads the machine's `.env` for the App, nor reaches api.github.com: a client a test does not
+    replace finds no App and an address where nothing answers."""
+    import workflow_core.adapters.github as github
+
+    monkeypatch.setattr(github, "ENV_FILE", tmp_path / "no-core.env")
+    monkeypatch.setattr(github, "API_URL", "http://127.0.0.1:9")
+    for name in ("GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY_PATH"):
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture
 def runtime_home(tmp_path, monkeypatch) -> Path:
     """A runtime home with the boards `factory` and `studio`, named by the runtime's own variable, and a fake runtime

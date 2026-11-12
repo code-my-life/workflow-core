@@ -76,10 +76,10 @@ def read_env_file(path: Path) -> dict[str, str]:
     return values
 
 
-def setting(name: str, environ: dict[str, str] | None = None, env_file: Path = ENV_FILE) -> str | None:
+def setting(name: str, environ: dict[str, str] | None = None, env_file: Path | None = None) -> str | None:
     """A variable of the environment, else of the core's `.env`; `None` when empty in both."""
     env = os.environ if environ is None else environ
-    return env.get(name) or read_env_file(env_file).get(name) or None
+    return env.get(name) or read_env_file(env_file if env_file is not None else ENV_FILE).get(name) or None
 
 
 def _b64(data: bytes) -> str:
@@ -118,16 +118,17 @@ class AppTokens:
         self,
         *,
         environ: dict[str, str] | None = None,
-        env_file: Path = ENV_FILE,
+        env_file: Path | None = None,
         cache_dir: Path | None = None,
-        api_url: str = API_URL,
+        api_url: str | None = None,
         org: str = ORG,
         clock: Callable[[], float] = time.time,
     ) -> None:
         self.environ = environ
-        self.env_file = env_file
+        # Read when the tokens are made, so that the tests can point every client elsewhere.
+        self.env_file = env_file if env_file is not None else ENV_FILE
         self.cache_dir = cache_dir if cache_dir is not None else state_dir(environ)
-        self.api_url = api_url.rstrip("/")
+        self.api_url = (api_url if api_url is not None else API_URL).rstrip("/")
         self.org = org
         self.clock = clock
 

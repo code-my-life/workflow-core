@@ -13,7 +13,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from workflow_core.adapters.github import API_URL, ENV_FILE, AppConfigError, AppTokens, GitHubClient, GitHubError
+from workflow_core.adapters.github import AppConfigError, AppTokens, GitHubClient, GitHubError
 
 CHECKED_REPO = "code-my-life/workflow-core"
 
@@ -22,8 +22,8 @@ def main(
     argv: list[str] | None = None,
     *,
     environ: dict[str, str] | None = None,
-    env_file: Path = ENV_FILE,
-    api_url: str = API_URL,
+    env_file: Path | None = None,
+    api_url: str | None = None,
     out: Callable[[str], None] = print,
     err: Callable[[str], None] = lambda line: print(line, file=sys.stderr),
 ) -> int:

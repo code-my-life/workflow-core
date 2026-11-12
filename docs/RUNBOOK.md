@@ -93,3 +93,18 @@ elle sort toujours en code 0.
 
 Réessayer à la main, dans `~/perso/workflow-core` : `set -a; . ~/.config/workflow-core/.env; set +a`, puis
 `.venv/bin/python -m workflow_core.notify.outage`.
+
+## L'issue du contrat cassé
+
+Au démarrage, quand le test de contrat échoue, le socle passe en observateur et ouvre dans
+`code-my-life/workflow-core` l'issue « Le contrat du socle avec Hermès est cassé », signée par l'App. Elle porte la
+marque `<!-- workflow-core:contrat -->`, la version d'Hermès lue, l'heure du test et chaque problème trouvé. C'est la
+seule écriture du socle en observateur, et elle part même notificateur éteint.
+
+- Une issue de contrat cassé déjà ouverte reçoit un commentaire à chaque démarrage, au lieu d'une seconde issue ; une
+  issue fermée depuis moins de 24 heures est rouverte et commentée.
+- Au premier démarrage où le contrat tient de nouveau, l'issue reçoit « Le contrat avec Hermès tient de nouveau » et se
+  ferme.
+- Son numéro est noté dans `~/.local/state/workflow-core/contract-issue.json` (`{"issue": <numéro> | null}`).
+- GitHub injoignable ou App absente : le journal du service le dit (`journalctl --user -u workflow-core.service`), le
+  socle reste en observateur, et le démarrage suivant réessaie (`systemctl --user restart workflow-core.service`).
