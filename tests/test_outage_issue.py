@@ -264,3 +264,61 @@ def test_the_watchdog_unit_runs_the_outage_command_after_the_probe():
         "ExecStartPost=%h/perso/workflow-core/.venv/bin/python -m workflow_core.notify.outage",
     ]
     assert "Type=oneshot" in lines
+
+
+class PagedGitHub(FakeGitHub):
+    """The same fake GitHub, whose issue list is served by pages of 100 with GitHub's `Link` header: 100 recent issues
+    without a marker come first, the outage issue after them."""
+
+    queries: ClassVar[list[str]] = []
+
+    def _route(self, method: str) -> None:
+        url = urlparse(self.path)
+        if url.path == f"{REPO}/issues" and method == "GET":
+            FakeGitHub.calls.append((method, self.path))
+            PagedGitHub.queries.append(url.query)
+            query = dict(part.split("=", 1) for part in url.query.split("&") if "=" in part)
+            page = int(query.get("page", "1"))
+            listed = [{k: v for k, v in i.items() if k != "comments"} for i in FakeGitHub.issues]
+            data = json.dumps(listed[(page - 1) * 100 : page * 100]).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            if page * 100 < len(listed):
+                base = f"http://{self.headers['Host']}{url.path}?{url.query.split('&page=')[0]}"
+                self.send_header("Link", f'<{base}&page={page + 1}>; rel="next"')
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        super()._route(method)
+
+
+def test_an_open_outage_issue_beyond_the_first_page_is_commented_not_duplicated(tmp_path, github):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), PagedGitHub)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    github.tokens.api_url = f"http://127.0.0.1:{server.server_address[1]}"
+    PagedGitHub.queries = []
+    recent = [
+        {
+            "number": n,
+            "title": f"Issue {n}",
+            "body": "Rien.",
+            "state": "open",
+            "closed_at": None,
+            "user": {"login": BOT},
+            "comments": [],
+        }
+        for n in range(1, 101)
+    ]
+    FakeGitHub.issues = [*recent, outage_issue(150, "open")]
+    state = tmp_path / "state"
+    watchdog(state, "2026-11-11T20:00:00+00:00", True)
+    try:
+        code, _ = passage(state, github, START + timedelta(minutes=5))
+    finally:
+        server.shutdown()
+
+    assert code == 0
+    assert len(FakeGitHub.issues) == 101
+    assert len(FakeGitHub.issues[100]["comments"]) == 1
+    assert noted(state) == 150
