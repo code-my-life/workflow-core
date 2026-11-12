@@ -1,0 +1,6 @@
+{
+  "repo": "code-my-life/factory-live",
+  "commit": "d47f235b0b717a7e6154e6f2fa866405fea15003",
+  "path": "packages/domain/src/diagnosis/incidents.fixture-builder.test-helpers.ts",
+  "export": "incidentInput('hookTimeout'), JSON.stringify, clés triées, tirets cadratins écrits \\u2014"
+}

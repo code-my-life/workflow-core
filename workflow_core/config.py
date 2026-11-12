@@ -39,6 +39,8 @@ class Workflow(BaseModel):
     default_agent: str | None = None
     relay_agent: str | None = None
     pr_acceptance: str | None = None
+    # How a card's body names its branch, as a regular expression whose first group is the branch (multiline).
+    body_branch: str | None = None
 
     @property
     def repo_path(self) -> Path | None:

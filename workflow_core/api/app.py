@@ -14,14 +14,15 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.exceptions import HTTPException
 
-from workflow_core.clock import utc_now
+from workflow_core.clock import iso_ms, utc_now
 from workflow_core.config import Workflow
-from workflow_core.diagnosis import diagnose, input_of
+from workflow_core.diagnosis import diagnose_board, diagnose_card
 from workflow_core.events import BoardWatcher, EventHub
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
 from workflow_core.model.diagnosis import diagnosis_json
-from workflow_core.model.facts import CardFactsReader
+from workflow_core.model.facts import CardFactsReader, DiagnosisSources
 from workflow_core.model.state import CoreState
+from workflow_core.model.triggers import Trigger
 from workflow_core.sheets import InvalidSheetError, SheetUnavailableError, read_sheet, sheet_json
 
 # The version of the API's contract (ADR 0018): within it, responses only gain optional fields.
@@ -53,6 +54,7 @@ def create_app(
     workflows: dict[str, Workflow],
     boards: BoardReader,
     facts: CardFactsReader | None = None,
+    sources: DiagnosisSources | None = None,
     state: CoreState | None = None,
     watcher: BoardWatcher | None = None,
     journal_path: Path | None = None,
@@ -60,10 +62,12 @@ def create_app(
     spy: Callable[[str], Any] | None = None,
 ) -> FastAPI:
     """The API. With a board watcher and a journal path, it also probes the boards and serves GET /api/events. The
-    facts of a card, for its diagnosis, are read by `facts`, by default the board reader itself."""
+    facts of a card, for its diagnosis, are read by `facts`, by default the board reader itself, and the other
+    sources of the diagnosis by `sources`, by default the board reader's."""
     if not secret:
         raise ValueError("the shared secret is empty")
     card_facts: CardFactsReader = facts if facts is not None else boards
+    diagnosis_sources: DiagnosisSources = sources if sources is not None else card_facts.diagnosis_sources()
     expected = secret.encode("utf-8")
     hub: EventHub | None = None
 
@@ -181,19 +185,45 @@ def create_app(
         }
         return with_cursor(payload, cursor)
 
+    def trigger_json(trigger: Trigger) -> dict:
+        # The core's keys, as the rest of its API; only the diagnosis follows factory-live's contract.
+        return {
+            "id": trigger.id,
+            "kind": trigger.kind,
+            "event": trigger.event,
+            "opened_at": iso_ms(trigger.opened_at),
+            "agent": trigger.agent,
+        }
+
     @app.get("/api/workflows/{key}/items/{item}/diagnosis")
     def diagnosis(key: str, item: str) -> dict:
-        # Computed on demand, from the card's facts read in one short read transaction (ADR 0012).
+        # Computed on demand, for a card that is a trigger (ADR 0012); another card has no diagnosis.
         workflow = declared(key)
         found = card_facts.read_card_facts(workflow.board, item)
         if found is None:
             raise UnknownItemError(workflow.board, item)
-        computed = diagnose(input_of(found, workflow.board, clock()), card_facts.texts, workflow)
+        computed = diagnose_card(found, workflow, clock(), diagnosis_sources)
+        trigger, result = computed if computed is not None else (None, None)
         return {
             "schema_version": SCHEMA_VERSION,
             "workflow": workflow.key,
             "item": item,
-            "diagnosis": diagnosis_json(computed) if computed is not None else None,
+            "trigger": trigger_json(trigger) if trigger is not None else None,
+            "diagnosis": diagnosis_json(result) if result is not None else None,
+        }
+
+    @app.get("/api/workflows/{key}/diagnoses")
+    def diagnoses(key: str) -> dict:
+        # Every trigger of the board with its diagnosis, by opening time.
+        workflow = declared(key)
+        cards = card_facts.read_board_facts(workflow.board)
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "workflow": workflow.key,
+            "diagnoses": [
+                {"item": trigger.card, "trigger": trigger_json(trigger), "diagnosis": diagnosis_json(result)}
+                for trigger, result in diagnose_board(cards, workflow, clock(), diagnosis_sources)
+            ],
         }
 
     @app.get("/api/events")
