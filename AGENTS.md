@@ -18,6 +18,7 @@ sont dans `docs/decisions/`, une par fichier (ADR 0001 à 0019).
 | Bout en bout | aucun |
 | Lint et format | `uv run ruff check` et `uv run ruff format --check` |
 | Hermès confiné | `python3 scripts/check_runtime_confined.py` |
+| Jeton de l'App GitHub (sans le service) | `uv run python -m workflow_core.adapters.github token` ou `check` (voir `docs/RUNBOOK.md`) |
 | Test de contrat (Hermès installé) | `uv run pytest tests/contract -rs` (sauté sans base de board, comme en CI) |
 | JSON Schema de la fiche | `uv run python scripts/write_sheet_schema.py` (après un changement de la forme) |
 | JSON Schema du diagnostic | `uv run python scripts/write_diagnosis_schema.py` (après un changement du contrat `Diagnosis` : réécrit `schema/diagnosis.schema.json` et `schema/run-verdicts.schema.json`) |

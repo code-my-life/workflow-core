@@ -1,0 +1,155 @@
+"""The notifier's pass: every 30 seconds in the service, one alert in its issue for each wait of a workflow whose
+entry asks for it (`notify = true`), never twice for the same key, and nothing at all when switched off or when the
+contract is broken (ADR 0009, ADR 0019).
+
+A wait is a blocked card, recognised by the diagnosis' triggers (one rule in the repository): its key is
+`<workflow>:<trigger id>`, `factory:needs_input:t_ab12cd34:5509`.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import sys
+import time
+from collections.abc import Callable
+from pathlib import Path
+from typing import Protocol
+
+from workflow_core.config import Workflow
+from workflow_core.diagnosis.triggers import trigger_of
+from workflow_core.model.board import BoardUnavailableError
+from workflow_core.model.facts import CardFacts
+from workflow_core.model.state import CoreState
+from workflow_core.notify.alerts import blocked_alert, parse_issue
+from workflow_core.notify.register import AlertRegister
+from workflow_core.notify.settings import NotifySettings
+
+PASS_SECONDS = 30.0
+# The triggers of a blocked card that are alerted.
+BLOCKED_KINDS = frozenset({"needs_input", "capability", "transient", "gave_up"})
+
+
+class WaitReader(Protocol):
+    """What the notifier reads of a board, through the runtime's adapter."""
+
+    def read_board_facts(self, board: str) -> list[CardFacts]: ...
+
+    def read_issue_urls(self, board: str) -> dict[str, str | None]: ...
+
+
+def journal_line(line: str) -> None:
+    # journald reads a leading "<n>" as the priority of the line; lines without one are information.
+    print(line if line.startswith("<") else f"<6>{line}", file=sys.stderr, flush=True)
+
+
+class Notifier:
+    def __init__(
+        self,
+        *,
+        workflows: dict[str, Workflow],
+        reader: WaitReader,
+        state: CoreState,
+        settings: NotifySettings,
+        post_comment: Callable[[str, int, str], str],
+        register_path: Path,
+        clock: Callable[[], float] = time.time,
+        log: Callable[[str], None] = journal_line,
+    ) -> None:
+        self.workflows = [workflow for workflow in workflows.values() if workflow.notify]
+        self.reader = reader
+        self.state = state
+        self.settings = settings
+        self.post_comment = post_comment
+        self.register = AlertRegister(register_path)
+        self.clock = clock
+        self.log = log
+        self._told_without_issue: set[tuple[str, str]] = set()
+
+    def run_pass(self) -> None:
+        """One pass over every notified workflow. Never raises: a failure is written to the journal, and the key is
+        not noted, so the next pass tries again."""
+        if not self.settings.on or self.state.mode != "normal":
+            return
+        for workflow in self.workflows:
+            try:
+                self._workflow_pass(workflow)
+            except BoardUnavailableError as error:
+                self.log(f"<3>workflow-core: notificateur, {workflow.key} : {error}")
+            except Exception as error:  # never an exception out of the pass
+                self.log(f"<3>workflow-core: notificateur, {workflow.key} : {type(error).__name__}: {error}")
+
+    def _workflow_pass(self, workflow: Workflow) -> None:
+        now = self.clock()
+        cards = self.reader.read_board_facts(workflow.board)
+        issues: dict[str, str | None] | None = None
+        for facts in cards:
+            card = facts.card
+            if card.status != "blocked" or card.assignee in workflow.notify_skip_assignees:
+                continue
+            trigger = trigger_of(facts, workflow, now)
+            if trigger is None or trigger.kind not in BLOCKED_KINDS:
+                continue
+            if trigger.opened_at < self.settings.since:
+                continue
+            key = f"{workflow.key}:{trigger.id}"
+            if self.register.has(key):
+                continue
+            if issues is None:
+                issues = self.reader.read_issue_urls(workflow.board)
+            issue = issues.get(card.id)
+            parsed = parse_issue(issue) if issue else None
+            if parsed is None:
+                if (workflow.key, card.id) not in self._told_without_issue:
+                    self._told_without_issue.add((workflow.key, card.id))
+                    self.log(
+                        f"workflow-core: notificateur, carte {card.id} de {workflow.key} sans issue : pas d'alerte"
+                    )
+                continue
+            owner, repo, number = parsed
+            if self.settings.repos is not None and f"{owner}/{repo}" not in self.settings.repos:
+                continue
+            event = next((item for item in facts.events if item.id == trigger.event), None)
+            reason = event.payload.get("reason") if event is not None else None
+            body = blocked_alert(
+                key=key,
+                workflow=workflow.key,
+                kind=trigger.kind,
+                issue=issue,
+                card=card.id,
+                title=card.title,
+                question=reason if isinstance(reason, str) else "",
+                live_url=self.settings.live_url,
+            )
+            try:
+                url = self.post_comment(f"{owner}/{repo}", number, body)
+            except Exception as error:
+                self.log(f"<3>workflow-core: notificateur, alerte {key} non postée sur {issue} : {error}")
+                continue
+            self.register.note(key, url)
+            self.log(f"workflow-core: notificateur, alerte {key} postée : {url}")
+
+
+class NotifierRunner:
+    """Runs the notifier's pass every 30 seconds in the service, off the event loop."""
+
+    def __init__(self, notifier: Notifier, every: float = PASS_SECONDS) -> None:
+        self.notifier = notifier
+        self.every = every
+        self._task: asyncio.Task | None = None
+
+    async def _loop(self) -> None:
+        while True:
+            await asyncio.to_thread(self.notifier.run_pass)
+            await asyncio.sleep(self.every)
+
+    async def start(self) -> None:
+        if self.notifier.settings.on and self._task is None:
+            self._task = asyncio.create_task(self._loop())
+
+    async def stop(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+            self._task = None

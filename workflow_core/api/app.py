@@ -61,10 +61,12 @@ def create_app(
     journal_path: Path | None = None,
     clock: Callable[[], float] = time.time,
     spy: Callable[[str], Any] | None = None,
+    background: list[Any] = (),
 ) -> FastAPI:
     """The API. With a board watcher and a journal path, it also probes the boards and serves GET /api/events. The
     facts of a card, for its diagnosis, are read by `facts`, by default the board reader itself, and the other
-    sources of the diagnosis by `sources`, by default the board reader's."""
+    sources of the diagnosis by `sources`, by default the board reader's. `background` holds tasks started and
+    stopped with the service (each with `async start()` and `async stop()`), such as the notifier."""
     if not secret:
         raise ValueError("the shared secret is empty")
     card_facts: CardFactsReader = facts if facts is not None else boards
@@ -76,9 +78,13 @@ def create_app(
     async def lifespan(app: FastAPI):
         if hub is not None:
             await hub.start()
+        for task in background:
+            await task.start()
         try:
             yield
         finally:
+            for task in reversed(background):
+                await task.stop()
             if hub is not None:
                 await hub.stop()
 

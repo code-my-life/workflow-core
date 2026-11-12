@@ -1,0 +1,66 @@
+# RUNBOOK du socle
+
+Ce qu'il faut savoir pour faire tourner le socle sur la machine. Le service et le chien de garde s'installent par
+`scripts/install.sh` (voir `AGENTS.md`, « Commandes ») ; leur `.env` est `~/.config/workflow-core/.env`, en mode 600,
+jamais dans le dépôt (ADR 0002).
+
+## L'App GitHub
+
+Le socle poste ses alertes sous l'identité de l'App GitHub `code-my-life-factory` (ADR 0009). Il fabrique lui-même
+ses jetons d'installation sur l'organisation `code-my-life` : il ne lit jamais le cache de jeton de la factory.
+
+### Variables du `.env` du socle
+
+| Variable | Rôle |
+|---|---|
+| `GITHUB_APP_ID` | L'identifiant de l'App. |
+| `GITHUB_APP_PRIVATE_KEY_PATH` | Le chemin de sa clé privée (PEM). La clé reste où elle est jusqu'à l'epic « Le socle administre Hermès ». |
+| `WORKFLOW_CORE_NOTIFY` | L'interrupteur du notificateur : `on` l'allume ; absent ou toute autre valeur, il est éteint et ne lit rien. |
+| `WORKFLOW_CORE_NOTIFY_SINCE` | L'heure d'allumage, ISO 8601 avec son décalage (`2026-11-20T14:05:00+01:00`), obligatoire avec `on` : seules les attentes ouvertes après elle sont alertées. Absente ou illisible, le notificateur reste éteint. |
+| `WORKFLOW_CORE_NOTIFY_REPOS` | Facultative : les dépôts (`code-my-life/workflow-core,…`) dont les issues peuvent recevoir une alerte ; vide, tous. Sert à l'essai sur une issue de test. |
+| `WORKFLOW_CORE_LIVE_URL` | L'adresse de factory-live, pour le lien vers l'élément ; sans elle, l'alerte n'a pas de lien. |
+
+Les deux premières sont lues dans l'environnement, sinon dans le `.env` ; les quatre autres, dans l'environnement du
+service (le `.env`, chargé par l'unité systemd). Au démarrage, le journal du service dit l'état de l'interrupteur, ses
+dépôts, son heure, et l'absence du lien : `journalctl --user -u workflow-core.service --since "-2 min"`.
+
+### Le cache du jeton
+
+`~/.local/state/workflow-core/app-token.json` (dossier d'état du socle), en mode 600, écrit sous verrou
+(`app-token.lock`). Le jeton est renouvelé quand il lui reste moins de 10 minutes. Le supprimer force un jeton neuf.
+
+### Les deux commandes, sans le service
+
+Dans `~/perso/workflow-core` :
+
+- `uv run python -m workflow_core.adapters.github token` imprime un jeton (celui du cache s'il est encore bon) ;
+- `uv run python -m workflow_core.adapters.github check` imprime, sans le jeton, son heure d'expiration, les
+  permissions de l'installation, et si `code-my-life/workflow-core` lui est accessible.
+
+Sans identifiant ni clé, ou avec une clé introuvable, les deux sortent en code 1 avec un message qui nomme la variable
+en cause.
+
+### Ce que le socle appelle sur GitHub
+
+Dans l'epic du notificateur : lire et écrire des commentaires d'issue (`POST /repos/{dépôt}/issues/{n}/comments`).
+Pour fabriquer le jeton : `GET /orgs/code-my-life/installation` et `POST /app/installations/{id}/access_tokens`.
+
+### Permissions accordées à l'App
+
+À compléter par la tâche du propriétaire qui suit l'issue de l'alerte d'une carte bloquée
+(code-my-life/workflow-core#41) : chaque permission, son niveau, et ce qui s'en sert (socle ou factory).
+
+## Le notificateur
+
+Toutes les 30 secondes, une passe lit les cartes des workflows dont l'entrée de `config/workflows.toml` porte
+`notify = true` (seulement `factory`). Une carte bloquée reçoit une alerte dans son issue, sauf un blocage
+`dependency` et une carte assignée à une voie de `notify_skip_assignees`. Chaque alerte finit par la marque cachée
+`<!-- workflow-core:attente <clé> -->`, et sa clé est notée dans `~/.local/state/workflow-core/alerts.db` : une clé
+notée n'est jamais repostée.
+
+Rien n'est posté interrupteur éteint, ni en mode observateur (test de contrat échoué, ADR 0019). Un commentaire
+refusé par GitHub est écrit au journal et réessayé à la passe suivante. Une carte sans issue est dite une fois au
+journal.
+
+Éteindre le notificateur : retirer `WORKFLOW_CORE_NOTIFY` du `.env`, puis
+`systemctl --user restart workflow-core.service`.

@@ -100,6 +100,7 @@ OTHER_TABLES = (
 )
 RUN_COLUMNS = ("id", "task_id", "profile", "status", "outcome", "started_at", "ended_at", "summary")
 COMMENT_COLUMNS = ("id", "task_id", "author", "body", "created_at")
+EVENT_COLUMNS = ("id", "task_id", "run_id", "kind", "payload", "created_at")
 
 FACTORY_RUNS = [
     {
@@ -169,6 +170,7 @@ def make_board(
     runs: list[dict] = (),
     links: list[tuple[str, str]] = (),
     comments: list[dict] = (),
+    events: list[dict] = (),
 ) -> Path:
     """Create `<home>/kanban/boards/<board>/kanban.db` in WAL mode, as the runtime does, holding these rows."""
     folder = home / "kanban" / "boards" / board
@@ -192,6 +194,10 @@ def make_board(
         db.executemany(
             f"INSERT INTO task_comments ({', '.join(COMMENT_COLUMNS)}) VALUES ({marks})",
             [tuple(comment[column] for column in COMMENT_COLUMNS) for comment in comments],
+        )
+        db.executemany(
+            f"INSERT INTO task_events ({', '.join(EVENT_COLUMNS)}) VALUES ({', '.join('?' * len(EVENT_COLUMNS))})",
+            [tuple(event.get(column) for column in EVENT_COLUMNS) for event in events],
         )
     db.close()
     return base
