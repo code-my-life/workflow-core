@@ -6,8 +6,6 @@ from __future__ import annotations
 import re
 
 ISSUE = re.compile(r"^https://github\.com/([\w.-]+)/([\w.-]+)/issues/(\d+)$")
-# The only account whose answers the workflows read on GitHub (the factory's decider).
-DECIDER = "cddev"
 QUESTION_MAX = 3000
 FOOTER = "<sub>Alerte du socle workflow-core</sub>"
 KIND_FR = {
@@ -49,7 +47,7 @@ def blocked_alert(
         "",
         "> " + quoted.replace("\n", "\n> "),
         "",
-        f"**Pour répondre** (seul `{DECIDER}` est écouté) : commente sur cette issue",
+        "**Pour répondre** (seul le propriétaire est écouté) : commente sur cette issue",
         "```",
         f"/{workflow} unblock ta décision ou ta réponse",
         "```",
