@@ -385,12 +385,15 @@ def create_app(
         # The workflow's agents and their configuration in service, without a secret (#129); the hook timeouts of
         # their plugins are counted over the last `days` days.
         workflow = declared(key)
-        kanban, found = agents_reader.agents(workflow, days, clock()) if agents_reader is not None else (None, [])
+        kanban, found, risks = (
+            agents_reader.agents(workflow, days, clock()) if agents_reader is not None else (None, [], [])
+        )
         return {
             "schema_version": SCHEMA_VERSION,
             "workflow": workflow.key,
             "kanban": kanban.model_dump() if kanban is not None else None,
             "agents": [agent.model_dump() for agent in found],
+            "guard_risks": [risk.model_dump() for risk in risks],
         }
 
     @app.get("/api/events")

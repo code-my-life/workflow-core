@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from workflow_core.model.agents import Agent, KanbanSettings
+from workflow_core.model.agents import Agent, GuardRisk, KanbanSettings
 from workflow_core.model.board import Item
 from workflow_core.model.checks import MachineCheck
 from workflow_core.model.contract import ContractVerdict, Mode
@@ -154,6 +154,8 @@ class AgentsResponse(_Response):
     workflow: str
     kanban: KanbanSettings | None
     agents: list[Agent]
+    # The guards at risk among these agents (#137): empty without a risk.
+    guard_risks: list[GuardRisk]
 
 
 def _schema_text(model: type[BaseModel]) -> Callable[[], str]:

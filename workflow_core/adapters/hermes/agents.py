@@ -22,8 +22,8 @@ from workflow_core.adapters.hermes.profiles import (
 )
 from workflow_core.adapters.hermes.texts import TERMS
 from workflow_core.config import Workflow
-from workflow_core.diagnosis.guards import hook_timeouts_by_plugin
-from workflow_core.model.agents import Agent, AgentLimit, AgentModel, AgentPlugin, KanbanSettings
+from workflow_core.diagnosis.guards import guard_risks, hook_timeouts_by_plugin
+from workflow_core.model.agents import Agent, AgentLimit, AgentModel, AgentPlugin, GuardRisk, KanbanSettings
 from workflow_core.model.facts import ProfileFacts
 
 
@@ -117,15 +117,22 @@ class HermesAgentsReader:
             max_in_progress_per_profile=_int(kanban.get("max_in_progress_per_profile")),
         )
 
-    def agents(self, workflow: Workflow, days: int, now: float) -> tuple[KanbanSettings | None, list[Agent]]:
+    def agents(
+        self, workflow: Workflow, days: int, now: float
+    ) -> tuple[KanbanSettings | None, list[Agent], list[GuardRisk]]:
         manifest = self._manifest(workflow)
         declared = _record(manifest.get("profiles")) if manifest is not None else {}
-        return self.kanban(), [
+        read = [
             self._agent(workflow, name, _strings(_record(declared.get(name)).get("skills")), days, now)
             for name in self._names(workflow, manifest)
         ]
+        # The guards at risk, from the facts of the agents served by this very answer (issue #137).
+        facts = [agent_facts for _, agent_facts in read if agent_facts is not None]
+        return self.kanban(), [agent for agent, _ in read], guard_risks(facts, TERMS)
 
-    def _agent(self, workflow: Workflow, name: str, skills: list[str], days: int, now: float) -> Agent:
+    def _agent(
+        self, workflow: Workflow, name: str, skills: list[str], days: int, now: float
+    ) -> tuple[Agent, ProfileFacts | None]:
         path = config_path(self.home, name)
         config = parse_capped(path, MAX_CONFIG_BYTES) if path is not None else None
         if config is None:
@@ -139,7 +146,7 @@ class HermesAgentsReader:
                 plugins=[],
                 mcp=[],
                 limits=_limits(None),
-            )
+            ), None
         facts = self.profiles.facts(name, workflow) or profile_facts_of(name, config, None, None, [])
         logs = self.journals.facts(name, now - days * 86_400, now) or []
         timeouts = hook_timeouts_by_plugin(logs, facts)
@@ -165,4 +172,4 @@ class HermesAgentsReader:
             ],
             mcp=sorted(key for key in _record(config.get("mcp_servers")) if isinstance(key, str)),
             limits=_limits(facts),
-        )
+        ), facts

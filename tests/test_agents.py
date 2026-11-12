@@ -237,3 +237,55 @@ def test_the_kanban_settings_are_served(factory):
 
     write(factory["home"] / "config.yaml", "kanban: [broken\n")
     assert agents(factory)["kanban"] is None
+
+
+def guard_config(hook: str = "", tools: str = "") -> str:
+    """An agent's configuration with only `coder-guard` active, its hook's delay and its tool ceiling as given."""
+    return f"plugins:\n  enabled: [coder-guard]\n{hook}{tools}"
+
+
+def guard_code(command: int, hooked: bool = True) -> str:
+    """The code of a guard that can run a command of `command` seconds, plugged to a hook or not."""
+    register = '    ctx.register_hook("pre_tool_call", pre_tool)\n' if hooked else "    pass\n"
+    return f'def pre_tool(**kwargs):\n    run(["npm", "test"], timeout={command})\n\ndef register(ctx):\n{register}'
+
+
+def guard_agents(factory: dict, agents_setup: dict[str, tuple[str, str]]) -> list[dict]:
+    """Writes each agent's configuration and its guard's code, declares them in the manifest, and reads the risks."""
+    home, repo = factory["home"], factory["repo"]
+    for name, (config, code) in agents_setup.items():
+        write(home / "profiles" / name / "config.yaml", config)
+        write(home / "profiles" / name / "plugins" / "coder-guard" / "__init__.py", code)
+    profiles = "".join(f"  {name}: {{skills: [], plugins: [coder-guard]}}\n" for name in agents_setup)
+    write(repo / "factory.yaml", f"profiles:\n{profiles}")
+    return agents(factory)["guard_risks"]
+
+
+def test_guard_risks_are_published_with_the_agents(factory):
+    hook = "  hook_callback_timeout: 600\n"
+    risks = guard_agents(
+        factory,
+        {"coder": (guard_config(hook), guard_code(900)), "scribe": (guard_config(hook), guard_code(900))},
+    )
+
+    # 600 s asked for the hook, but a tool call's ceiling (420 s by default) holds it.
+    assert risks == [
+        {"plugin": "coder-guard", "agents": ["coder", "scribe"], "longest_seconds": 900.0, "limit_seconds": 420.0}
+    ]
+
+
+def test_a_short_command_or_a_plugin_without_hook_is_no_risk(factory):
+    no_delay = guard_config("  hook_callback_timeout: 0\n", "timeouts:\n  tools:\n    sequential_call: 0\n")
+    risks = guard_agents(
+        factory,
+        {
+            # 20 s under the default delay of 30 s.
+            "coder": (guard_config(), guard_code(20)),
+            # 900 s, but plugged to no hook.
+            "scribe": (guard_config(), guard_code(900, hooked=False)),
+            # 900 s plugged to a hook, but no delay cuts it.
+            "writer": (no_delay, guard_code(900)),
+        },
+    )
+
+    assert risks == []
