@@ -15,6 +15,7 @@ from workflow_core.api.app import create_app
 from workflow_core.clock import utc_now
 from workflow_core.config import Workflow
 from workflow_core.events import JOURNAL_FILE, state_dir
+from workflow_core.model.checks import CHECK_EVERY_SECONDS, DeclaredCheck
 from workflow_core.model.contract import ContractVerdict
 from workflow_core.model.state import CoreState
 
@@ -34,6 +35,8 @@ def build_service(
     adapter: ModuleType,
     clock: Callable[[], float] = time.time,
     spy: Callable[[str], Any] | None = None,
+    checks: list[DeclaredCheck] | None = None,
+    checks_every: float = CHECK_EVERY_SECONDS,
 ) -> FastAPI:
     """The API, with the core's state after the contract check. A broken contract keeps the observer mode and is
     written to the journal; the service still answers."""
@@ -60,6 +63,9 @@ def build_service(
         journal_path=state_dir() / JOURNAL_FILE,
         clock=clock,
         spy=spy,
+        runtime_checks=adapter.make_machine_checks(),
+        checks=checks,
+        checks_every=checks_every,
     )
 
 

@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 import httpx2 as httpx
+import jsonschema
 import pytest
 import uvicorn
 from workflow_core.adapters import runtime_adapter
@@ -40,9 +41,20 @@ def free_port() -> int:
 
 
 @contextmanager
-def running_service(clock=time.time, spy=None, stopped: dict | None = None) -> Iterator[str]:
+def running_service(
+    clock=time.time, spy=None, stopped: dict | None = None, checks=(), checks_every: float | None = None
+) -> Iterator[str]:
     """The service as `python -m workflow_core` builds it, served by a real uvicorn on a free port."""
-    app = build_service(secret=SECRET, workflows=WORKFLOWS, adapter=runtime_adapter(), clock=clock, spy=spy)
+    extra = {"checks_every": checks_every} if checks_every is not None else {}
+    app = build_service(
+        secret=SECRET,
+        workflows=WORKFLOWS,
+        adapter=runtime_adapter(),
+        clock=clock,
+        spy=spy,
+        checks=list(checks),
+        **extra,
+    )
     port = free_port()
     server = uvicorn.Server(server_config(app, "127.0.0.1", port, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
@@ -361,3 +373,40 @@ def test_a_new_card_event_goes_on_the_stream_with_the_full_item(runtime_home, st
     assert event["state"]["events"][-1]["payload"] == {"reason": "il manque une preuve"}
     assert event["state"] == next(item for item in items if item["id"] == "t_0002")
     assert elapsed < 1.0, f"the event took {elapsed:.3f} s to reach the stream"
+
+
+def test_a_check_status_change_goes_on_the_stream_once(runtime_home, state_dir, tmp_path, monkeypatch):
+    from workflow_core.model.checks import DeclaredCheck
+
+    # No machine tool is run: only the declared tcp check matters here.
+    empty = tmp_path / "no-tools"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    listening = socket.socket()
+    listening.bind(("127.0.0.1", 0))
+    listening.listen()
+    port = listening.getsockname()[1]
+    check = DeclaredCheck(id="graphify", label="MCP graphify", group="tools", kind="tcp", target=str(port))
+    with running_service(checks=[check], checks_every=0.2) as base:
+        machine = httpx.get(f"{base}/api/machine", headers=AUTH).json()
+        assert {c["id"]: c["status"] for c in machine["checks"]}["graphify"] == "ok"
+        stream = Stream(base)
+        time.sleep(0.5)  # a few rounds of checks, all ok: no event
+
+        listening.close()
+        frames = []
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            try:
+                frames.append(stream.next(timeout=0.2))
+            except queue.Empty:
+                continue
+        stream.close()
+
+    machines = [(kind, event) for _, kind, event in frames if kind == "machine"]
+    assert len(machines) == 1, machines
+    _, event = machines[0]
+    assert (event["workflow"], event["item"]) == (None, None)
+    assert {c["id"]: c["status"] for c in event["state"]}["graphify"] == "down"
+    schema = json.loads((Path(__file__).resolve().parent.parent / "schema" / "event.schema.json").read_text())
+    jsonschema.Draft202012Validator(schema).validate(event)

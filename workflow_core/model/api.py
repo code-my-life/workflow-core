@@ -13,6 +13,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from workflow_core.model.board import Item
+from workflow_core.model.checks import MachineCheck
 from workflow_core.model.contract import ContractVerdict, Mode
 from workflow_core.model.live import ActivityFact, AgentLive, Usage
 from workflow_core.model.sheet import WorkflowSheet
@@ -67,6 +68,9 @@ class MachineResponse(_AtCursor):
     contract: ContractVerdict | None
     mode: Mode
     boards: dict[str, BoardRead]
+    # The state of the machine: one check per service, as the former probe reported them (ADR 0008). Empty before
+    # the first round of checks.
+    checks: list[MachineCheck] = []
 
 
 class LiveResponse(_Response):
@@ -92,15 +96,16 @@ class UsageResponse(_Response, Usage):
 class StreamEvent(BaseModel):
     """One event of GET /api/events. `reset` opens an epoch: the client reads the full state again; it names no
     workflow, no item and carries no state. `changed` carries the full state of the item, `live` the live state of an
-    agent (its item: the card it holds), `activity` one new fact of the board."""
+    agent (its item: the card it holds), `activity` one new fact of the board, `machine` the full list of the machine's
+    checks when a status changed (no workflow, no item)."""
 
     cursor: str
     workflow: str | None
     item: str | None
-    kind: Literal["changed", "reset", "live", "activity"]
+    kind: Literal["changed", "reset", "live", "activity", "machine"]
     # ISO 8601, UTC.
     at: str
-    state: Item | AgentLive | ActivityFact | None
+    state: Item | AgentLive | ActivityFact | list[MachineCheck] | None
 
 
 class ErrorResponse(BaseModel):

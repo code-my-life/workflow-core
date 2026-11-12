@@ -342,3 +342,32 @@ def test_the_session_messages_and_usage_columns_are_in_the_contract(runtime_home
     base.execute("DROP TABLE messages")
     base.close()
     assert "agent coder : table messages absente" in check().problems
+
+
+def test_the_machine_check_formats_are_in_the_contract(runtime_home):
+    from workflow_core.adapters.hermes.contract import MACHINE_CONTRACT, MACHINE_FILES
+
+    from conftest import runtime_schema
+
+    # The four formats the machine checks read are declared: the pause, the gateway's heartbeats, the scheduled
+    # jobs and the local model router.
+    assert set(MACHINE_CONTRACT["gateway_heartbeats"].columns) >= {"pid", "last_heartbeat"}
+    assert set(MACHINE_FILES) == {"ESTOP", "cron/jobs.json", "runtimes/llamacpp/server.json"}
+
+    with sqlite3.connect(runtime_home / "state.db") as db:
+        db.executescript(runtime_schema("state", ["gateway_heartbeats"]))
+    db.close()
+    (runtime_home / "cron").mkdir()
+    (runtime_home / "cron" / "jobs.json").write_text('{"jobs": [{"name": "watch", "failure_streak": 0}]}')
+    (runtime_home / "runtimes" / "llamacpp").mkdir(parents=True)
+    (runtime_home / "runtimes" / "llamacpp" / "server.json").write_text('{"base_url": "http://127.0.0.1:1/v1"}')
+    assert check().ok is True
+
+    (runtime_home / "cron" / "jobs.json").write_text('{"tasks": []}')
+    assert check().problems == ["cron/jobs.json : plus de liste jobs"]
+    (runtime_home / "cron" / "jobs.json").write_text('{"jobs": []}')
+    (runtime_home / "runtimes" / "llamacpp" / "server.json").write_text('{"url": "x"}')
+    assert check().problems == ["runtimes/llamacpp/server.json : plus de base_url"]
+    (runtime_home / "runtimes" / "llamacpp" / "server.json").write_text('{"base_url": "x"}')
+    rebuild_tasks_column(runtime_home / "state.db", "gateway_heartbeats", "last_heartbeat")
+    assert check().problems == ["state.db : gateway_heartbeats.last_heartbeat absente"]
