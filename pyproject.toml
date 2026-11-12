@@ -1,6 +1,6 @@
 [project]
 name = "workflow-core"
-version = "0.6.0"
+version = "0.7.0"
 description = "Le socle commun des workflows de code-my-life : il observe les boards et les sert à factory-live."
 readme = "README.md"
 license = "MIT"
