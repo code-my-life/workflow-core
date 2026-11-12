@@ -10,38 +10,21 @@ passage tries again: the command always exits with 0 (ADR 0019).
 
 from __future__ import annotations
 
-import json
 import sys
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TextIO
 
 from workflow_core.events import state_dir as core_state_dir
+from workflow_core.notify.issues import open_or_comment, read_state, write_state
 
 REPO = "code-my-life/workflow-core"
-APP_LOGIN = "code-my-life-factory[bot]"
 MARKER = "<!-- workflow-core:panne -->"
 TITLE = "Le socle workflow-core ne répond plus"
 WATCHDOG_FILE = "watchdog.json"
 OUTAGE_FILE = "outage-issue.json"
-REOPEN_WITHIN = timedelta(hours=24)
 FOOTER = "<sub>Chien de garde du socle workflow-core</sub>"
-
-
-def _read(path: Path) -> dict:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-def _write(path: Path, value: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(json.dumps(value) + "\n", encoding="utf-8")
-    temporary.replace(path)
 
 
 def _minutes(since: str, now: datetime) -> int:
@@ -74,25 +57,6 @@ def _still_down(since: str, now: datetime) -> str:
     return f"Le socle ne répond toujours pas depuis {since} ({_minutes(since, now)} min).\n\n{FOOTER}"
 
 
-def _outage_issue(client, now: datetime) -> dict | None:
-    """The App's outage issue to take again: an open one, else one closed less than 24 hours ago."""
-    marked = [
-        issue
-        for issue in client.list_issues(REPO)
-        if (issue.get("user") or {}).get("login") == APP_LOGIN and MARKER in (issue.get("body") or "")
-    ]
-    opened = [issue for issue in marked if issue.get("state") == "open"]
-    if opened:
-        return opened[0]
-    recent = [
-        issue
-        for issue in marked
-        if issue.get("closed_at")
-        and now - datetime.fromisoformat(issue["closed_at"].replace("Z", "+00:00")) < REOPEN_WITHIN
-    ]
-    return recent[0] if recent else None
-
-
 def _default_client():
     from workflow_core.adapters.github import AppTokens, GitHubClient
 
@@ -109,31 +73,26 @@ def run_once(
     """One passage; always 0."""
     folder = state_dir if state_dir is not None else core_state_dir()
     out = out or sys.stderr
-    watchdog = _read(folder / WATCHDOG_FILE)
+    watchdog = read_state(folder / WATCHDOG_FILE)
     outage_path = folder / OUTAGE_FILE
-    noted = _read(outage_path)
+    noted = read_state(outage_path)
     number = noted.get("issue")
     since = watchdog.get("first_failure_at")
     now = clock()
     try:
         if watchdog.get("reported") is True and isinstance(since, str) and number is None:
             client = client if client is not None else _default_client()
-            found = _outage_issue(client, now)
-            if found is None:
-                number = client.create_issue(REPO, TITLE, _opening_body(since, now))
-            else:
-                number = int(found["number"])
-                if found.get("state") != "open":
-                    client.set_issue_state(REPO, number, "open")
-                client.post_comment(REPO, number, _still_down(since, now))
-            _write(outage_path, {"issue": number, "since": since})
+            number = open_or_comment(
+                client, REPO, MARKER, now, TITLE, _opening_body(since, now), _still_down(since, now)
+            )
+            write_state(outage_path, {"issue": number, "since": since})
         elif since is None and number is not None:
             client = client if client is not None else _default_client()
             began = noted.get("since")
             lasted = f"après {_minutes(began, now)} min de panne" if isinstance(began, str) else "après une panne"
             client.post_comment(REPO, number, f"Le socle répond de nouveau, {lasted}.\n\n{FOOTER}")
             client.set_issue_state(REPO, number, "closed")
-            _write(outage_path, {"issue": None})
+            write_state(outage_path, {"issue": None})
     except Exception as error:  # never a failed unit because of GitHub: the next passage tries again
         print(f"<3>workflow-core: issue de panne : {error}", file=out, flush=True)
     return 0
