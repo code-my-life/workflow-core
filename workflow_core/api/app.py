@@ -14,11 +14,16 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.exceptions import HTTPException
 
-from workflow_core.clock import utc_now
+from workflow_core.clock import iso_ms, utc_now
 from workflow_core.config import Workflow
+from workflow_core.diagnosis import diagnose_board, diagnose_card
+from workflow_core.diagnosis.service import run_verdicts
 from workflow_core.events import BoardWatcher, EventHub
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
+from workflow_core.model.diagnosis import diagnosis_json
+from workflow_core.model.facts import CardFactsReader, DiagnosisSources
 from workflow_core.model.state import CoreState
+from workflow_core.model.triggers import Trigger
 from workflow_core.sheets import InvalidSheetError, SheetUnavailableError, read_sheet, sheet_json
 
 # The version of the API's contract (ADR 0018): within it, responses only gain optional fields.
@@ -28,6 +33,11 @@ SCHEMA_VERSION = 1
 class UnknownWorkflowError(Exception):
     def __init__(self, key: str) -> None:
         super().__init__(f'workflow "{key}" is not declared in the configuration')
+
+
+class UnknownItemError(Exception):
+    def __init__(self, board: str, item: str) -> None:
+        super().__init__(f'card "{item}" is not on board "{board}"')
 
 
 def error(status: int, code: str, detail: str) -> JSONResponse:
@@ -44,15 +54,21 @@ def create_app(
     secret: str,
     workflows: dict[str, Workflow],
     boards: BoardReader,
+    facts: CardFactsReader | None = None,
+    sources: DiagnosisSources | None = None,
     state: CoreState | None = None,
     watcher: BoardWatcher | None = None,
     journal_path: Path | None = None,
     clock: Callable[[], float] = time.time,
     spy: Callable[[str], Any] | None = None,
 ) -> FastAPI:
-    """The API. With a board watcher and a journal path, it also probes the boards and serves GET /api/events."""
+    """The API. With a board watcher and a journal path, it also probes the boards and serves GET /api/events. The
+    facts of a card, for its diagnosis, are read by `facts`, by default the board reader itself, and the other
+    sources of the diagnosis by `sources`, by default the board reader's."""
     if not secret:
         raise ValueError("the shared secret is empty")
+    card_facts: CardFactsReader = facts if facts is not None else boards
+    diagnosis_sources: DiagnosisSources = sources if sources is not None else card_facts.diagnosis_sources()
     expected = secret.encode("utf-8")
     hub: EventHub | None = None
 
@@ -112,6 +128,10 @@ def create_app(
     async def unknown_workflow(request: Request, exc: UnknownWorkflowError) -> JSONResponse:
         return error(404, "unknown_workflow", str(exc))
 
+    @app.exception_handler(UnknownItemError)
+    async def unknown_item(request: Request, exc: UnknownItemError) -> JSONResponse:
+        return error(404, "unknown_item", str(exc))
+
     @app.exception_handler(BoardUnavailableError)
     async def board_unavailable(request: Request, exc: BoardUnavailableError) -> JSONResponse:
         return error(503, "board_unavailable", str(exc))
@@ -165,6 +185,62 @@ def create_app(
             "items": [item.model_dump() for item in read_items(workflow.board)],
         }
         return with_cursor(payload, cursor)
+
+    def trigger_json(trigger: Trigger) -> dict:
+        # The core's keys, as the rest of its API; only the diagnosis follows factory-live's contract.
+        return {
+            "id": trigger.id,
+            "kind": trigger.kind,
+            "event": trigger.event,
+            "opened_at": iso_ms(trigger.opened_at),
+            "agent": trigger.agent,
+        }
+
+    @app.get("/api/workflows/{key}/items/{item}/diagnosis")
+    def diagnosis(key: str, item: str) -> dict:
+        # Computed on demand, for a card that is a trigger (ADR 0012); another card has no diagnosis.
+        workflow = declared(key)
+        found = card_facts.read_card_facts(workflow.board, item)
+        if found is None:
+            raise UnknownItemError(workflow.board, item)
+        computed = diagnose_card(found, workflow, clock(), diagnosis_sources)
+        trigger, result = computed if computed is not None else (None, None)
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "workflow": workflow.key,
+            "item": item,
+            "trigger": trigger_json(trigger) if trigger is not None else None,
+            "diagnosis": diagnosis_json(result) if result is not None else None,
+        }
+
+    @app.get("/api/workflows/{key}/items/{item}/run-verdicts")
+    def verdicts(key: str, item: str) -> dict:
+        # The verdict of each failed run of the card, finished or not, newest run first; computed on demand.
+        workflow = declared(key)
+        found = card_facts.read_card_facts(workflow.board, item)
+        if found is None:
+            raise UnknownItemError(workflow.board, item)
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "verdicts": [
+                verdict.model_dump(mode="json", by_alias=True)
+                for verdict in run_verdicts(found, workflow, clock(), diagnosis_sources)
+            ],
+        }
+
+    @app.get("/api/workflows/{key}/diagnoses")
+    def diagnoses(key: str) -> dict:
+        # Every trigger of the board with its diagnosis, by opening time.
+        workflow = declared(key)
+        cards = card_facts.read_board_facts(workflow.board)
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "workflow": workflow.key,
+            "diagnoses": [
+                {"item": trigger.card, "trigger": trigger_json(trigger), "diagnosis": diagnosis_json(result)}
+                for trigger, result in diagnose_board(cards, workflow, clock(), diagnosis_sources)
+            ],
+        }
 
     @app.get("/api/events")
     async def events(request: Request, cursor: str | None = None) -> StreamingResponse:

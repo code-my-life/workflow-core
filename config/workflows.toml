@@ -1,12 +1,30 @@
-# The workflows the core serves: one [[workflow]] table each, with its key, its board and the path of its sheet.
+# The workflows the core serves: one [[workflow]] table each, with its key, its board and the path of its sheet, and
+# optionally the settings of the diagnosis: its triggers (held_after_minutes, approval_card_title, main_red_reason),
+# its sources (repo, profiles, plugins) and the workflow's words (guard_suffixes, default_agent, relay_agent,
+# pr_acceptance, body_branch).
 # The key of a workflow is the name of its board (ADR 0003). The manifests of the engine epic will replace this list.
 
 [[workflow]]
 key = "factory"
 board = "factory"
 sheet = "~/perso/hermes-software-factory/config/workflow.json"
+# The factory's conventions for the interventions the diagnosis leaves to factory-live: a `release ...` card blocked
+# for an answer is a pull request to approve, and one blocked by a red main is a failed CI (interventions.ts, d47f235).
+approval_card_title = '^release\s'
+main_red_reason = 'main rouge|workflows? de main|watch-main'
+# Its repository, where the diagnosis reads its agents' profiles and its plugins, and its own words.
+repo = "~/perso/hermes-software-factory"
+profiles = "profiles"
+plugins = "plugins"
+guard_suffixes = ["-guard", "-readonly"]
+default_agent = "coder"
+relay_agent = "scribe"
+pr_acceptance = "PR acceptance"
+# The factory's brief names a card's branch: « - branch_name : fix/8-island-blur ».
+body_branch = '^- branch_name : (\S{1,250})\s*$'
 
 [[workflow]]
 key = "studio"
 board = "studio"
 sheet = "~/perso/video-factory/hermes/workflow.json"
+repo = "~/perso/video-factory"

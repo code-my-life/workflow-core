@@ -1,0 +1,583 @@
+{
+  "case": "question",
+  "input": {
+    "anchor": {
+      "createdAt": 1792353926,
+      "id": 2005,
+      "kind": "blocked",
+      "payload": {
+        "kind": "needs_input",
+        "reason": "Fail-first test passes on base_commit: the flip parasite bug (issue #15) was already fixed in the sg-flip component (systems-generator) before base_commit 2680abd/81c569a.\n\nTest `desktop/test/card-actions.test.js` (created per gate request) passes on both base_commit and tip:\n- base_commit (2680abd)",
+        "recurrences": 1
+      },
+      "runId": 144,
+      "taskId": "t_f272434e"
+    },
+    "board": "factory",
+    "branch": null,
+    "events": [
+      {
+        "createdAt": 1792328424,
+        "id": 1434,
+        "kind": "created",
+        "payload": {},
+        "runId": null,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792328439,
+        "id": 1439,
+        "kind": "promoted",
+        "payload": {},
+        "runId": null,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792335158,
+        "id": 1594,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 112,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792337113,
+        "id": 1650,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "branche en retard sur main : git merge origin/main puis relancer la suite"
+        },
+        "runId": 116,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792337411,
+        "id": 1658,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 117,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792337746,
+        "id": 1667,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "E2E CI check FAILING: 6/8 tests fail on Windows CI (card-actions: 4 tests can't find data-testid elements in island; launcher: 2 tests fail on width/height). Per factory-gate Rule 1bis-CI, a single red check blocks approval."
+        },
+        "runId": 118,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792338623,
+        "id": 1683,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 119,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792339041,
+        "id": 1694,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "e2e check FAILING on Windows CI: 6/8 tests fail (card-actions: 4 no matching window; launcher: 2 senderFrame crash)"
+        },
+        "runId": 120,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792339847,
+        "id": 1711,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 121,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792340817,
+        "id": 1731,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "E2E CI check FAILING on Windows CI: 5/8 tests fail (card-actions: 4 tests can't find data-testid buttons in island window; launcher: resize not applied height 72 vs 380-420 expected)"
+        },
+        "runId": 122,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792341507,
+        "id": 1744,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 123,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792342017,
+        "id": 1756,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "E2E CI check FAILING on Windows CI: 5/8 tests fail (card-actions: 4 tests can't find data-testid buttons in island window; launcher: resize not applied height 72 vs 380-420 expected)"
+        },
+        "runId": 124,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792342884,
+        "id": 1773,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 125,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792343279,
+        "id": 1783,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "E2E CI check FAILING on Windows CI: 5/8 tests fail (card-actions: 4 tests can't find data-testid buttons in island window; launcher: resize not applied height 72 vs 380-420 expected)"
+        },
+        "runId": 126,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792343829,
+        "id": 1794,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 127,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792344283,
+        "id": 1804,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "E2E CI check FAILING on Windows CI: 5/8 tests fail (card-actions: 4 tests can't find data-testid buttons in island window; launcher: resize not applied height 72 vs 380-420 expected)"
+        },
+        "runId": 128,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792345259,
+        "id": 1821,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 129,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792345776,
+        "id": 1833,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "E2E CI check FAILING on Windows CI: 5/8 tests fail \u2014 card-actions: 4 tests timeout on islandHasCards probe (sg-flip[data-engine] with card-enlarge button not found in island window); launcher: resize not applied height 72 vs 380-420 expected"
+        },
+        "runId": 130,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792346226,
+        "id": 1843,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 131,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792347025,
+        "id": 1858,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "E2E CI check FAILING on Windows CI: 5/8 tests fail (card-actions: 4 tests timeout on islandHasCards probe; launcher: resize not applied height 72 vs 380-420 expected)"
+        },
+        "runId": 132,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792347920,
+        "id": 1875,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 133,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792348462,
+        "id": 1888,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "E2E CI check failing: card actions tests timeout on islandHasCards probe; launcher resize not applied height 72 vs 380-420 expected"
+        },
+        "runId": 134,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792349080,
+        "id": 1902,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 135,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792350449,
+        "id": 1927,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "BLOQUANT, régression cockpit : mod/assets/conversations.html:985-992 ajoute onclick=\"event.stopPropagation()\" sur les boutons data-action (summarize, terminal, big, toggle, send, exact à la ligne 951)."
+        },
+        "runId": 137,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792351241,
+        "id": 1942,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 138,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792351465,
+        "id": 1949,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "Handoff evidence issues: evidence/02-typecheck.txt is empty (expected typecheck output); evidence/03-build.txt does not contain build output (expected output of build command)."
+        },
+        "runId": 139,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792352060,
+        "id": 1963,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 140,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792352461,
+        "id": 1973,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "card actions : enlarge opens full conversation view \u2014 [data-testid=\"card-enlarge\"] not found"
+        },
+        "runId": 141,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792353083,
+        "id": 1985,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 142,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792353409,
+        "id": 1993,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "Missing fail-first test file: desktop/test/card-actions.test.js does not exist on base or tip."
+        },
+        "runId": 143,
+        "taskId": "t_f272434e"
+      },
+      {
+        "createdAt": 1792353926,
+        "id": 2005,
+        "kind": "blocked",
+        "payload": {
+          "kind": "needs_input",
+          "reason": "Fail-first test passes on base_commit: the flip parasite bug (issue #15) was already fixed in the sg-flip component (systems-generator) before base_commit 2680abd/81c569a.\n\nTest `desktop/test/card-actions.test.js` (created per gate request) passes on both base_commit and tip:\n- base_commit (2680abd)",
+          "recurrences": 1
+        },
+        "runId": 144,
+        "taskId": "t_f272434e"
+      }
+    ],
+    "evidence": null,
+    "logs": [],
+    "now": 1792353929,
+    "prUrl": null,
+    "profile": null,
+    "runs": [
+      {
+        "endedAt": 1792353926,
+        "error": null,
+        "id": 144,
+        "metadata": {},
+        "outcome": "blocked",
+        "profile": "coder",
+        "startedAt": 1792353415,
+        "status": "blocked",
+        "summary": "Fail-first test passes on base_commit: the flip parasite bug (issue #15) was already fixed in the sg-flip component (systems-generator) before base_commit 2680abd/81c569a.\n\nTest `desktop/test/card-act",
+        "taskId": "t_f272434e"
+      }
+    ],
+    "sessions": [
+      {
+        "calls": [
+          {
+            "at": 1792353447.958,
+            "callId": "call_7bdabab88ecb4ffeb4dada1a",
+            "input": "/home/user/.hermes/profiles/coder/cache/scratch/parse_task.py",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792353636.776,
+            "callId": "call-e01f07a8-b6f8-411a-86d6-7a43a87981d3",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_f272434e/claude-cockpit/test-island-actions.mjs",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792353874.329,
+            "callId": "call-87cc9939-cc26-401e-8cfd-e73bbcc08712",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_f272434e/claude-cockpit/desktop/test/card-actions.test.js",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792353893.728,
+            "callId": "call-3e2b1f64-4cac-45b1-b4c1-1aa07dc81678",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_f272434e/claude-cockpit && node --test desktop/test/card-actions.test.js 2>&1",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792353903.996,
+            "callId": "call-8b22dfe2-71ca-4c37-9746-2cbf8a3f0fd2",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_f272434e/claude-cockpit/desktop/test/card-actions.test.js",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792353908.008,
+            "callId": "call-8327ee78-cf4f-45c5-be92-9ffc68f51feb",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_f272434e/claude-cockpit && node --test desktop/test/card-actions.test.js 2>&1",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792353911.079,
+            "callId": "call-ef7a1984-ece2-4496-8911-587025908e76",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_f272434e/claude-cockpit/2680abd && node --test desktop/test/card-actions.test.js 2>&1",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792353914.711,
+            "callId": "call-fcf208c6-60b7-423a-b16a-3ac7471d0383",
+            "input": "cp /home/user/.hermes/kanban/boards/factory/workspaces/t_f272434e/claude-cockpit/desktop/test/card-actions.test.js /home/user/.hermes/kanban/boards/factory/work",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792353920.796,
+            "callId": "call-154cecec-d258-42ab-a273-539cc97e376a",
+            "input": "mkdir -p /home/user/.hermes/kanban/boards/factory/workspaces/t_f272434e/evidence && cd /home/user/.hermes/kanban/boards/factory/workspaces/t_f272434e/claude-coc",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792353926.978,
+            "callId": "call-0a1487f7-d8d2-48f0-8127-d9abe66d950c",
+            "input": null,
+            "tool": "kanban_block"
+          },
+          {
+            "at": 1792353945.091,
+            "callId": "call-b7b161ac-7e38-4cd2-98e3-a7e59c7bb9cc",
+            "input": "cat /home/user/.hermes/kanban/boards/factory/workspaces/t_f272434e/evidence/01-test-fails-on-base.txt && echo \"====\" && cat /home/user/.hermes/kanban/boards/fac",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792353949.177,
+            "callId": "call-2c05436c-b6c3-4e0e-8e6a-a5ff17c89043",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_f272434e/claude-cockpit && npm run test 2>&1 | tail -30",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792353957.951,
+            "callId": "call-69272e2a-a123-46cc-940a-946762a9329d",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_f272434e/claude-cockpit && npm run typecheck:mod 2>&1",
+            "tool": "terminal"
+          }
+        ],
+        "id": "20261018_215657_3d013b",
+        "results": [
+          {
+            "at": 1792353447.979,
+            "callId": "call_7bdabab88ecb4ffeb4dada1a",
+            "content": "{\"error\": \"Refusing to overwrite /home/user/.hermes/profiles/coder/cache/scratch/parse_task.py: /home/user/.hermes/profiles/coder/cache/scratch/parse_task.py ex…esolved_path\": \"/home/user/.hermes/profiles/coder/cache/scratch/parse_task.py\"}",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792353894.336,
+            "callId": "call-3e2b1f64-4cac-45b1-b4c1-1aa07dc81678",
+            "content": "{\"output\": \"/home/user/.hermes/kanban/boards/factory/workspaces/t_f272434e/claude-cockpit/desktop/test/card-actions.test",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792353905.466,
+            "callId": "call-8b22dfe2-71ca-4c37-9746-2cbf8a3f0fd2",
+            "content": "{\"bytes_written\": 3649, \"dirs_created\": true, \"verified\": true, \"lint\": {\"status\": \"ok\", \"output\": \"\"}, \"resolved_path\":",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792353908.621,
+            "callId": "call-8327ee78-cf4f-45c5-be92-9ffc68f51feb",
+            "content": "{\"output\": \"ReferenceError: getComputedStyle is not defined\\n    at dd (/home/user/.hermes/kanban/boards/factory/workspa",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792353911.189,
+            "callId": "call-ef7a1984-ece2-4496-8911-587025908e76",
+            "content": "{\"output\": \"Could not find 'desktop/test/card-actions.test.js'\", \"exit_code\": 1, \"error\": null, \"cwd\": \"/home/user/.herm",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792353915.326,
+            "callId": "call-fcf208c6-60b7-423a-b16a-3ac7471d0383",
+            "content": "{\"output\": \"ReferenceError: getComputedStyle is not defined\\n    at dd (/home/user/.hermes/kanban/boards/factory/workspa",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792353921.807,
+            "callId": "call-154cecec-d258-42ab-a273-539cc97e376a",
+            "content": "{\"output\": \"TIP EXIT CODE: 0\\nBASE EXIT CODE: 0\", \"exit_code\": 0, \"error\": null}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792353926.99,
+            "callId": "call-0a1487f7-d8d2-48f0-8127-d9abe66d950c",
+            "content": "{\"ok\": true, \"task_id\": \"t_f272434e\", \"run_id\": 144, \"status\": \"blocked\", \"block_kind\": \"needs_input\"}",
+            "tool": "kanban_block"
+          },
+          {
+            "at": 1792353945.15,
+            "callId": "call-b7b161ac-7e38-4cd2-98e3-a7e59c7bb9cc",
+            "content": "{\"output\": \"ReferenceError: getComputedStyle is not defined\\n    at dd (/home/user/.hermes/kanban/boards/factory/workspa",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792353951.785,
+            "callId": "call-2c05436c-b6c3-4e0e-8e6a-a5ff17c89043",
+            "content": "{\"output\": \"✔ a parked conversation reads as its park, and says when it moved since (0.691895ms)\\n✔ a done conversation ",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792353958.234,
+            "callId": "call-69272e2a-a123-46cc-940a-946762a9329d",
+            "content": "{\"output\": \"npm notice run typecheck:mod\\nnpm notice run tsc -p ci/tsconfig.mod.json\", \"exit_code\": 0, \"error\": null}",
+            "tool": "terminal"
+          }
+        ],
+        "runId": 144
+      }
+    ],
+    "task": {
+      "assignee": "coder",
+      "blockKind": "needs_input",
+      "blockRecurrences": 0,
+      "body": "",
+      "branchName": null,
+      "completedAt": null,
+      "consecutiveFailures": 0,
+      "createdAt": 1792328424,
+      "currentRunId": null,
+      "id": "t_f272434e",
+      "idempotencyKey": null,
+      "lastFailureError": null,
+      "lastHeartbeatAt": null,
+      "maxRuntimeSeconds": 7200,
+      "modelOverride": null,
+      "providerOverride": null,
+      "skills": [
+        "factory-author-proof"
+      ],
+      "startedAt": null,
+      "status": "blocked",
+      "title": "impl claude-cockpit#42 : E2E PR 2a - outillage de test et actions des cartes",
+      "workspacePath": "/home/user/.hermes/kanban/boards/factory/workspaces/t_f272434e"
+    }
+  },
+  "journal": {
+    "facts": [],
+    "lines": [],
+    "timeZone": "Europe/Paris"
+  },
+  "output": {
+    "computedAt": "2026-10-18T20:05:29.000Z",
+    "episode": {
+      "from": "2026-10-18T19:56:49.000Z",
+      "runIds": [
+        144
+      ]
+    },
+    "others": [],
+    "primary": {
+      "actor": "you_answer",
+      "cause": {
+        "state": "none"
+      },
+      "code": "question",
+      "confidence": "certain",
+      "evidence": [],
+      "runIds": [
+        144
+      ],
+      "setting": null,
+      "steps": [
+        {
+          "command": null,
+          "done": false,
+          "text": {
+            "code": "diagnosis.step.answer",
+            "params": {}
+          }
+        }
+      ],
+      "subject": {
+        "plugin": null,
+        "profile": "coder",
+        "tool": null
+      },
+      "summary": {
+        "code": "diagnosis.summary.question",
+        "params": {}
+      },
+      "why": {
+        "code": "diagnosis.why.question",
+        "params": {}
+      }
+    },
+    "runs": [
+      {
+        "finding": "question",
+        "role": "cause",
+        "runId": 144,
+        "sessionId": "20261018_215657_3d013b",
+        "text": {
+          "code": "diagnosis.run.question",
+          "params": {}
+        }
+      }
+    ],
+    "sources": {
+      "agentLog": true,
+      "config": false,
+      "transcript": true,
+      "workspace": false
+    },
+    "unblock": {
+      "nextBlock": "blocked",
+      "template": null,
+      "when": "answer"
+    },
+    "work": {
+      "branch": null,
+      "commits": "none",
+      "commitsRefused": 0,
+      "editedFiles": 3,
+      "evidence": [],
+      "prUrl": null,
+      "pushed": "no"
+    }
+  },
+  "test": "les autres incidents réels du kanban > claude-cockpit#42 (PR 2a), plus tôt : une vraie question, à toi de répondre"
+}

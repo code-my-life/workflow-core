@@ -1,0 +1,573 @@
+{
+  "case": "prChecks",
+  "input": {
+    "anchor": {
+      "createdAt": 1792459875,
+      "id": 2537,
+      "kind": "blocked",
+      "payload": {
+        "kind": "needs_input",
+        "reason": "repository-required checks are not configured for the PR; human input needed to set up required checks in the branch protection rules",
+        "recurrences": 1
+      },
+      "runId": 160,
+      "taskId": "t_93914cb4"
+    },
+    "board": "factory",
+    "branch": null,
+    "events": [
+      {
+        "createdAt": 1792362583,
+        "id": 2022,
+        "kind": "created",
+        "payload": {},
+        "runId": null,
+        "taskId": "t_93914cb4"
+      },
+      {
+        "createdAt": 1792396510,
+        "id": 2222,
+        "kind": "promoted",
+        "payload": {},
+        "runId": null,
+        "taskId": "t_93914cb4"
+      },
+      {
+        "createdAt": 1792396546,
+        "id": 2224,
+        "kind": "blocked",
+        "payload": {
+          "kind": null,
+          "reason": "Opérateur : en attente de la PR 2a (outillage). Sa carte parente a été archivée par la fermeture de la PR #64 ; ne pas démarrer avant la fusion de la nouvelle PR 2a.",
+          "recurrences": 1
+        },
+        "runId": 151,
+        "taskId": "t_93914cb4"
+      },
+      {
+        "createdAt": 1792396629,
+        "id": 2232,
+        "kind": "unblocked",
+        "payload": {},
+        "runId": null,
+        "taskId": "t_93914cb4"
+      },
+      {
+        "createdAt": 1792455934,
+        "id": 2452,
+        "kind": "promoted",
+        "payload": {},
+        "runId": null,
+        "taskId": "t_93914cb4"
+      },
+      {
+        "createdAt": 1792456274,
+        "id": 2462,
+        "kind": "unblocked",
+        "payload": {},
+        "runId": null,
+        "taskId": "t_93914cb4"
+      },
+      {
+        "createdAt": 1792456274,
+        "id": 2463,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 158,
+        "taskId": "t_93914cb4"
+      },
+      {
+        "createdAt": 1792459801,
+        "id": 2531,
+        "kind": "pr_acceptance",
+        "payload": {
+          "classification": "missing",
+          "detail": "Supply metadata.published_pr matching the persisted completion contract.",
+          "ok": false
+        },
+        "runId": 160,
+        "taskId": "t_93914cb4"
+      },
+      {
+        "createdAt": 1792459811,
+        "id": 2532,
+        "kind": "pr_acceptance",
+        "payload": {
+          "classification": "missing",
+          "detail": "No repository-required checks are configured; explicitly use a local-only contract for non-CI tasks.",
+          "ok": false
+        },
+        "runId": 160,
+        "taskId": "t_93914cb4"
+      },
+      {
+        "createdAt": 1792459830,
+        "id": 2534,
+        "kind": "pr_acceptance",
+        "payload": {
+          "classification": "missing",
+          "detail": "No repository-required checks are configured; explicitly use a local-only contract for non-CI tasks.",
+          "ok": false
+        },
+        "runId": 160,
+        "taskId": "t_93914cb4"
+      },
+      {
+        "createdAt": 1792459862,
+        "id": 2535,
+        "kind": "pr_acceptance",
+        "payload": {
+          "classification": "missing",
+          "detail": "No repository-required checks are configured; explicitly use a local-only contract for non-CI tasks.",
+          "ok": false
+        },
+        "runId": 160,
+        "taskId": "t_93914cb4"
+      },
+      {
+        "createdAt": 1792459869,
+        "id": 2536,
+        "kind": "pr_acceptance",
+        "payload": {
+          "classification": "missing",
+          "detail": "No repository-required checks are configured; explicitly use a local-only contract for non-CI tasks.",
+          "ok": false
+        },
+        "runId": 160,
+        "taskId": "t_93914cb4"
+      },
+      {
+        "createdAt": 1792459875,
+        "id": 2537,
+        "kind": "blocked",
+        "payload": {
+          "kind": "needs_input",
+          "reason": "repository-required checks are not configured for the PR; human input needed to set up required checks in the branch protection rules",
+          "recurrences": 1
+        },
+        "runId": 160,
+        "taskId": "t_93914cb4"
+      }
+    ],
+    "evidence": null,
+    "logs": [],
+    "now": 1792459878,
+    "prUrl": null,
+    "profile": null,
+    "runs": [
+      {
+        "endedAt": 1792459875,
+        "error": null,
+        "id": 160,
+        "metadata": {},
+        "outcome": "blocked",
+        "profile": "gate",
+        "startedAt": 1792457852,
+        "status": "blocked",
+        "summary": "repository-required checks are not configured for the PR; human input needed to set up required checks in the branch protection rules",
+        "taskId": "t_93914cb4"
+      }
+    ],
+    "sessions": [
+      {
+        "calls": [
+          {
+            "at": 1792458483.54,
+            "callId": "call-679fbf17-65cf-48ee-81f1-c93a61e237a3",
+            "input": "cd /tmp/gate-sabotage && git restore mod/assets/island-model.js mod/assets/island-deck.js",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792458943.337,
+            "callId": "call-a2ffe187-0d2e-4994-af8a-e050c72d3fe1",
+            "input": "cd /tmp/gate-sabotage2/desktop && xvfb-run -a npx playwright test --grep \"D1: with an empty query, at most 8 suggestions, the waiting ones first, under \\\"N conv",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792459041.02,
+            "callId": "call-1f2698c8-3e7d-489c-b19d-61d9cbf20fd5",
+            "input": null,
+            "tool": "kanban_complete"
+          },
+          {
+            "at": 1792459080.772,
+            "callId": "call-e08a6fda-d6c8-4813-98f8-f9dc473750c6",
+            "input": "cd /tmp/gate-sabotage2/desktop && xvfb-run -a npx playwright test --grep \"C1: a permission request shows in the island; a click before it is armed is ignored; \\",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792459702.158,
+            "callId": "call-c1dab179-bf7a-4979-891f-d31d3241e951",
+            "input": null,
+            "tool": "kanban_complete"
+          },
+          {
+            "at": 1792459777.028,
+            "callId": "call-49d26428-2b7b-410d-b391-9a0d684ab702",
+            "input": "echo \"=== C1 ===\" > $HERMES_KANBAN_WORKSPACE/evidence/gate/1/01-sabotage-red.txt\ncat $HERMES_KANBAN_WORKSPACE/evidence/gate/1/sabotage_outputs/red_C1.txt >> $HE",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792459796.223,
+            "callId": "call-bc74b03a-52e1-4012-9a3c-57d90572cf85",
+            "input": "echo \"=== C1 ===\" > $HERMES_KANBAN_WORKSPACE/evidence/gate/1/02-tip-green.txt\ncat $HERMES_KANBAN_WORKSPACE/evidence/gate/1/sabotage_outputs/green_C1.txt >> $HER",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792459800.26,
+            "callId": "call-efce600d-0cd8-42cc-b02f-c1ac5c71a1b0",
+            "input": null,
+            "tool": "kanban_complete"
+          },
+          {
+            "at": 1792459809.401,
+            "callId": "call-060de4cb-6153-4d1f-a8e8-44fccf7c795c",
+            "input": null,
+            "tool": "kanban_complete"
+          },
+          {
+            "at": 1792459829.018,
+            "callId": "call-daaf3794-1a2b-463d-868b-739b36c603c4",
+            "input": null,
+            "tool": "kanban_complete"
+          },
+          {
+            "at": 1792459834.797,
+            "callId": "call-033d50eb-e8ee-4dfc-ac2f-8a192e07f5e9",
+            "input": null,
+            "tool": "kanban_show"
+          },
+          {
+            "at": 1792459850.377,
+            "callId": "call-60f644d5-bdd1-4e22-b13e-80fab9a4bb15",
+            "input": "cd /tmp/gate-sabotage2 && gh pr view 70 --repo code-my-life/claude-cockpit --json state,mergeable,mergeStateStatus 2>&1",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792459860.698,
+            "callId": "call-248a8663-383b-46d5-84ef-57fe0c0248aa",
+            "input": null,
+            "tool": "kanban_complete"
+          },
+          {
+            "at": 1792459867.544,
+            "callId": "call-86484f1a-6a16-48af-a03a-0b545caae3bb",
+            "input": null,
+            "tool": "kanban_complete"
+          },
+          {
+            "at": 1792459875.325,
+            "callId": "call-fab34321-9c35-4d20-9895-1d862e1b25f0",
+            "input": null,
+            "tool": "kanban_block"
+          }
+        ],
+        "id": "20261020_025734_e83290",
+        "results": [
+          {
+            "at": 1792458483.55,
+            "callId": "call-679fbf17-65cf-48ee-81f1-c93a61e237a3",
+            "content": "{\"error\": \"gate-readonly : la gate ne modifie pas l'historique git ni ne publie. Verdict via kanban_request_changes ou kanban_complete.\"}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792458943.345,
+            "callId": "call-a2ffe187-0d2e-4994-af8a-e050c72d3fe1",
+            "content": "{\"error\": \"gate-readonly : redirection vers /tmp/red_output.txt refusée, écris sous evidence/.\"}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792459042.053,
+            "callId": "call-1f2698c8-3e7d-489c-b19d-61d9cbf20fd5",
+            "content": "{\"error\": \"gate-readonly : approbation refusée, PR de tests (factory-gate critère 1) : sabotages sans sortie dans 01-sabotage-red.txt : C1, C2, C3, C4, D2, D3, …it être rouge sous son sabotage. Sinon kanban_request_changes avec le détail.\"}",
+            "tool": "kanban_complete"
+          },
+          {
+            "at": 1792459080.78,
+            "callId": "call-e08a6fda-d6c8-4813-98f8-f9dc473750c6",
+            "content": "{\"error\": \"gate-readonly : redirection vers /tmp/sabotage_outputs/red_C1.txt refusée, écris sous evidence/.\"}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792458943.345,
+            "callId": "call-a2ffe187-0d2e-4994-af8a-e050c72d3fe1",
+            "content": "{\"error\": \"gate-readonly : redirection vers /tmp/red_output.txt refusée, écris sous evidence/.\"}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792459080.78,
+            "callId": "call-e08a6fda-d6c8-4813-98f8-f9dc473750c6",
+            "content": "{\"error\": \"gate-readonly : redirection vers /tmp/sabotage_outputs/red_C1.txt refusée, écris sous evidence/.\"}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792459703.14,
+            "callId": "call-c1dab179-bf7a-4979-891f-d31d3241e951",
+            "content": "{\"error\": \"gate-readonly : approbation refusée, PR de tests (factory-gate critère 1) : sabotages sans sortie dans 01-sabotage-red.txt : G1. Sinon kanban_request_changes avec le détail.\"}",
+            "tool": "kanban_complete"
+          },
+          {
+            "at": 1792459777.143,
+            "callId": "call-49d26428-2b7b-410d-b391-9a0d684ab702",
+            "content": "{\"output\": \"\", \"exit_code\": 0, \"error\": null}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792459796.339,
+            "callId": "call-bc74b03a-52e1-4012-9a3c-57d90572cf85",
+            "content": "{\"output\": \"\", \"exit_code\": 0, \"error\": null}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792459801.157,
+            "callId": "call-efce600d-0cd8-42cc-b02f-c1ac5c71a1b0",
+            "content": "{\"error\": \"PR acceptance missing: Supply metadata.published_pr matching the persisted completion contract. Fix required failures, rerun infrastructure checks or…kanban_block if human input is needed; receipts remain on the task event log.\"}",
+            "tool": "kanban_complete"
+          },
+          {
+            "at": 1792459811.42,
+            "callId": "call-060de4cb-6153-4d1f-a8e8-44fccf7c795c",
+            "content": "{\"error\": \"PR acceptance missing: No repository-required checks are configured; explicitly use a local-only contract for non-CI tasks. Fix required failures, re…kanban_block if human input is needed; receipts remain on the task event log.\"}",
+            "tool": "kanban_complete"
+          },
+          {
+            "at": 1792459830.768,
+            "callId": "call-daaf3794-1a2b-463d-868b-739b36c603c4",
+            "content": "{\"error\": \"PR acceptance missing: No repository-required checks are configured; explicitly use a local-only contract for non-CI tasks. Fix required failures, re… loop; inspect the error and change strategy instead of retrying it unchanged.]",
+            "tool": "kanban_complete"
+          },
+          {
+            "at": 1792459834.806,
+            "callId": "call-033d50eb-e8ee-4dfc-ac2f-8a192e07f5e9",
+            "content": "{\"task\": {\"id\": \"t_93914cb4\", \"title\": \"impl claude-cockpit#42 : E2E PR 2b - \\u00eele et lanceur\", \"body\": \"# claude-coc",
+            "tool": "kanban_show"
+          },
+          {
+            "at": 1792459851.187,
+            "callId": "call-60f644d5-bdd1-4e22-b13e-80fab9a4bb15",
+            "content": "{\"output\": \"{\\\"mergeStateStatus\\\":\\\"CLEAN\\\",\\\"mergeable\\\":\\\"MERGEABLE\\\",\\\"state\\\":\\\"OPEN\\\"}\", \"exit_code\": 0, \"error\": n",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792459862.916,
+            "callId": "call-248a8663-383b-46d5-84ef-57fe0c0248aa",
+            "content": "{\"error\": \"PR acceptance missing: No repository-required checks are configured; explicitly use a local-only contract for non-CI tasks. Fix required failures, re…kanban_block if human input is needed; receipts remain on the task event log.\"}",
+            "tool": "kanban_complete"
+          },
+          {
+            "at": 1792459869.683,
+            "callId": "call-86484f1a-6a16-48af-a03a-0b545caae3bb",
+            "content": "{\"error\": \"PR acceptance missing: No repository-required checks are configured; explicitly use a local-only contract for non-CI tasks. Fix required failures, re…kanban_block if human input is needed; receipts remain on the task event log.\"}",
+            "tool": "kanban_complete"
+          },
+          {
+            "at": 1792459875.345,
+            "callId": "call-fab34321-9c35-4d20-9895-1d862e1b25f0",
+            "content": "{\"ok\": true, \"task_id\": \"t_93914cb4\", \"run_id\": 160, \"status\": \"blocked\", \"block_kind\": \"needs_input\"}",
+            "tool": "kanban_block"
+          }
+        ],
+        "runId": 160
+      }
+    ],
+    "task": {
+      "assignee": "gate",
+      "blockKind": "needs_input",
+      "blockRecurrences": 0,
+      "body": "",
+      "branchName": null,
+      "completedAt": null,
+      "consecutiveFailures": 0,
+      "createdAt": 1792362583,
+      "currentRunId": null,
+      "id": "t_93914cb4",
+      "idempotencyKey": null,
+      "lastFailureError": null,
+      "lastHeartbeatAt": null,
+      "maxRuntimeSeconds": 7200,
+      "modelOverride": null,
+      "providerOverride": null,
+      "skills": [
+        "factory-author-proof"
+      ],
+      "startedAt": null,
+      "status": "blocked",
+      "title": "impl claude-cockpit#42 : E2E PR 2b - île et lanceur",
+      "workspacePath": "/home/user/.hermes/kanban/boards/factory/workspaces/t_93914cb4"
+    }
+  },
+  "journal": {
+    "facts": [],
+    "lines": [],
+    "timeZone": "Europe/Paris"
+  },
+  "output": {
+    "computedAt": "2026-10-20T01:31:18.000Z",
+    "episode": {
+      "from": "2026-10-20T00:31:14.000Z",
+      "runIds": [
+        160
+      ]
+    },
+    "others": [
+      {
+        "actor": "you_answer",
+        "cause": {
+          "state": "none"
+        },
+        "code": "refusal_loop",
+        "confidence": "certain",
+        "evidence": [
+          {
+            "at": "2026-10-20T01:15:43.345Z",
+            "count": 4,
+            "fact": {
+              "code": "diagnosis.evidence.guardMessage",
+              "params": {
+                "count": 4,
+                "plugin": "gate-readonly"
+              }
+            },
+            "quote": "{\"error\": \"gate-readonly : redirection vers /tmp/sabotage_outputs/red_C1.txt refusée, écris sous evidence/.\"}",
+            "runId": null,
+            "source": "transcript",
+            "until": "2026-10-20T01:18:00.780Z"
+          }
+        ],
+        "runIds": [
+          160
+        ],
+        "setting": null,
+        "steps": [
+          {
+            "command": null,
+            "done": false,
+            "text": {
+              "code": "diagnosis.step.giveCommand",
+              "params": {}
+            }
+          },
+          {
+            "command": null,
+            "done": false,
+            "text": {
+              "code": "diagnosis.step.unblockWithTemplate",
+              "params": {}
+            }
+          }
+        ],
+        "subject": {
+          "plugin": "gate-readonly",
+          "profile": "gate",
+          "tool": "terminal"
+        },
+        "summary": {
+          "code": "diagnosis.summary.refusalLoop",
+          "params": {
+            "count": 4,
+            "plugin": "gate-readonly"
+          }
+        },
+        "why": {
+          "code": "diagnosis.why.refusalLoop",
+          "params": {
+            "count": 4,
+            "plugin": "gate-readonly"
+          }
+        }
+      }
+    ],
+    "primary": {
+      "actor": "you_factory",
+      "cause": {
+        "state": "present"
+      },
+      "code": "pr_acceptance_missing",
+      "confidence": "certain",
+      "evidence": [
+        {
+          "at": "2026-10-20T01:31:09.683Z",
+          "count": 5,
+          "fact": {
+            "code": "diagnosis.evidence.prAcceptance",
+            "params": {
+              "classification": "missing",
+              "count": 5
+            }
+          },
+          "quote": "{\"error\": \"PR acceptance missing: No repository-required checks are configured; explicitly use a local-only contract for non-CI tasks. Fix required failures, re…kanban_block if human input is needed; receipts remain on the task event log.\"}",
+          "runId": 160,
+          "source": "transcript",
+          "until": null
+        }
+      ],
+      "runIds": [
+        160
+      ],
+      "setting": null,
+      "steps": [
+        {
+          "command": null,
+          "done": false,
+          "text": {
+            "code": "diagnosis.step.configureChecks",
+            "params": {}
+          }
+        }
+      ],
+      "subject": {
+        "plugin": null,
+        "profile": "gate",
+        "tool": "kanban_complete"
+      },
+      "summary": {
+        "code": "diagnosis.summary.prAcceptanceMissing",
+        "params": {}
+      },
+      "why": {
+        "code": "diagnosis.why.prAcceptanceMissing",
+        "params": {
+          "checks": true
+        }
+      }
+    },
+    "runs": [
+      {
+        "finding": "pr_acceptance_missing",
+        "role": "cause",
+        "runId": 160,
+        "sessionId": "20261020_025734_e83290",
+        "text": {
+          "code": "diagnosis.run.prAcceptance",
+          "params": {}
+        }
+      }
+    ],
+    "sources": {
+      "agentLog": true,
+      "config": false,
+      "transcript": true,
+      "workspace": false
+    },
+    "unblock": {
+      "nextBlock": "blocked",
+      "template": {
+        "code": "diagnosis.unblock.causeFixed",
+        "params": {
+          "branch": null
+        }
+      },
+      "when": "after_fix"
+    },
+    "work": {
+      "branch": null,
+      "commits": "none",
+      "commitsRefused": 0,
+      "editedFiles": 0,
+      "evidence": [],
+      "prUrl": null,
+      "pushed": "no"
+    }
+  },
+  "test": "les autres incidents réels du kanban > claude-cockpit#42 (PR 2b) : aucun check requis sur le dépôt, la gate ne peut pas valider"
+}

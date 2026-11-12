@@ -190,3 +190,23 @@ def test_every_new_route_refuses_a_missing_secret(service, route):
         response = service.get(route, headers=headers)
         assert response.status_code == 401
         assert response.json()["error"] == "unauthorized"
+
+
+def test_run_verdicts_of_a_card_without_failure_is_empty(client):
+    # t_0002 has no run; t_0001's runs are crashed then completed: one verdict, for the crashed run.
+    response = client.get("/api/workflows/factory/items/t_0002/run-verdicts", headers=GOOD)
+    assert response.status_code == 200
+    assert response.json() == {"schema_version": 1, "verdicts": []}
+
+    verdicts = client.get("/api/workflows/factory/items/t_0001/run-verdicts", headers=GOOD).json()["verdicts"]
+    assert [verdict["runId"] for verdict in verdicts] == [1]
+
+
+def test_run_verdicts_of_an_unknown_card_is_unknown_item(client):
+    response = client.get("/api/workflows/factory/items/t_9999/run-verdicts", headers=GOOD)
+    assert (response.status_code, response.json()["error"]) == (404, "unknown_item")
+    assert (
+        client.get("/api/workflows/nope/items/t_0001/run-verdicts", headers=GOOD).json()["error"] == "unknown_workflow"
+    )
+    refused = client.get("/api/workflows/factory/items/t_0001/run-verdicts")
+    assert (refused.status_code, refused.json()["error"]) == (401, "unauthorized")

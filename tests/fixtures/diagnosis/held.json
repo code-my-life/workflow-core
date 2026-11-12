@@ -1,0 +1,275 @@
+{
+  "case": "held",
+  "input": {
+    "anchor": null,
+    "board": "factory",
+    "branch": null,
+    "events": [
+      {
+        "createdAt": 1792396607,
+        "id": 2225,
+        "kind": "created",
+        "payload": {},
+        "runId": null,
+        "taskId": "t_04382be9"
+      },
+      {
+        "createdAt": 1792396607,
+        "id": 2226,
+        "kind": "blocked",
+        "payload": {
+          "reason": "initial_status"
+        },
+        "runId": null,
+        "taskId": "t_04382be9"
+      },
+      {
+        "createdAt": 1792396801,
+        "id": 2234,
+        "kind": "unblocked",
+        "payload": {},
+        "runId": null,
+        "taskId": "t_04382be9"
+      },
+      {
+        "createdAt": 1792403699,
+        "id": 2338,
+        "kind": "pr_acceptance",
+        "payload": {
+          "classification": "missing",
+          "detail": "Supply metadata.published_pr matching the persisted completion contract.",
+          "ok": false
+        },
+        "runId": 152,
+        "taskId": "t_04382be9"
+      },
+      {
+        "createdAt": 1792403714,
+        "id": 2339,
+        "kind": "blocked",
+        "payload": {
+          "kind": null,
+          "reason": "Implémentation PR 2a terminée : 12/13 scénarios E2E validés (12 tests passent), npm test/typecheck OK, PR #69 créée. Mais factory-author-proof 1bis exige que CHAQUE scénario soit rouge sous son sabotage et vert sans. Sabotage evidence partiel : 6 patches créés (A1-A4, B1-B2), seulement 2 validés en ",
+          "recurrences": 1
+        },
+        "runId": 152,
+        "taskId": "t_04382be9"
+      },
+      {
+        "createdAt": 1792446960,
+        "id": 2342,
+        "kind": "unblocked",
+        "payload": {},
+        "runId": null,
+        "taskId": "t_04382be9"
+      },
+      {
+        "createdAt": 1792446970,
+        "id": 2343,
+        "kind": "respawn_guarded",
+        "payload": {
+          "reason": "active_pr"
+        },
+        "runId": null,
+        "taskId": "t_04382be9"
+      },
+      {
+        "createdAt": 1792447030,
+        "id": 2344,
+        "kind": "respawn_guarded",
+        "payload": {
+          "reason": "active_pr"
+        },
+        "runId": null,
+        "taskId": "t_04382be9"
+      },
+      {
+        "createdAt": 1792447090,
+        "id": 2345,
+        "kind": "respawn_guarded",
+        "payload": {
+          "reason": "active_pr"
+        },
+        "runId": null,
+        "taskId": "t_04382be9"
+      },
+      {
+        "createdAt": 1792449313,
+        "id": 2382,
+        "kind": "respawn_guarded",
+        "payload": {
+          "reason": "active_pr"
+        },
+        "runId": null,
+        "taskId": "t_04382be9"
+      }
+    ],
+    "evidence": null,
+    "logs": [],
+    "now": 1792449370,
+    "owner": "coder",
+    "prUrl": null,
+    "profile": null,
+    "runs": [],
+    "sessions": [],
+    "task": {
+      "assignee": "coder",
+      "blockKind": null,
+      "blockRecurrences": 0,
+      "body": "",
+      "branchName": null,
+      "completedAt": null,
+      "consecutiveFailures": 0,
+      "createdAt": 1792396607,
+      "currentRunId": null,
+      "id": "t_04382be9",
+      "idempotencyKey": null,
+      "lastFailureError": null,
+      "lastHeartbeatAt": null,
+      "maxRuntimeSeconds": 7200,
+      "modelOverride": null,
+      "providerOverride": null,
+      "skills": [
+        "factory-author-proof"
+      ],
+      "startedAt": null,
+      "status": "ready",
+      "title": "impl claude-cockpit#42 : E2E PR 2a - outillage de test et actions des cartes (reprise)",
+      "workspacePath": "/home/user/.hermes/kanban/boards/factory/workspaces/t_04382be9"
+    }
+  },
+  "journal": {
+    "facts": [],
+    "lines": [],
+    "timeZone": "Europe/Paris"
+  },
+  "output": {
+    "computedAt": "2026-10-19T22:36:10.000Z",
+    "episode": {
+      "from": "2026-10-19T08:00:01.000Z",
+      "runIds": []
+    },
+    "others": [
+      {
+        "actor": "agent",
+        "cause": {
+          "state": "none"
+        },
+        "code": "pr_acceptance_missing",
+        "confidence": "certain",
+        "evidence": [
+          {
+            "at": "2026-10-19T09:54:59.000Z",
+            "count": 1,
+            "fact": {
+              "code": "diagnosis.evidence.prAcceptance",
+              "params": {
+                "classification": "missing",
+                "count": 1
+              }
+            },
+            "quote": "Supply metadata.published_pr matching the persisted completion contract.",
+            "runId": 152,
+            "source": "kanban",
+            "until": null
+          }
+        ],
+        "runIds": [
+          152
+        ],
+        "setting": null,
+        "steps": [],
+        "subject": {
+          "plugin": null,
+          "profile": "coder",
+          "tool": "kanban_complete"
+        },
+        "summary": {
+          "code": "diagnosis.summary.prAcceptanceMissing",
+          "params": {}
+        },
+        "why": {
+          "code": "diagnosis.why.prAcceptanceMissing",
+          "params": {
+            "checks": false
+          }
+        }
+      }
+    ],
+    "primary": {
+      "actor": "you_factory",
+      "cause": {
+        "state": "present"
+      },
+      "code": "held_active_pr",
+      "confidence": "certain",
+      "evidence": [
+        {
+          "at": "2026-10-19T21:56:10.000Z",
+          "count": 4,
+          "fact": {
+            "code": "diagnosis.evidence.lastSignals",
+            "params": {
+              "count": 4
+            }
+          },
+          "quote": "respawn_guarded {\"reason\": \"active_pr\"}",
+          "runId": null,
+          "source": "kanban",
+          "until": "2026-10-19T22:35:13.000Z"
+        }
+      ],
+      "runIds": [],
+      "setting": null,
+      "steps": [
+        {
+          "command": "hermes kanban --board factory reassign t_04382be9 scribe --reason \"relais active_pr\" && hermes kanban --board factory reassign t_04382be9 coder --reason \"reprise sur la PR\"",
+          "done": false,
+          "text": {
+            "code": "diagnosis.step.relay",
+            "params": {
+              "owner": "coder"
+            }
+          }
+        }
+      ],
+      "subject": {
+        "plugin": null,
+        "profile": "coder",
+        "tool": null
+      },
+      "summary": {
+        "code": "diagnosis.summary.heldActivePr",
+        "params": {
+          "minutes": 40
+        }
+      },
+      "why": {
+        "code": "diagnosis.why.heldActivePr",
+        "params": {}
+      }
+    },
+    "runs": [],
+    "sources": {
+      "agentLog": true,
+      "config": false,
+      "transcript": true,
+      "workspace": false
+    },
+    "unblock": {
+      "nextBlock": null,
+      "template": null,
+      "when": "not_unblockable"
+    },
+    "work": {
+      "branch": null,
+      "commits": "none",
+      "commitsRefused": 0,
+      "editedFiles": 0,
+      "evidence": [],
+      "prUrl": null,
+      "pushed": "no"
+    }
+  },
+  "test": "les autres incidents réels du kanban > claude-cockpit#42 (PR 2a) : la carte prête, retenue par la garde active_pr, à relayer"
+}

@@ -23,6 +23,9 @@ WORKFLOW_CORE_SECRET=<secret> uv run python -m workflow_core
 | `GET /api/workflows` | les workflows déclarés, chacun avec son board et la validité de sa fiche |
 | `GET /api/workflows/<clé>/sheet` | la fiche du workflow, jugée à chaque requête (`schema/workflow-sheet.schema.json`) |
 | `GET /api/workflows/<clé>/items` | les éléments du workflow, chacun avec ses exécutions, ses liens et ses commentaires |
+| `GET /api/workflows/<clé>/items/<carte>/diagnosis` | le diagnostic complet de la carte et son déclencheur (`trigger`), calculés à la demande (`schema/diagnosis.schema.json`) ; `null` et `null` pour une carte qui n'attend pas le propriétaire |
+| `GET /api/workflows/<clé>/diagnoses` | les cartes du board qui attendent le propriétaire (bloquées, abandonnées, en triage, retenues), chacune avec son déclencheur et son diagnostic, rangées par heure |
+| `GET /api/workflows/<clé>/items/<carte>/run-verdicts` | le verdict de chaque run en échec de la carte, terminée ou non, du plus récent au plus ancien (`schema/run-verdicts.schema.json`) |
 | `GET /api/machine` | la version d'Hermès, le verdict du test de contrat, le mode (`normal` ou `observer`), l'heure de la dernière lecture de chaque board |
 | `GET /api/events` | le flux SSE des changements, repris avec `Last-Event-ID` ou `?cursor=` |
 

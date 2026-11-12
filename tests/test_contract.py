@@ -139,6 +139,8 @@ def test_the_new_read_tables_and_the_version_line_are_in_the_contract(runtime_ho
         "started_at",
         "ended_at",
         "summary",
+        "metadata",
+        "error",
     }
     assert set(CONTRACT["task_links"].columns) == {"parent_id", "child_id"}
     assert set(CONTRACT["task_comments"].columns) == {"id", "task_id", "author", "body", "created_at"}
@@ -178,3 +180,107 @@ def test_the_data_version_read_is_in_the_contract(runtime_home):
             return ("seven",)
 
     assert contract.pragma_problems(TextVersion()) == ["PRAGMA data_version illisible : 'seven'"]
+
+
+def test_the_card_runs_and_events_read_for_the_diagnosis_are_in_the_contract(runtime_home):
+    from workflow_core.adapters.hermes.contract import CONTRACT
+
+    assert set(CONTRACT["tasks"].columns) >= {
+        "current_run_id",
+        "workspace_path",
+        "skills",
+        "last_heartbeat_at",
+        "branch_name",
+        "consecutive_failures",
+        "block_recurrences",
+        "last_failure_error",
+        "max_runtime_seconds",
+        "idempotency_key",
+        "model_override",
+        "provider_override",
+    }
+    assert {"error", "metadata"} <= set(CONTRACT["task_runs"].columns)
+    assert set(CONTRACT["task_events"].columns) == {"id", "task_id", "run_id", "kind", "payload", "created_at"}
+    assert check().ok is True
+
+    rebuild_tasks_column(board_base(runtime_home, "studio"), "task_events", "payload")
+    assert check().problems == ["studio: task_events.payload absente"]
+
+
+def test_a_journal_line_of_a_modified_format_breaks_the_contract(runtime_home):
+    from workflow_core.adapters.hermes.contract import JOURNAL_KINDS, JOURNAL_LINE
+
+    assert JOURNAL_LINE.pattern.startswith(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),(\d{3}) ")
+    assert JOURNAL_KINDS == (
+        "hook_timeout",
+        "hook_abandoned",
+        "hook_skipped",
+        "hook_raised",
+        "plugin_load_failed",
+        "stop_nudge",
+        "turn_ended",
+        "tool_deadline",
+        "api_failed",
+    )
+    logs = runtime_home / "profiles" / "coder" / "logs"
+    logs.mkdir(parents=True)
+    good = "2026-10-29 09:46:10,161 INFO [20261029_093652_fc383d] agent.tool_executor: tool terminal completed"
+    (logs / "agent.log").write_text(f"{good}\nTraceback (most recent call last):\n", encoding="utf-8")
+    assert check().ok is True
+
+    # The level after the session: a header the reader no longer understands.
+    moved = "2026-10-29 09:46:12,000 [20261029_093652_fc383d] INFO agent.tool_executor: tool terminal completed"
+    with (logs / "agent.log").open("a", encoding="utf-8") as journal:
+        journal.write(f"{moved}\n")
+
+    assert check().problems == [f"journal de coder : en-tête de ligne inconnu : « {moved[:80]} »"]
+
+
+def test_a_session_base_of_a_modified_schema_breaks_the_contract(runtime_home):
+    from workflow_core.adapters.hermes.contract import SESSION_CONTRACT
+
+    from conftest import make_session_base
+
+    assert set(SESSION_CONTRACT["messages"].columns) >= {"session_id", "role", "content", "tool_calls", "timestamp"}
+    base = make_session_base(runtime_home, "coder")
+    base.execute("INSERT INTO sessions (id, source, started_at) VALUES ('s1', 'kanban', 1)")
+    calls = '[{"id": "c1", "type": "function", "function": {"name": "terminal", "arguments": "{}"}}]'
+    base.execute(
+        "INSERT INTO messages (session_id, role, tool_calls, timestamp) VALUES ('s1', 'assistant', ?, 2)", (calls,)
+    )
+    assert check().ok is True
+
+    base.execute("DROP INDEX idx_messages_assistant_calls_by_session")
+    base.execute("ALTER TABLE messages DROP COLUMN tool_calls")
+    base.close()
+
+    assert check().problems == ["agent coder : messages.tool_calls absente"]
+
+
+def test_a_tool_call_without_its_read_fields_breaks_the_contract(runtime_home):
+    from conftest import make_session_base
+
+    base = make_session_base(runtime_home, "coder")
+    base.execute("INSERT INTO sessions (id, source, started_at) VALUES ('s1', 'kanban', 1)")
+    renamed = '[{"id": "c1", "type": "function", "fn": {"name": "terminal", "arguments": "{}"}}]'
+    base.execute(
+        "INSERT INTO messages (session_id, role, tool_calls, timestamp) VALUES ('s1', 'assistant', ?, 2)", (renamed,)
+    )
+    base.close()
+
+    assert check().problems == ["agent coder : appel d'outil sans function.name dans messages.tool_calls"]
+
+
+def test_a_config_of_a_modified_format_breaks_the_contract(runtime_home):
+    from workflow_core.adapters.hermes.contract import CONFIG_KEYS, CONFIG_TABLES
+
+    assert "plugins" in CONFIG_TABLES
+    assert "plugins.hook_callback_timeout" in CONFIG_KEYS
+    profile = runtime_home / "profiles" / "coder"
+    profile.mkdir(parents=True)
+    (profile / "config.yaml").write_text("plugins:\n  enabled: [coder-guard]\n  hook_callback_timeout: 600\n")
+    assert check().ok is True
+
+    (profile / "config.yaml").write_text("plugins:\n  - coder-guard\n")
+
+    assert check().problems == ["agent coder : config.yaml : plugins n'est plus une table"]

@@ -6,6 +6,7 @@ SQLite URI `mode=ro`: SQLite refuses every write on the connection, and the base
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from collections.abc import Iterator
@@ -13,7 +14,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote
 
+from workflow_core.adapters.hermes.texts import TEXTS
 from workflow_core.model.board import BoardUnavailableError, Card, Item
+from workflow_core.model.facts import CardDetail, CardFacts, EventFact, RunFact
 
 # The variable that locates Hermès' home; only this adapter reads it.
 HOME_VARIABLE = "HERMES_HOME"
@@ -24,6 +27,25 @@ CARD_COLUMNS = ("id", "title", "body", "status", "assignee", "created_at", "star
 RUN_COLUMNS = ("id", "task_id", "profile", "status", "outcome", "started_at", "ended_at", "summary")
 LINK_COLUMNS = ("parent_id", "child_id")
 COMMENT_COLUMNS = ("id", "task_id", "author", "body", "created_at")
+# What the diagnosis reads besides, as factory-live reads it (apps/server/src/adapters/hermes/kanban.ts at d47f235).
+CARD_FACT_COLUMNS = (
+    "current_run_id",
+    "workspace_path",
+    "skills",
+    "last_heartbeat_at",
+    "branch_name",
+    "consecutive_failures",
+    "block_recurrences",
+    "last_failure_error",
+    "max_runtime_seconds",
+    "idempotency_key",
+    "model_override",
+    "provider_override",
+)
+RUN_FACT_COLUMNS = ("metadata", "error")
+EVENT_COLUMNS = ("id", "task_id", "run_id", "kind", "payload", "created_at")
+FACT_CARD_COLUMNS = CARD_COLUMNS + CARD_FACT_COLUMNS
+FACT_RUN_COLUMNS = RUN_COLUMNS + RUN_FACT_COLUMNS
 
 
 def open_read_only(board: str, path: Path) -> sqlite3.Connection:
@@ -41,6 +63,25 @@ def _select_cards(db: sqlite3.Connection) -> list[sqlite3.Row]:
     return db.execute(f"SELECT {', '.join(CARD_COLUMNS)} FROM tasks ORDER BY created_at, id").fetchall()
 
 
+def _json_object(text: str | None) -> dict:
+    """A JSON object column; anything else (NULL, invalid JSON, another type) is an empty object, as factory-live
+    reads it."""
+    try:
+        value = json.loads(text) if text else {}
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _string_list(text: str | None) -> list[str]:
+    """A JSON list of strings column (`skills`); anything else is an empty list."""
+    try:
+        value = json.loads(text) if text else []
+    except ValueError:
+        return []
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+
 def hermes_home(environ: dict[str, str] | None = None) -> Path:
     env = os.environ if environ is None else environ
     return Path(env.get(HOME_VARIABLE) or DEFAULT_HOME).expanduser()
@@ -51,6 +92,7 @@ class HermesBoardReader:
 
     def __init__(self, home: Path) -> None:
         self.home = home
+        self.texts = TEXTS
 
     def base_path(self, board: str) -> Path:
         if not board or "/" in board or board in {".", ".."}:
@@ -107,6 +149,75 @@ class HermesBoardReader:
             if row["task_id"] in by_card:
                 by_card[row["task_id"]]["comments"].append({k: row[k] for k in COMMENT_COLUMNS if k != "task_id"})
         return [Item(**dict(row), **by_card[row["id"]]) for row in cards]
+
+    def diagnosis_sources(self, environ: dict[str, str] | None = None) -> HermesDiagnosisSources:
+        """The other sources of the diagnosis under the same Hermès home: sessions, journals, configurations,
+        proofs. The journals are dated in the zone named by `HERMES_TZ`."""
+        return HermesDiagnosisSources(self.home, environ)
+
+    def read_card_facts(self, board: str, card: str) -> CardFacts | None:
+        """The card, its runs and its events, read in one short read transaction; `None` if the card is absent."""
+        found = self._read_facts(board, "WHERE id = ?", "WHERE task_id = ?", (card,))
+        return found[0] if found else None
+
+    def read_board_facts(self, board: str) -> list[CardFacts]:
+        """Every card of the board with its runs and its events, read in one short read transaction."""
+        return self._read_facts(board, "", "", ())
+
+    def _read_facts(self, board: str, card_filter: str, child_filter: str, args: tuple) -> list[CardFacts]:
+        with self.open_board(board) as db:
+            try:
+                db.execute("BEGIN")
+                try:
+                    cards = db.execute(
+                        f"SELECT {', '.join(FACT_CARD_COLUMNS)} FROM tasks {card_filter} ORDER BY created_at, id", args
+                    ).fetchall()
+                    runs = db.execute(
+                        f"SELECT {', '.join(FACT_RUN_COLUMNS)} FROM task_runs {child_filter} ORDER BY id", args
+                    ).fetchall()
+                    events = db.execute(
+                        f"SELECT {', '.join(EVENT_COLUMNS)} FROM task_events {child_filter} ORDER BY id", args
+                    ).fetchall()
+                finally:
+                    db.execute("COMMIT")
+            except sqlite3.Error as error:
+                raise BoardUnavailableError(board, str(error)) from error
+
+        runs_of: dict[str, list[RunFact]] = {row["id"]: [] for row in cards}
+        events_of: dict[str, list[EventFact]] = {row["id"]: [] for row in cards}
+        for run in runs:
+            if run["task_id"] in runs_of:
+                fields = {k: run[k] for k in FACT_RUN_COLUMNS if k != "task_id"}
+                runs_of[run["task_id"]].append(RunFact(**{**fields, "metadata": _json_object(run["metadata"])}))
+        for event in events:
+            if event["task_id"] in events_of:
+                fields = {k: event[k] for k in EVENT_COLUMNS if k != "task_id"}
+                events_of[event["task_id"]].append(EventFact(**{**fields, "payload": _json_object(event["payload"])}))
+        return [
+            CardFacts(
+                card=CardDetail(**{**dict(row), "skills": _string_list(row["skills"])}),
+                runs=runs_of[row["id"]],
+                events=events_of[row["id"]],
+            )
+            for row in cards
+        ]
+
+
+class HermesDiagnosisSources:
+    """Every source the diagnosis reads besides the board, under one Hermès home (`DiagnosisSources`)."""
+
+    def __init__(self, home: Path, environ: dict[str, str] | None = None) -> None:
+        from workflow_core.adapters.hermes.agent_log import DEFAULT_TIME_ZONE, TIME_ZONE_VARIABLE, AgentLogReader
+        from workflow_core.adapters.hermes.evidence import EvidenceReader
+        from workflow_core.adapters.hermes.profiles import ProfileReader
+        from workflow_core.adapters.hermes.sessions import SessionReader
+
+        env = os.environ if environ is None else environ
+        self.texts = TEXTS
+        self.sessions = SessionReader(home)
+        self.logs = AgentLogReader(home, env.get(TIME_ZONE_VARIABLE) or DEFAULT_TIME_ZONE, self.sessions.open_sessions)
+        self.profiles = ProfileReader(home)
+        self.evidence = EvidenceReader(home)
 
 
 class HermesBoardWatcher:

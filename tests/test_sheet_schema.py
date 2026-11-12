@@ -26,3 +26,27 @@ def test_the_published_schema_is_the_model_schema():
     assert published.endswith(b"}\n")
     text = published.decode("utf-8")
     assert not [rule for rule in CROSS_RULES if rule in text]
+
+
+def test_the_run_verdicts_response_matches_its_published_schema():
+    import json
+
+    import jsonschema
+    from workflow_core.model.diagnosis import run_verdicts_schema_text
+
+    published = (SCHEMA.parent / "run-verdicts.schema.json").read_bytes()
+    assert published == run_verdicts_schema_text().encode("utf-8")
+    response = {
+        "schema_version": 1,
+        "verdicts": [
+            {
+                "runId": 191,
+                "finding": "guard_hook_timeout",
+                "role": "consequence",
+                "text": {"code": "diagnosis.run.blockedAfterRefusals", "params": {"count": 3}},
+                "sessionId": "20261029_093652_fc383d",
+            },
+            {"runId": 7, "finding": None, "role": None, "text": "texte tel quel", "sessionId": None},
+        ],
+    }
+    jsonschema.Draft202012Validator(json.loads(published)).validate(response)
