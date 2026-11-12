@@ -2,7 +2,7 @@
 
 Ported from factory-live's rules at commit d47f235 (packages/domain/src/diagnosis/rules.ts). Each rule reads precise
 facts and returns zero, one or several findings; none reads the agent's free text. The runtime's own words a finding
-quotes (the name of a setting) come from the adapter's `RuntimeTerms`.
+quotes (the name of a setting) come from the adapter's texts.
 """
 
 from __future__ import annotations
@@ -11,21 +11,18 @@ import math
 from collections.abc import Callable
 from typing import Any
 
-from workflow_core.clock import iso_ms
 from workflow_core.diagnosis.episode import Episode, profile_name
-from workflow_core.model.diagnosis import (
-    CausePresent,
-    CauseUnknown,
-    Evidence,
-    Finding,
-    Setting,
-    Step,
-    Subject,
-    message,
+from workflow_core.diagnosis.findings import PRESENT, UNKNOWN, RawFinding, RawSetting, evidence, step, subject
+from workflow_core.diagnosis.rules_guards import (
+    guard_hook_hung,
+    guard_hook_raised,
+    guard_hook_timeout,
+    guard_refusals,
+    plugin_load_failed,
 )
-from workflow_core.model.facts import RuntimeTerms
+from workflow_core.model.diagnosis import message
 
-Rule = Callable[[Episode, RuntimeTerms], list[Finding]]
+Rule = Callable[[Episode], list[RawFinding]]
 
 
 def _whole(value: float) -> int | float:
@@ -58,7 +55,7 @@ def _unique(values: list[int]) -> list[int]:
     return list(dict.fromkeys(values))
 
 
-def runtime_limit(episode: Episode, terms: RuntimeTerms) -> list[Finding]:
+def runtime_limit(episode: Episode) -> list[RawFinding]:
     """A run stopped because it went past the card's maximum duration (`runtimeLimit`).
 
     The duration and the limit come from the `timed_out` events of the episode. Reading them from a run's error text
@@ -75,19 +72,17 @@ def runtime_limit(episode: Episode, terms: RuntimeTerms) -> list[Finding]:
     run = episode.run_of(run_id)
     name = profile_name(run) if run is not None else (episode.profile or "?")
     current = episode.card.max_runtime_seconds
-    key = terms.runtime_limit_key
+    key = episode.terms.runtime_limit_key
     return [
-        Finding(
+        RawFinding(
             code="runtime_limit",
             confidence="certain",
             actor="you_factory",
-            cause=CauseUnknown(state="unknown")
-            if current is not None and current > limit
-            else CausePresent(state="present"),
+            cause=UNKNOWN if current is not None and current > limit else PRESENT,
             summary=message("diagnosis.summary.runtimeLimit", seconds=elapsed),
             why=message("diagnosis.why.runtimeLimit", seconds=elapsed, limit=limit),
-            subject=Subject(profile=name, plugin=None, tool=None),
-            setting=Setting(
+            subject=subject(name),
+            setting=RawSetting(
                 profile=name,
                 key=key,
                 unit="seconds",
@@ -98,21 +93,31 @@ def runtime_limit(episode: Episode, terms: RuntimeTerms) -> list[Finding]:
                 repo=None,
             ),
             evidence=[
-                Evidence(
-                    source="kanban",
-                    at=iso_ms(at),
-                    until=None,
-                    run_id=run_id if run_id is not None and run_id > 0 else None,
-                    fact=message("diagnosis.evidence.lastSignals", count=len(hits)),
+                evidence(
+                    "kanban",
+                    at,
+                    message("diagnosis.evidence.lastSignals", count=len(hits)),
+                    run_id=run_id,
                     quote=f"elapsed {elapsed}s > limit {limit}s",
-                    count=None,
                 )
             ],
-            steps=[Step(text=message("diagnosis.step.raiseLimit", key=key, profile=name), command=None, done=False)],
+            steps=[step(message("diagnosis.step.raiseLimit", key=key, profile=name))],
             run_ids=_unique([hit[1] for hit in hits if hit[1] is not None]),
         )
     ]
 
 
-# In factory-live's order. The other rules come with the next stories of the epic.
-RULES: tuple[Rule, ...] = (runtime_limit,)
+# In factory-live's order (`RULES`). The other rules come with the next stories of the epic.
+RULES: tuple[Rule, ...] = (
+    guard_hook_timeout,
+    guard_hook_hung,
+    guard_hook_raised,
+    plugin_load_failed,
+    runtime_limit,
+    guard_refusals,
+)
+
+
+def findings_of(episode: Episode) -> list[RawFinding]:
+    """Every finding of the ported rules, in their order."""
+    return [finding for rule in RULES for finding in rule(episode)]

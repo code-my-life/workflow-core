@@ -14,8 +14,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote
 
+from workflow_core.adapters.hermes.texts import TEXTS
 from workflow_core.model.board import BoardUnavailableError, Card, Item
-from workflow_core.model.facts import CardDetail, CardFacts, EventFact, RunFact, RuntimeTerms
+from workflow_core.model.facts import CardDetail, CardFacts, EventFact, RunFact
 
 # The variable that locates Hermès' home; only this adapter reads it.
 HOME_VARIABLE = "HERMES_HOME"
@@ -45,9 +46,6 @@ RUN_FACT_COLUMNS = ("metadata", "error")
 EVENT_COLUMNS = ("id", "task_id", "run_id", "kind", "payload", "created_at")
 FACT_CARD_COLUMNS = CARD_COLUMNS + CARD_FACT_COLUMNS
 FACT_RUN_COLUMNS = RUN_COLUMNS + RUN_FACT_COLUMNS
-
-# Hermès' own words that a diagnosis quotes.
-TERMS = RuntimeTerms(runtime_limit_key="max_runtime_seconds")
 
 
 def open_read_only(board: str, path: Path) -> sqlite3.Connection:
@@ -94,7 +92,8 @@ class HermesBoardReader:
 
     def __init__(self, home: Path) -> None:
         self.home = home
-        self.terms = TERMS
+        self.terms = TEXTS.terms
+        self.texts = TEXTS
 
     def base_path(self, board: str) -> Path:
         if not board or "/" in board or board in {".", ".."}:

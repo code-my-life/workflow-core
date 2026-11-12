@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
@@ -266,3 +267,93 @@ def make_session_base(home: Path, agent: str) -> sqlite3.Connection:
     db.execute("PRAGMA journal_mode=wal")
     db.executescript(runtime_schema("state", ["sessions", "messages"]))
     return db
+
+
+DIAGNOSIS_REFERENCES = Path(__file__).resolve().parent / "fixtures" / "diagnosis"
+
+
+def reference_cases() -> list[dict]:
+    """The 13 reference outputs of factory-live's diagnosis, copied by the story of the agents' journals."""
+    paths = sorted(path for path in DIAGNOSIS_REFERENCES.glob("*.json") if path.name != "source.json")
+    return [json.loads(path.read_text(encoding="utf-8")) for path in paths]
+
+
+def diagnosis_input_of(data: dict):
+    """The core's diagnosis input from the `input` of a reference output: factory-live's `DiagnosisInput`, in
+    camelCase."""
+    from workflow_core.model.facts import (
+        CardDetail,
+        DiagnosisInput,
+        EventFact,
+        EvidenceFile,
+        LogFact,
+        PluginHook,
+        ProfileFacts,
+        RunFact,
+        SessionFacts,
+        ToolCallFact,
+        ToolResultFact,
+    )
+
+    def snake(name: str) -> str:
+        return re.sub(r"(?<!^)([A-Z])", r"_\1", name).lower()
+
+    def event(item: dict) -> EventFact:
+        return EventFact(
+            id=item["id"],
+            run_id=item["runId"],
+            kind=item["kind"],
+            payload=item["payload"],
+            created_at=item["createdAt"],
+        )
+
+    task = data["task"]
+    card = CardDetail(**{snake(key): value for key, value in task.items()})
+    runs = [RunFact(**{snake(k): v for k, v in run.items() if k != "taskId"}) for run in data["runs"]]
+    sessions = None
+    if data["sessions"] is not None:
+        sessions = [
+            SessionFacts(
+                id=session["id"],
+                run_id=session["runId"],
+                calls=[ToolCallFact(**{snake(k): v for k, v in call.items()}) for call in session["calls"]],
+                results=[ToolResultFact(**{snake(k): v for k, v in result.items()}) for result in session["results"]],
+            )
+            for session in data["sessions"]
+        ]
+    logs = (
+        None if data["logs"] is None else [LogFact(**{snake(k): v for k, v in fact.items()}) for fact in data["logs"]]
+    )
+    profile = None
+    if data["profile"] is not None:
+        raw = data["profile"]
+        profile = ProfileFacts(
+            profile=raw["profile"],
+            hook_timeout=raw["hookTimeout"],
+            tool_deadline=raw["toolDeadline"],
+            terminal_timeout=raw["terminalTimeout"],
+            max_turns=raw["maxTurns"],
+            changed_at=raw["changedAt"],
+            # factory-live leaves `repoHookTimeout` out when the repository cannot be read.
+            repo_read="repoHookTimeout" in raw,
+            repo_hook_timeout=raw.get("repoHookTimeout"),
+            plugins=raw["plugins"],
+            hooks=[PluginHook(**hook) for hook in raw["hooks"]],
+            longest_commands=raw.get("longestCommands", {}),
+        )
+    evidence = None if data["evidence"] is None else [EvidenceFile(**item) for item in data["evidence"]]
+    return DiagnosisInput(
+        now=data["now"],
+        board=data["board"],
+        card=card,
+        runs=runs,
+        events=[event(item) for item in data["events"]],
+        anchor=None if data["anchor"] is None else event(data["anchor"]),
+        sessions=sessions,
+        logs=logs,
+        profile=profile,
+        evidence=evidence,
+        branch=data["branch"],
+        pr_url=data["prUrl"],
+        owner=data.get("owner"),
+    )
