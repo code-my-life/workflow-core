@@ -205,3 +205,32 @@ def test_the_card_runs_and_events_read_for_the_diagnosis_are_in_the_contract(run
 
     rebuild_tasks_column(board_base(runtime_home, "studio"), "task_events", "payload")
     assert check().problems == ["studio: task_events.payload absente"]
+
+
+def test_a_journal_line_of_a_modified_format_breaks_the_contract(runtime_home):
+    from workflow_core.adapters.hermes.contract import JOURNAL_KINDS, JOURNAL_LINE
+
+    assert JOURNAL_LINE.pattern.startswith(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),(\d{3}) ")
+    assert JOURNAL_KINDS == (
+        "hook_timeout",
+        "hook_abandoned",
+        "hook_skipped",
+        "hook_raised",
+        "plugin_load_failed",
+        "stop_nudge",
+        "turn_ended",
+        "tool_deadline",
+        "api_failed",
+    )
+    logs = runtime_home / "profiles" / "coder" / "logs"
+    logs.mkdir(parents=True)
+    good = "2026-10-29 09:46:10,161 INFO [20261029_093652_fc383d] agent.tool_executor: tool terminal completed"
+    (logs / "agent.log").write_text(f"{good}\nTraceback (most recent call last):\n", encoding="utf-8")
+    assert check().ok is True
+
+    # The level after the session: a header the reader no longer understands.
+    moved = "2026-10-29 09:46:12,000 [20261029_093652_fc383d] INFO agent.tool_executor: tool terminal completed"
+    with (logs / "agent.log").open("a", encoding="utf-8") as journal:
+        journal.write(f"{moved}\n")
+
+    assert check().problems == [f"journal de coder : en-tête de ligne inconnu : « {moved[:80]} »"]

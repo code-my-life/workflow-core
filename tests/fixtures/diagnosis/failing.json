@@ -1,0 +1,383 @@
+{
+  "case": "failing",
+  "input": {
+    "anchor": {
+      "createdAt": 1792118327,
+      "id": 130,
+      "kind": "gave_up",
+      "payload": {
+        "error": "pid 22542 exited with code 1 Worker's last output: 'nd event-open + blur fold\" -p gate Session:        20261016_043319_e7ab4e Title:          impl claude-cockpit#8 : island event-open + blur fold Duration:       4m 6s Messages:       41 (1 user, 39 tool calls) Warning: Unknown toolsets: mcp-graphify",
+        "failures": 2,
+        "trigger_outcome": "crashed"
+      },
+      "runId": null,
+      "taskId": "t_2fe761e4"
+    },
+    "board": "factory",
+    "branch": null,
+    "events": [
+      {
+        "createdAt": 1792116356,
+        "id": 65,
+        "kind": "created",
+        "payload": {},
+        "runId": null,
+        "taskId": "t_2fe761e4"
+      },
+      {
+        "createdAt": 1792116548,
+        "id": 79,
+        "kind": "promoted",
+        "payload": {},
+        "runId": null,
+        "taskId": "t_2fe761e4"
+      },
+      {
+        "createdAt": 1792116548,
+        "id": 81,
+        "kind": "spawn_failed",
+        "payload": {
+          "error": "workspace: task t_2fe761e4 has workspace_kind=worktree but no workspace_path, and board 'factory' has no default_workdir set. Set a board default workdir (a git repo) or create the task with --workspace worktree:<absolute-repo-path>.",
+          "failures": 1
+        },
+        "runId": 10,
+        "taskId": "t_2fe761e4"
+      },
+      {
+        "createdAt": 1792116600,
+        "id": 86,
+        "kind": "gave_up",
+        "payload": {
+          "error": "workspace: task t_2fe761e4 has workspace_kind=worktree but no workspace_path, and board 'factory' has no default_workdir set. Set a board default workdir (a git repo) or create the task with --workspace worktree:<absolute-repo-path>.",
+          "failures": 2,
+          "trigger_outcome": "spawn_failed"
+        },
+        "runId": 12,
+        "taskId": "t_2fe761e4"
+      },
+      {
+        "createdAt": 1792116663,
+        "id": 95,
+        "kind": "blocked",
+        "payload": {
+          "kind": "needs_input",
+          "reason": "Le test fail-first passe déjà sur la base, ce qui signifie que le brief est incorrect ou que le bug est ailleurs.",
+          "recurrences": 1
+        },
+        "runId": 14,
+        "taskId": "t_2fe761e4"
+      },
+      {
+        "createdAt": 1792117668,
+        "id": 108,
+        "kind": "crashed",
+        "payload": {
+          "exit_code": 130,
+          "exit_kind": "nonzero_exit",
+          "worker_output": "se renewal stopped so the session can be reclaimed. You can retry your message. ⚡ Interrupted during API call. Operation interrupted: waiting for model response (857.5s elapsed). [Interrupted \u2014 processing new message] ⚡ Sending after interrupt: 'Turn made no progress for 669s; aborting to releas...'"
+        },
+        "runId": 15,
+        "taskId": "t_2fe761e4"
+      },
+      {
+        "createdAt": 1792117949,
+        "id": 116,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 18,
+        "taskId": "t_2fe761e4"
+      },
+      {
+        "createdAt": 1792118199,
+        "id": 122,
+        "kind": "pr_acceptance",
+        "payload": {
+          "classification": "missing",
+          "detail": "Supply metadata.published_pr matching the persisted completion contract.",
+          "ok": false
+        },
+        "runId": 19,
+        "taskId": "t_2fe761e4"
+      },
+      {
+        "createdAt": 1792118238,
+        "id": 124,
+        "kind": "pr_acceptance",
+        "payload": {
+          "classification": "missing",
+          "detail": "Supply metadata.published_pr matching the persisted completion contract.",
+          "ok": false
+        },
+        "runId": 19,
+        "taskId": "t_2fe761e4"
+      },
+      {
+        "createdAt": 1792118241,
+        "id": 125,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "代码审查通过，所有验收标准和接口契约均已满足，测试与类型检查均通过。但因完成合同要求 public repo 需提交 PR，请在将分支 wt/t_2fe761e4 推送到远端后，向 main 创建 PR 并附上 PR 链接，然后重新提交审核。"
+        },
+        "runId": 19,
+        "taskId": "t_2fe761e4"
+      },
+      {
+        "createdAt": 1792118327,
+        "id": 129,
+        "kind": "crashed",
+        "payload": {
+          "exit_code": 1,
+          "exit_kind": "nonzero_exit",
+          "worker_output": "e-cockpit#8 : island event-open + blur fold Duration:       4m 6s Messages:       41 (1 user, 39 tool calls) Warning: Unknown toolsets: mcp-graphify ⚠️ No reply: every provider in the fallback chain kept failing over, so the turn stopped instead of retrying forever. Send continue or switch provider."
+        },
+        "runId": 20,
+        "taskId": "t_2fe761e4"
+      },
+      {
+        "createdAt": 1792118327,
+        "id": 130,
+        "kind": "gave_up",
+        "payload": {
+          "error": "pid 22542 exited with code 1 Worker's last output: 'nd event-open + blur fold\" -p gate Session:        20261016_043319_e7ab4e Title:          impl claude-cockpit#8 : island event-open + blur fold Duration:       4m 6s Messages:       41 (1 user, 39 tool calls) Warning: Unknown toolsets: mcp-graphify",
+          "failures": 2,
+          "trigger_outcome": "crashed"
+        },
+        "runId": null,
+        "taskId": "t_2fe761e4"
+      }
+    ],
+    "evidence": null,
+    "logs": [],
+    "now": 1792118330,
+    "prUrl": null,
+    "profile": null,
+    "runs": [
+      {
+        "endedAt": 1792117668,
+        "error": "pid 2663 exited with code 130 Worker's last output: \"y so the session can continue. ⚠️ Turn aborted by the liveness watchdog (669s without activity); lease renewal stopped so the session can be reclaimed. You can retry your message. ⚡ Interrupted during API call. Operation interrupted: waiting for m",
+        "id": 15,
+        "metadata": {
+          "exit_code": 130,
+          "worker_output": "se renewal stopped so the session can be reclaimed. You can retry your message. ⚡ Interrupted during API call. Operation interrupted: waiting for model response (857.5s elapsed). [Interrupted \u2014 processing new message] ⚡ Sending after interrupt: 'Turn made no progress for 669s; aborting to releas...'"
+        },
+        "outcome": "crashed",
+        "profile": "coder",
+        "startedAt": 1792116746,
+        "status": "crashed",
+        "summary": null,
+        "taskId": "t_2fe761e4"
+      },
+      {
+        "endedAt": 1792118327,
+        "error": "pid 22542 exited with code 1 Worker's last output: 'nd event-open + blur fold\" -p gate Session:        20261016_043319_e7ab4e Title:          impl claude-cockpit#8 : island event-open + blur fold Duration:       4m 6s Messages:       41 (1 user, 39 tool calls) Warning: Unknown toolsets: mcp-graphify",
+        "id": 20,
+        "metadata": {
+          "exit_code": 1,
+          "worker_output": "e-cockpit#8 : island event-open + blur fold Duration:       4m 6s Messages:       41 (1 user, 39 tool calls) Warning: Unknown toolsets: mcp-graphify ⚠️ No reply: every provider in the fallback chain kept failing over, so the turn stopped instead of retrying forever. Send continue or switch provider."
+        },
+        "outcome": "crashed",
+        "profile": "coder",
+        "startedAt": 1792118261,
+        "status": "crashed",
+        "summary": null,
+        "taskId": "t_2fe761e4"
+      }
+    ],
+    "sessions": [
+      {
+        "calls": [
+          {
+            "at": 1792116751.597,
+            "callId": "ZhrqzIeFM",
+            "input": null,
+            "tool": "kanban_show"
+          },
+          {
+            "at": 1792116756.242,
+            "callId": "yaEK3BsxP",
+            "input": "desktop/island/fsm.test.js",
+            "tool": "read_file"
+          },
+          {
+            "at": 1792116756.242,
+            "callId": "kLf4KXhFU",
+            "input": "desktop/island/fsm.js",
+            "tool": "read_file"
+          }
+        ],
+        "id": "20261016_041227_f66774",
+        "results": [
+          {
+            "at": 1792116751.613,
+            "callId": "ZhrqzIeFM",
+            "content": "{\"task\": {\"id\": \"t_2fe761e4\", \"title\": \"impl claude-cockpit#8 : island event-open + blur fold\", \"body\": \"# claude-cockpi",
+            "tool": "kanban_show"
+          },
+          {
+            "at": 1792116756.333,
+            "callId": "yaEK3BsxP",
+            "content": "{\"content\": \"1|const { test } = require('node:test')\\n2|const assert = require('node:assert/strict')\\n3|const { createIs",
+            "tool": "read_file"
+          },
+          {
+            "at": 1792116756.339,
+            "callId": "kLf4KXhFU",
+            "content": "{\"content\": \"1|// Automate de l'île : caché, réduit (compact), ouvert. Module pur : l'horloge\\n2|// est injectée, il ne ",
+            "tool": "read_file"
+          }
+        ],
+        "runId": 15
+      },
+      {
+        "calls": [],
+        "id": "20261016_043743_d90490",
+        "results": [],
+        "runId": 20
+      }
+    ],
+    "task": {
+      "assignee": "gate",
+      "blockKind": null,
+      "blockRecurrences": 0,
+      "body": "",
+      "branchName": null,
+      "completedAt": null,
+      "consecutiveFailures": 0,
+      "createdAt": 1792116356,
+      "currentRunId": null,
+      "id": "t_2fe761e4",
+      "idempotencyKey": null,
+      "lastFailureError": null,
+      "lastHeartbeatAt": null,
+      "maxRuntimeSeconds": 7200,
+      "modelOverride": null,
+      "providerOverride": null,
+      "skills": [
+        "factory-author-proof",
+        "factory-cli-lane"
+      ],
+      "startedAt": null,
+      "status": "blocked",
+      "title": "impl claude-cockpit#8 : island event-open + blur fold",
+      "workspacePath": "/home/user/perso/claude-cockpit/.worktrees/t_2fe761e4"
+    }
+  },
+  "journal": {
+    "facts": [],
+    "lines": [],
+    "timeZone": "Europe/Paris"
+  },
+  "output": {
+    "computedAt": "2026-10-16T02:38:50.000Z",
+    "episode": {
+      "from": "2026-10-16T02:37:21.000Z",
+      "runIds": [
+        20
+      ]
+    },
+    "others": [],
+    "primary": {
+      "actor": "you_factory",
+      "cause": {
+        "state": "unknown"
+      },
+      "code": "provider_unavailable",
+      "confidence": "certain",
+      "evidence": [
+        {
+          "at": "2026-10-16T02:38:47.000Z",
+          "count": 1,
+          "fact": {
+            "code": "diagnosis.evidence.workerOutput",
+            "params": {}
+          },
+          "quote": "e-cockpit#8 : island event-open + blur fold Duration:       4m 6s Messages:       41 (1 user, 39 tool calls) Warning: Unknown toolsets: mcp-graphify ⚠️ No reply: every provider in the fallback chain kept failing over, so the turn stopped instead of retrying forever. Send continue or switch provider.",
+          "runId": 20,
+          "source": "kanban",
+          "until": null
+        }
+      ],
+      "runIds": [
+        20
+      ],
+      "setting": null,
+      "steps": [
+        {
+          "command": null,
+          "done": false,
+          "text": {
+            "code": "diagnosis.step.checkProvider",
+            "params": {
+              "provider": null
+            }
+          }
+        },
+        {
+          "command": null,
+          "done": false,
+          "text": {
+            "code": "diagnosis.step.chooseModel",
+            "params": {}
+          }
+        }
+      ],
+      "subject": {
+        "plugin": null,
+        "profile": "coder",
+        "tool": null
+      },
+      "summary": {
+        "code": "diagnosis.summary.providerUnavailable",
+        "params": {
+          "mode": "failing",
+          "seconds": null
+        }
+      },
+      "why": {
+        "code": "diagnosis.why.providerUnavailable",
+        "params": {
+          "mode": "failing",
+          "seconds": null
+        }
+      }
+    },
+    "runs": [
+      {
+        "finding": "provider_unavailable",
+        "role": "cause",
+        "runId": 20,
+        "sessionId": "20261016_043743_d90490",
+        "text": {
+          "code": "diagnosis.run.providerUnavailable",
+          "params": {}
+        }
+      }
+    ],
+    "sources": {
+      "agentLog": true,
+      "config": false,
+      "transcript": true,
+      "workspace": false
+    },
+    "unblock": {
+      "nextBlock": "blocked",
+      "template": {
+        "code": "diagnosis.unblock.causeFixed",
+        "params": {
+          "branch": null
+        }
+      },
+      "when": "now"
+    },
+    "work": {
+      "branch": null,
+      "commits": "none",
+      "commitsRefused": 0,
+      "editedFiles": 0,
+      "evidence": [],
+      "prUrl": null,
+      "pushed": "no"
+    }
+  },
+  "test": "les autres incidents réels du kanban > claude-cockpit#8 : le fournisseur muet 669 s, puis toute la chaîne de repli en échec"
+}
