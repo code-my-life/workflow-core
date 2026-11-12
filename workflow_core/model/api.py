@@ -12,6 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from workflow_core.model.agents import Agent, KanbanSettings
 from workflow_core.model.board import Item
 from workflow_core.model.checks import MachineCheck
 from workflow_core.model.contract import ContractVerdict, Mode
@@ -146,6 +147,15 @@ class DeclaredDataResponse(_Response):
     data: list[DeclaredData]
 
 
+class AgentsResponse(_Response):
+    """GET /api/workflows/<key>/agents?days=<n>: the workflow's agents and their configuration in service, without a
+    secret, and the runtime's settings of the kanban (None when its configuration is unreadable)."""
+
+    workflow: str
+    kanban: KanbanSettings | None
+    agents: list[Agent]
+
+
 def _schema_text(model: type[BaseModel]) -> Callable[[], str]:
     def text() -> str:
         return json.dumps(model.model_json_schema(by_alias=True), indent=2, ensure_ascii=False) + "\n"
@@ -166,4 +176,5 @@ API_SCHEMAS: dict[str, Callable[[], str]] = {
     "usage.schema.json": _schema_text(UsageResponse),
     "declared-data.schema.json": _schema_text(DeclaredDataResponse),
     "interventions.schema.json": _schema_text(InterventionsResponse),
+    "agents.schema.json": _schema_text(AgentsResponse),
 }

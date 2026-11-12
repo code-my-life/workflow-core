@@ -29,6 +29,7 @@ from workflow_core.adapters.hermes.live import LIVE_LOG_PATTERNS, USAGE_COLUMNS
 from workflow_core.adapters.hermes.machine import CRON_JOBS, ESTOP, HEARTBEAT_COLUMNS, LLAMA_SERVER, cron_jobs
 from workflow_core.adapters.hermes.profiles import (
     CONFIG_KEYS,
+    CONFIG_LISTS,
     CONFIG_TABLES,
     MAX_CONFIG_BYTES,
     config_path,
@@ -92,7 +93,7 @@ def pragma_problems(db) -> list[str]:
 # The version output is part of the contract too: its first line must keep the form VERSION_LINE reads.
 
 # The agents' configurations: the YAML keys read (profiles.py), declared here with the tables that hold them.
-CONFIG_DECLARATION = {"tables": CONFIG_TABLES, "keys": CONFIG_KEYS}
+CONFIG_DECLARATION = {"tables": CONFIG_TABLES, "keys": CONFIG_KEYS, "lists": CONFIG_LISTS}
 
 # The agents' journals: the header of a line, and the nine kinds of lines the diagnosis reads (agent_log.py).
 JOURNAL_LINE = LOG_LINE
@@ -175,17 +176,24 @@ def configs(home: Path) -> list[tuple[str, Path]]:
     return [(agent, path) for agent, path in found if path is not None]
 
 
+def _dotted(config: dict, key: str) -> object:
+    value: object = config
+    for part in key.split("."):
+        value = value.get(part) if isinstance(value, dict) else None
+    return value
+
+
 def _config_gaps(config: dict) -> list[str]:
-    gaps = []
-    for key in CONFIG_TABLES:
-        value: object = config
-        for part in key.split("."):
-            value = value.get(part) if isinstance(value, dict) else None
-        if value is not None and not isinstance(value, dict):
-            gaps.append(f"{key} n'est plus une table")
-    enabled = config.get("plugins", {}).get("enabled") if isinstance(config.get("plugins"), dict) else None
-    if enabled is not None and not isinstance(enabled, list):
-        gaps.append("plugins.enabled n'est plus une liste")
+    gaps = [
+        f"{key} n'est plus une table"
+        for key in CONFIG_TABLES
+        if (value := _dotted(config, key)) is not None and not isinstance(value, dict)
+    ]
+    gaps += [
+        f"{key} n'est plus une liste"
+        for key in CONFIG_LISTS
+        if (value := _dotted(config, key)) is not None and not isinstance(value, list)
+    ]
     return gaps
 
 

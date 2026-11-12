@@ -31,6 +31,7 @@ PUBLISHED = (
     "usage.schema.json",
     "declared-data.schema.json",
     "interventions.schema.json",
+    "agents.schema.json",
 )
 
 

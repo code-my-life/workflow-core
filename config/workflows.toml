@@ -16,6 +16,8 @@ main_red_reason = 'main rouge|workflows? de main|watch-main'
 repo = "~/perso/hermes-software-factory"
 profiles = "profiles"
 plugins = "plugins"
+# Its manifest, which declares its agents and their skills (served by GET /api/workflows/factory/agents).
+manifest = "factory.yaml"
 guard_suffixes = ["-guard", "-readonly"]
 default_agent = "coder"
 relay_agent = "scribe"
