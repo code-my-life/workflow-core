@@ -38,6 +38,12 @@ def _held_since(events: list[EventFact]) -> int | None:
     return since
 
 
+def ready_since(facts: CardFacts) -> int:
+    """When a held card became ready: its last event that counts the hold again from zero, else its creation."""
+    resets = [event.created_at for event in facts.events if event.kind in RESET_HOLD]
+    return max(resets) if resets else facts.card.created_at
+
+
 def _matches(pattern: str | None, text: str) -> bool:
     return pattern is not None and re.search(pattern, text, re.IGNORECASE) is not None
 

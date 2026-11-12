@@ -2,8 +2,10 @@
 entry asks for it (`notify = true`), never twice for the same key, and nothing at all when switched off or when the
 contract is broken (ADR 0009, ADR 0019).
 
-A wait is a blocked card, recognised by the diagnosis' triggers (one rule in the repository): its key is
-`<workflow>:<trigger id>`, `factory:needs_input:t_ab12cd34:5509`. Before posting a key its register does not hold,
+A wait is a blocked card, or a ready card held by the active pull request guard for the workflow's
+`held_after_minutes`, both recognised by the diagnosis' triggers (one rule in the repository): its key is
+`<workflow>:<trigger id>`, `factory:needs_input:t_ab12cd34:5509`, `factory:held_active_pr:t_ab12cd34:1794500000`.
+Before posting a key its register does not hold,
 the notifier reads every comment of the issue and posts nothing when the App already wrote the wait's marker there:
 a lost register or a rebuilt journal never posts an alert twice.
 """
@@ -20,11 +22,11 @@ from typing import Protocol
 
 from workflow_core.adapters.github import APP_BOT, IssueComment
 from workflow_core.config import Workflow
-from workflow_core.diagnosis.triggers import trigger_of
+from workflow_core.diagnosis.triggers import ready_since, trigger_of
 from workflow_core.model.board import BoardUnavailableError
 from workflow_core.model.facts import CardFacts
 from workflow_core.model.state import CoreState
-from workflow_core.notify.alerts import blocked_alert, marker, parse_issue
+from workflow_core.notify.alerts import blocked_alert, held_alert, marker, parse_issue
 from workflow_core.notify.register import AlertRegister
 from workflow_core.notify.settings import NotifySettings
 
@@ -39,6 +41,8 @@ class WaitReader(Protocol):
     def read_board_facts(self, board: str) -> list[CardFacts]: ...
 
     def read_issue_urls(self, board: str) -> dict[str, str | None]: ...
+
+    def relaunch_command(self, board: str, card: str, assignee: str, relay: str) -> str: ...
 
 
 def journal_line(line: str) -> None:
@@ -90,12 +94,19 @@ class Notifier:
         issues: dict[str, str | None] | None = None
         for facts in cards:
             card = facts.card
-            if card.status != "blocked" or card.assignee in workflow.notify_skip_assignees:
+            if card.status not in ("blocked", "ready") or card.assignee in workflow.notify_skip_assignees:
                 continue
             trigger = trigger_of(facts, workflow, now)
-            if trigger is None or trigger.kind not in BLOCKED_KINDS:
+            if trigger is None:
                 continue
-            if trigger.opened_at < self.settings.since:
+            if card.status == "blocked" and trigger.kind in BLOCKED_KINDS:
+                opened = trigger.opened_at
+            elif card.status == "ready" and trigger.kind == "held_active_pr":
+                # A held card's wait opens when it became ready.
+                opened = ready_since(facts)
+            else:
+                continue
+            if opened < self.settings.since:
                 continue
             key = f"{workflow.key}:{trigger.id}"
             if self.register.has(key):
@@ -116,18 +127,10 @@ class Notifier:
                 continue
             if self._already_in_issue(key, issue, f"{owner}/{repo}", number):
                 continue
-            event = next((item for item in facts.events if item.id == trigger.event), None)
-            reason = event.payload.get("reason") if event is not None else None
-            body = blocked_alert(
-                key=key,
-                workflow=workflow.key,
-                kind=trigger.kind,
-                issue=issue,
-                card=card.id,
-                title=card.title,
-                question=reason if isinstance(reason, str) else "",
-                live_url=self.settings.live_url,
-            )
+            if trigger.kind == "held_active_pr":
+                body = self._held_body(workflow, facts, key, issue, now)
+            else:
+                body = self._blocked_body(workflow, facts, trigger, key, issue)
             try:
                 url = self.post_comment(f"{owner}/{repo}", number, body)
             except Exception as error:
@@ -135,6 +138,39 @@ class Notifier:
                 continue
             self.register.note(key, url)
             self.log(f"workflow-core: notificateur, alerte {key} postée : {url}")
+
+    def _blocked_body(self, workflow: Workflow, facts: CardFacts, trigger, key: str, issue: str) -> str:
+        event = next((item for item in facts.events if item.id == trigger.event), None)
+        reason = event.payload.get("reason") if event is not None else None
+        return blocked_alert(
+            key=key,
+            workflow=workflow.key,
+            kind=trigger.kind,
+            issue=issue,
+            card=facts.card.id,
+            title=facts.card.title,
+            question=reason if isinstance(reason, str) else "",
+            live_url=self.settings.live_url,
+        )
+
+    def _held_body(self, workflow: Workflow, facts: CardFacts, key: str, issue: str, now: float) -> str:
+        card = facts.card
+        relay = next((agent for agent in workflow.notify_relay_agents if agent != card.assignee), None)
+        relaunch = (
+            self.reader.relaunch_command(workflow.board, card.id, card.assignee, relay)
+            if relay is not None and card.assignee
+            else None
+        )
+        return held_alert(
+            key=key,
+            workflow=workflow.key,
+            issue=issue,
+            card=card.id,
+            title=card.title,
+            minutes=int((now - ready_since(facts)) // 60),
+            relaunch=relaunch,
+            live_url=self.settings.live_url,
+        )
 
     def _already_in_issue(self, key: str, issue: str, repo: str, number: int) -> bool:
         """Whether the issue already holds this wait's alert, by the App (a marker written by another account does

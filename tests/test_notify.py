@@ -423,3 +423,174 @@ def test_a_rebuilt_event_journal_posts_nothing_again(home, tmp_path):
             app.state.notifier.run_pass()
         journal.unlink(missing_ok=True)
     assert len(github.posted) == 1
+
+
+READY = NOON + 60
+HELD_WORKFLOWS = {
+    "factory": Workflow(
+        key="factory",
+        board="factory",
+        sheet=Path("factory.json"),
+        notify=True,
+        notify_skip_assignees=["factory-gate", "factory-release"],
+        notify_relay_agents=["scribe", "coder"],
+    ),
+}
+
+
+def event(id: int, task: str, kind: str, at: float, payload: dict | None = None) -> dict:
+    return {
+        "id": id,
+        "task_id": task,
+        "run_id": None,
+        "kind": kind,
+        "payload": json.dumps(payload or {}),
+        "created_at": int(at),
+    }
+
+
+def held_card(id: str = "t_00000001", assignee: str = "coder") -> dict:
+    return card(id, title="Le juge refuse une fiche", body=ISSUE, status="ready", block_kind=None, assignee=assignee)
+
+
+def guarded(id: int, task: str, at: float, reason: str = "active_pr") -> dict:
+    return event(id, task, "respawn_guarded", at, {"reason": reason})
+
+
+def test_a_card_held_by_active_pr_for_thirty_minutes_gets_one_alert(home, tmp_path):
+    make_board(
+        home,
+        "factory",
+        [held_card()],
+        events=[event(1, "t_00000001", "created", READY), guarded(2, "t_00000001", READY)],
+    )
+    make_board(home, "studio", [])
+    github = FakeGitHub()
+    alerts = notifier(tmp_path, github, now=READY + 31 * 60, workflows=HELD_WORKFLOWS)
+
+    alerts.run_pass()
+    alerts.run_pass()
+
+    assert len(github.posted) == 1
+    repo, number, body = github.posted[0]
+    assert (repo, number) == ("code-my-life/workflow-core", 99)
+    assert "### ⚠️ Carte prête mais retenue" in body
+    assert "Workflow `factory` · élément `factory:workflow-core#99` · carte `t_00000001` : Le juge" in body
+    assert "Prête depuis 31 min" in body
+    assert "la garde `active_pr` la retient" in body
+    relay = "kanban --board factory reassign t_00000001 scribe"
+    back = "kanban --board factory reassign t_00000001 coder"
+    assert relay in body
+    assert back in body
+    assert body.index(relay) < body.index(back)
+    assert f"{LIVE}/issues/workflow-core/99" in body
+    assert body.endswith(f"<!-- workflow-core:attente factory:held_active_pr:t_00000001:{int(READY)} -->")
+
+
+def test_the_held_delay_is_read_from_the_workflow_entry(home, tmp_path):
+    make_board(
+        home,
+        "factory",
+        [held_card()],
+        events=[event(1, "t_00000001", "created", READY), guarded(2, "t_00000001", READY)],
+    )
+    make_board(home, "studio", [])
+    github = FakeGitHub()
+
+    notifier(tmp_path, github, now=READY + 29 * 60, workflows=HELD_WORKFLOWS).run_pass()
+    assert github.posted == []
+
+    sooner = {"factory": HELD_WORKFLOWS["factory"].model_copy(update={"held_after_minutes": 20})}
+    notifier(tmp_path, github, now=READY + 29 * 60, workflows=sooner).run_pass()
+    assert len(github.posted) == 1
+    assert "Prête depuis 29 min" in github.posted[0][2]
+
+
+def test_a_ready_card_without_the_active_pr_guard_gets_no_alert(home, tmp_path):
+    make_board(
+        home,
+        "factory",
+        [held_card("t_00000001"), held_card("t_00000002")],
+        events=[
+            event(1, "t_00000001", "created", READY),
+            guarded(2, "t_00000001", READY, reason="rate_limit_cooldown"),
+            event(3, "t_00000002", "created", READY),
+        ],
+    )
+    make_board(home, "studio", [])
+    github = FakeGitHub()
+
+    notifier(tmp_path, github, now=READY + 60 * 60, workflows=HELD_WORKFLOWS).run_pass()
+
+    assert github.posted == []
+
+
+def test_the_relaunch_command_relays_through_another_agent(home, tmp_path):
+    make_board(
+        home,
+        "factory",
+        [held_card(assignee="scribe")],
+        events=[event(1, "t_00000001", "created", READY), guarded(2, "t_00000001", READY)],
+    )
+    make_board(home, "studio", [])
+    github = FakeGitHub()
+
+    notifier(tmp_path, github, now=READY + 31 * 60, workflows=HELD_WORKFLOWS).run_pass()
+
+    body = github.posted[0][2]
+    relay = "kanban --board factory reassign t_00000001 coder"
+    back = "kanban --board factory reassign t_00000001 scribe"
+    assert body.index(relay) < body.index(back)
+
+    # Without relay agents in its entry, the alert leaves the command out and points at the factory's RUNBOOK.
+    bare = {"factory": HELD_WORKFLOWS["factory"].model_copy(update={"notify_relay_agents": []})}
+    other = FakeGitHub()
+    notifier(tmp_path / "bare", other, now=READY + 31 * 60, workflows=bare).run_pass()
+    assert "reassign" not in other.posted[0][2]
+    assert "« Incidents connus »" in other.posted[0][2]
+
+
+def test_a_card_held_again_gets_a_new_alert(home, tmp_path):
+    make_board(
+        home,
+        "factory",
+        [held_card()],
+        events=[event(1, "t_00000001", "created", READY), guarded(2, "t_00000001", READY)],
+    )
+    make_board(home, "studio", [])
+    github = FakeGitHub()
+    notifier(tmp_path, github, now=READY + 31 * 60, workflows=HELD_WORKFLOWS).run_pass()
+
+    again = READY + 40 * 60
+    with sqlite3.connect(home / "kanban" / "boards" / "factory" / "kanban.db") as db:
+        for row in (event(3, "t_00000001", "unblocked", again), guarded(4, "t_00000001", again)):
+            db.execute(
+                "INSERT INTO task_events (id, task_id, run_id, kind, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                tuple(row.values()),
+            )
+    db.close()
+    alerts = notifier(tmp_path, github, now=again + 31 * 60, workflows=HELD_WORKFLOWS)
+    alerts.run_pass()
+    alerts.run_pass()
+
+    assert [body.splitlines()[-1] for _, _, body in github.posted] == [
+        f"<!-- workflow-core:attente factory:held_active_pr:t_00000001:{int(READY)} -->",
+        f"<!-- workflow-core:attente factory:held_active_pr:t_00000001:{int(again)} -->",
+    ]
+
+
+def test_a_held_alert_already_in_the_issue_is_not_posted_again(home, tmp_path):
+    make_board(
+        home,
+        "factory",
+        [held_card()],
+        events=[event(1, "t_00000001", "created", READY), guarded(2, "t_00000001", READY)],
+    )
+    make_board(home, "studio", [])
+    github = FakeGitHub()
+    notifier(tmp_path, github, now=READY + 31 * 60, workflows=HELD_WORKFLOWS).run_pass()
+
+    (tmp_path / "state" / "alerts.db").unlink()
+    notifier(tmp_path, github, now=READY + 45 * 60, workflows=HELD_WORKFLOWS).run_pass()
+
+    assert len(github.posted) == 1

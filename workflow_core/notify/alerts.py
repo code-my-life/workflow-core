@@ -58,3 +58,33 @@ def blocked_alert(
         lines += ["", f"[Voir l'élément dans factory-live]({live_url}/issues/{repo}/{number})"]
     lines += ["", FOOTER, "", marker(key)]
     return "\n".join(lines)
+
+
+def held_alert(
+    *,
+    key: str,
+    workflow: str,
+    issue: str,
+    card: str,
+    title: str,
+    minutes: int,
+    relaunch: str | None,
+    live_url: str | None,
+) -> str:
+    _, repo, number = parse_issue(issue)
+    lines = [
+        "### ⚠️ Carte prête mais retenue",
+        f"Workflow `{workflow}` · élément `{workflow}:{repo}#{number}` · carte `{card}` : {title}",
+        "",
+        f"Prête depuis {minutes} min, aucun agent ne la prend : la garde `active_pr` la retient (un commentaire de la "
+        "carte cite déjà sa pull request, et aucun relais n'a suivi). Ne pas la bloquer : elle passerait en triage.",
+        "",
+    ]
+    if relaunch:
+        lines += ["**Relance** (opérateur) :", "```", relaunch, "```"]
+    else:
+        lines += ["Relance : voir le RUNBOOK de la factory, « Incidents connus »."]
+    if live_url:
+        lines += ["", f"[Voir l'élément dans factory-live]({live_url}/issues/{repo}/{number})"]
+    lines += ["", FOOTER, "", marker(key)]
+    return "\n".join(lines)
