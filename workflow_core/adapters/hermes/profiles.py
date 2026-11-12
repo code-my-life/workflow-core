@@ -15,10 +15,10 @@ from typing import Any
 
 import yaml
 
-from workflow_core.adapters.hermes.agent_log import safe_file
+from workflow_core.adapters.hermes.paths import NAME, safe_file
 from workflow_core.config import Workflow
 from workflow_core.model.facts import PluginHook, ProfileFacts
-from workflow_core.text import js_regex, js_trim
+from workflow_core.text import js_regex, js_trim, whole
 
 # The ceilings of a read: a bigger file is not a file the diagnosis expects.
 MAX_CONFIG_BYTES = 256 * 1024
@@ -26,7 +26,6 @@ MAX_PLUGIN_BYTES = 512 * 1024
 # Where a workflow's repository keeps its agents' profiles when its entry does not say (ADR 0001).
 DEFAULT_REPO_PROFILES = "hermes/profiles"
 
-_NAME = js_regex(r"^[\w-]+$")
 # A hook a plugin plugs, read in its code: `ctx.register_hook("<hook>", <function>)`.
 REGISTER_HOOK = js_regex(r"""register_hook\(\s*["'](\w+)["']\s*,\s*(\w+)""")
 # A delay written in a plugin's Python code: `timeout=120`, `timeout: int = 900`.
@@ -45,10 +44,6 @@ CONFIG_KEYS = (
 # JavaScript's `Number(text)` for a trimmed text: a decimal, `0x`, `0o` or `0b` literal, or `Infinity`.
 _JS_DECIMAL = re.compile(r"[+-]?(?:\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?|Infinity)", re.ASCII)
 _JS_RADIX = re.compile(r"0(?:[xX][0-9a-fA-F]+|[oO][0-7]+|[bB][01]+)", re.ASCII)
-
-
-def _whole(value: float) -> float:
-    return int(value) if value.is_integer() else value
 
 
 def _js_number(text: str) -> float:
@@ -72,7 +67,7 @@ def amount(value: Any) -> float | None:
         number = _js_number(js_trim(value))
     else:
         number = math.nan
-    return _whole(number) if value != "" and math.isfinite(number) else None
+    return whole(number) if value != "" and math.isfinite(number) else None
 
 
 def _record(value: Any) -> dict:
@@ -97,7 +92,7 @@ def plugin_hooks_of(plugin: str, source: str) -> list[PluginHook]:
 def longest_timeout_of(source: str) -> float | None:
     """The longest command a plugin's code can run: the greatest literal delay it passes or gives by default."""
     values = [float(match[1]) for match in TIMEOUT_LITERAL.finditer(source)]
-    return _whole(max(values)) if values else None
+    return whole(max(values)) if values else None
 
 
 def profile_facts_of(
@@ -138,21 +133,21 @@ def _parts(folder: str) -> list[str] | None:
 
 def config_path(home: Path, agent: str) -> Path | None:
     """`profiles/<agent>/config.yaml` of Hermès' home: the configuration in service."""
-    return safe_file(home / "profiles", agent, "config.yaml") if _NAME.fullmatch(agent) else None
+    return safe_file(home / "profiles", agent, "config.yaml") if NAME.fullmatch(agent) else None
 
 
 def repo_config_path(workflow: Workflow, agent: str) -> Path | None:
     """`<repo>/<profiles>/<agent>/config.yaml`: the configuration the workflow's repository installs."""
     repo = workflow.repo_path
     parts = _parts(workflow.profiles or DEFAULT_REPO_PROFILES)
-    if repo is None or parts is None or not _NAME.fullmatch(agent):
+    if repo is None or parts is None or not NAME.fullmatch(agent):
         return None
     return safe_file(repo, *parts, agent, "config.yaml")
 
 
 def plugin_source(home: Path, workflow: Workflow, agent: str, plugin: str) -> Path | None:
     """The code of a plugin installed for the agent, else the one of the workflow's repository."""
-    if not _NAME.fullmatch(agent) or not _NAME.fullmatch(plugin):
+    if not NAME.fullmatch(agent) or not NAME.fullmatch(plugin):
         return None
     installed = safe_file(home / "profiles", agent, "plugins", plugin, "__init__.py")
     if installed is not None:

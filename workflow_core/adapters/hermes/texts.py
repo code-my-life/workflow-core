@@ -9,14 +9,13 @@ suffixes of its guards, the text of its pull request acceptance check) are given
 from __future__ import annotations
 
 import json
-import math
 import re
 from typing import Any
 
 from workflow_core.adapters.hermes.profiles import DEFAULT_REPO_PROFILES
 from workflow_core.adapters.hermes.sessions import resume_session_of
 from workflow_core.model.facts import RuntimeTerms, ToolOutcome
-from workflow_core.text import js_regex, js_trim
+from workflow_core.text import js_regex, js_round_text, js_trim, number_text
 
 # `plugins.hook_callback_timeout` by default, and its maximum.
 HOOK_TIMEOUT_DEFAULT = 30
@@ -97,14 +96,6 @@ def _full(pattern: re.Pattern[str], text: str) -> re.Match[str] | None:
     return match if match is not None and match.end() == len(text) else None
 
 
-def _js_round(text: str) -> float | None:
-    try:
-        value = float(text)
-    except ValueError:
-        return None
-    return math.floor(value + 0.5) if math.isfinite(value) else None
-
-
 def _record_of(trimmed: str) -> dict | None:
     """The JSON object of a tool result. A content cut by the adapter is no longer valid JSON: then the start of
     `error`, or the exit code, is kept, enough to classify the result."""
@@ -136,7 +127,7 @@ class HermesTexts:
         trimmed = js_trim(content)
         deadline = TOOL_DEADLINE.search(trimmed)
         if deadline:
-            return ToolOutcome(kind="tool_deadline", tool=deadline[1] or "?", seconds=_js_round(deadline[2]))
+            return ToolOutcome(kind="tool_deadline", tool=deadline[1] or "?", seconds=js_round_text(deadline[2]))
         if not trimmed.startswith("{"):
             return ToolOutcome(kind="ok")
         record = _record_of(trimmed)
@@ -172,7 +163,7 @@ class HermesTexts:
         return ToolOutcome(kind="ok")
 
     def set_command(self, agent: str, key: str, value: float) -> str:
-        return f"hermes -p {agent} config set {key} {_number_text(value)}"
+        return f"hermes -p {agent} config set {key} {number_text(value)}"
 
     def is_protocol_violation(self, error: str | None) -> bool:
         return bool(error) and PROTOCOL_VIOLATION.search(error) is not None
@@ -220,11 +211,6 @@ class HermesTexts:
             return None
         name = module.split(".")[-1]
         return name.replace("_", "-") if name else None
-
-
-def _number_text(value: float) -> str:
-    # A number as JavaScript writes it in a template: 600, not 600.0.
-    return str(int(value)) if float(value).is_integer() else str(value)
 
 
 TEXTS = HermesTexts()

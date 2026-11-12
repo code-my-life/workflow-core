@@ -8,6 +8,7 @@ code units.
 
 from __future__ import annotations
 
+import math
 import re
 
 # JavaScript's `\s` (ECMAScript WhiteSpace and LineTerminator), for a character class.
@@ -125,3 +126,23 @@ def quote(text: str | None) -> str | None:
         return None
     clean = js_trim(redact_secrets(text))
     return f"{utf16_slice(clean, 299)}…" if _utf16_length(clean) > 300 else clean
+
+
+def whole(value):
+    """A number as JSON holds it: JavaScript has one number type, so 7260.0 is the integer 7260."""
+    return int(value) if isinstance(value, float) and value.is_integer() else value
+
+
+def number_text(value: float) -> str:
+    """A number as a JavaScript template writes it: 600, not 600.0."""
+    return str(whole(float(value)))
+
+
+def js_round_text(text: str) -> int | None:
+    """JavaScript's `Math.round(Number(text))` for a decimal text: halves go up; what is not a number (`1.2.3`)
+    gives `None`, as JavaScript's `NaN` is written `null` in JSON."""
+    try:
+        value = float(text)
+    except ValueError:
+        return None
+    return math.floor(value + 0.5) if math.isfinite(value) else None

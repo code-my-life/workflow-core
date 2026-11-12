@@ -106,7 +106,6 @@ class CardFactsReader(Protocol):
     """Reads the facts of one card of a named board. A card absent from the board is `None`; a board that cannot
     be read raises `BoardUnavailableError`. It gives the runtime's texts the diagnosis quotes."""
 
-    terms: RuntimeTerms
     texts: RuntimeTexts
 
     def diagnosis_sources(self) -> DiagnosisSources:

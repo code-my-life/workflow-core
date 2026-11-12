@@ -37,7 +37,7 @@ from workflow_core.diagnosis.support import (
     tools_summary,
 )
 from workflow_core.model.diagnosis import message
-from workflow_core.text import quote
+from workflow_core.text import number_text, quote
 
 PRE_TOOL_CALL = "pre_tool_call"
 
@@ -178,7 +178,7 @@ def guard_hook_timeout(episode: Episode) -> list[RawFinding]:
                     "config",
                     cause.at,
                     message("diagnosis.evidence.settingChanged", key=key, value=current),
-                    quote=f"{key.split('.')[-1]}: {_text(current)}",
+                    quote=f"{key.split('.')[-1]}: {number_text(current)}",
                 )
             )
         elif current is None:
@@ -235,11 +235,6 @@ def guard_hook_timeout(episode: Episode) -> list[RawFinding]:
             run_ids=run_ids_of(hits),
         )
     ]
-
-
-def _text(value: float) -> str:
-    # A number as JavaScript writes it in a template: 600, not 600.0.
-    return str(int(value)) if float(value).is_integer() else str(value)
 
 
 def guard_hook_hung(episode: Episode) -> list[RawFinding]:
