@@ -3,7 +3,9 @@ entry asks for it (`notify = true`), never twice for the same key, and nothing a
 contract is broken (ADR 0009, ADR 0019).
 
 A wait is a blocked card, recognised by the diagnosis' triggers (one rule in the repository): its key is
-`<workflow>:<trigger id>`, `factory:needs_input:t_ab12cd34:5509`.
+`<workflow>:<trigger id>`, `factory:needs_input:t_ab12cd34:5509`. Before posting a key its register does not hold,
+the notifier reads every comment of the issue and posts nothing when the App already wrote the wait's marker there:
+a lost register or a rebuilt journal never posts an alert twice.
 """
 
 from __future__ import annotations
@@ -16,12 +18,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
+from workflow_core.adapters.github import APP_BOT, IssueComment
 from workflow_core.config import Workflow
 from workflow_core.diagnosis.triggers import trigger_of
 from workflow_core.model.board import BoardUnavailableError
 from workflow_core.model.facts import CardFacts
 from workflow_core.model.state import CoreState
-from workflow_core.notify.alerts import blocked_alert, parse_issue
+from workflow_core.notify.alerts import blocked_alert, marker, parse_issue
 from workflow_core.notify.register import AlertRegister
 from workflow_core.notify.settings import NotifySettings
 
@@ -52,6 +55,7 @@ class Notifier:
         state: CoreState,
         settings: NotifySettings,
         post_comment: Callable[[str, int, str], str],
+        read_comments: Callable[[str, int], list[IssueComment]],
         register_path: Path,
         clock: Callable[[], float] = time.time,
         log: Callable[[str], None] = journal_line,
@@ -61,9 +65,10 @@ class Notifier:
         self.state = state
         self.settings = settings
         self.post_comment = post_comment
-        self.register = AlertRegister(register_path)
+        self.read_comments = read_comments
         self.clock = clock
         self.log = log
+        self.register = AlertRegister(register_path, log)
         self._told_without_issue: set[tuple[str, str]] = set()
 
     def run_pass(self) -> None:
@@ -109,6 +114,8 @@ class Notifier:
             owner, repo, number = parsed
             if self.settings.repos is not None and f"{owner}/{repo}" not in self.settings.repos:
                 continue
+            if self._already_in_issue(key, issue, f"{owner}/{repo}", number):
+                continue
             event = next((item for item in facts.events if item.id == trigger.event), None)
             reason = event.payload.get("reason") if event is not None else None
             body = blocked_alert(
@@ -128,6 +135,24 @@ class Notifier:
                 continue
             self.register.note(key, url)
             self.log(f"workflow-core: notificateur, alerte {key} postée : {url}")
+
+    def _already_in_issue(self, key: str, issue: str, repo: str, number: int) -> bool:
+        """Whether the issue already holds this wait's alert, by the App (a marker written by another account does
+        not count); then the key is noted. An issue not read in full counts as holding it: nothing is posted before
+        every page is read, and the next pass tries again."""
+        try:
+            comments = self.read_comments(repo, number)
+        except Exception as error:
+            self.log(
+                f"<3>workflow-core: notificateur, commentaires de {issue} illisibles, alerte {key} remise : {error}"
+            )
+            return True
+        found = next((c for c in comments if c.author == APP_BOT and marker(key) in c.body), None)
+        if found is None:
+            return False
+        self.register.note(key, found.url)
+        self.log(f"workflow-core: notificateur, alerte {key} existait déjà : {found.url}")
+        return True
 
 
 class NotifierRunner:

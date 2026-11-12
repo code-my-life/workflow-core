@@ -212,6 +212,13 @@ def fake_version_command(folder: Path, first_line: str = VERSION_LINE) -> Path:
     return folder
 
 
+@pytest.fixture(autouse=True)
+def own_state_dir(tmp_path, monkeypatch):
+    """Every test gets its own state folder: no test ever reads or writes the machine's core state (its event
+    journal, its register of alerts, its token cache)."""
+    monkeypatch.setenv("WORKFLOW_CORE_STATE_DIR", str(tmp_path / "state"))
+
+
 @pytest.fixture
 def runtime_home(tmp_path, monkeypatch) -> Path:
     """A runtime home with the boards `factory` and `studio`, named by the runtime's own variable, and a fake runtime
