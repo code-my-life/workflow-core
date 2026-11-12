@@ -1,10 +1,15 @@
-# The workflows the core serves: one [[workflow]] table each, with its key, its board and the path of its sheet.
+# The workflows the core serves: one [[workflow]] table each, with its key, its board and the path of its sheet, and
+# optionally the settings of the diagnosis' triggers (held_after_minutes, approval_card_title, main_red_reason).
 # The key of a workflow is the name of its board (ADR 0003). The manifests of the engine epic will replace this list.
 
 [[workflow]]
 key = "factory"
 board = "factory"
 sheet = "~/perso/hermes-software-factory/config/workflow.json"
+# The factory's conventions for the interventions the diagnosis leaves to factory-live: a `release ...` card blocked
+# for an answer is a pull request to approve, and one blocked by a red main is a failed CI (interventions.ts, d47f235).
+approval_card_title = '^release\s'
+main_red_reason = 'main rouge|workflows? de main|watch-main'
 
 [[workflow]]
 key = "studio"

@@ -43,6 +43,8 @@ CARD_FACT_COLUMNS = (
 )
 RUN_FACT_COLUMNS = ("metadata", "error")
 EVENT_COLUMNS = ("id", "task_id", "run_id", "kind", "payload", "created_at")
+FACT_CARD_COLUMNS = CARD_COLUMNS + CARD_FACT_COLUMNS
+FACT_RUN_COLUMNS = RUN_COLUMNS + RUN_FACT_COLUMNS
 
 # Hermès' own words that a diagnosis quotes.
 TERMS = RuntimeTerms(runtime_limit_key="max_runtime_seconds")
@@ -152,43 +154,50 @@ class HermesBoardReader:
 
     def read_card_facts(self, board: str, card: str) -> CardFacts | None:
         """The card, its runs and its events, read in one short read transaction; `None` if the card is absent."""
-        card_columns = CARD_COLUMNS + CARD_FACT_COLUMNS
-        run_columns = RUN_COLUMNS + RUN_FACT_COLUMNS
+        found = self._read_facts(board, "WHERE id = ?", "WHERE task_id = ?", (card,))
+        return found[0] if found else None
+
+    def read_board_facts(self, board: str) -> list[CardFacts]:
+        """Every card of the board with its runs and its events, read in one short read transaction."""
+        return self._read_facts(board, "", "", ())
+
+    def _read_facts(self, board: str, card_filter: str, child_filter: str, args: tuple) -> list[CardFacts]:
         with self.open_board(board) as db:
             try:
                 db.execute("BEGIN")
                 try:
-                    row = db.execute(f"SELECT {', '.join(card_columns)} FROM tasks WHERE id = ?", (card,)).fetchone()
+                    cards = db.execute(
+                        f"SELECT {', '.join(FACT_CARD_COLUMNS)} FROM tasks {card_filter} ORDER BY created_at, id", args
+                    ).fetchall()
                     runs = db.execute(
-                        f"SELECT {', '.join(run_columns)} FROM task_runs WHERE task_id = ? ORDER BY id", (card,)
+                        f"SELECT {', '.join(FACT_RUN_COLUMNS)} FROM task_runs {child_filter} ORDER BY id", args
                     ).fetchall()
                     events = db.execute(
-                        f"SELECT {', '.join(EVENT_COLUMNS)} FROM task_events WHERE task_id = ? ORDER BY id", (card,)
+                        f"SELECT {', '.join(EVENT_COLUMNS)} FROM task_events {child_filter} ORDER BY id", args
                     ).fetchall()
                 finally:
                     db.execute("COMMIT")
             except sqlite3.Error as error:
                 raise BoardUnavailableError(board, str(error)) from error
-        if row is None:
-            return None
-        return CardFacts(
-            card=CardDetail(**{**dict(row), "skills": _string_list(row["skills"])}),
-            runs=[
-                RunFact(
-                    **{**{k: run[k] for k in run_columns if k != "task_id"}, "metadata": _json_object(run["metadata"])}
-                )
-                for run in runs
-            ],
-            events=[
-                EventFact(
-                    **{
-                        **{k: event[k] for k in EVENT_COLUMNS if k != "task_id"},
-                        "payload": _json_object(event["payload"]),
-                    }
-                )
-                for event in events
-            ],
-        )
+
+        runs_of: dict[str, list[RunFact]] = {row["id"]: [] for row in cards}
+        events_of: dict[str, list[EventFact]] = {row["id"]: [] for row in cards}
+        for run in runs:
+            if run["task_id"] in runs_of:
+                fields = {k: run[k] for k in FACT_RUN_COLUMNS if k != "task_id"}
+                runs_of[run["task_id"]].append(RunFact(**{**fields, "metadata": _json_object(run["metadata"])}))
+        for event in events:
+            if event["task_id"] in events_of:
+                fields = {k: event[k] for k in EVENT_COLUMNS if k != "task_id"}
+                events_of[event["task_id"]].append(EventFact(**{**fields, "payload": _json_object(event["payload"])}))
+        return [
+            CardFacts(
+                card=CardDetail(**{**dict(row), "skills": _string_list(row["skills"])}),
+                runs=runs_of[row["id"]],
+                events=events_of[row["id"]],
+            )
+            for row in cards
+        ]
 
 
 class HermesBoardWatcher:
