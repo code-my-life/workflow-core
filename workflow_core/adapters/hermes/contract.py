@@ -6,9 +6,12 @@ declaration with the base of each declared board, opened read-only, and names ev
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass, field
+from pathlib import Path
 
+from workflow_core.adapters.hermes.agent_log import LOG_LINE, LOG_PATTERNS, journal_paths
 from workflow_core.adapters.hermes.board import (
     CARD_COLUMNS,
     CARD_FACT_COLUMNS,
@@ -71,6 +74,46 @@ def pragma_problems(db) -> list[str]:
 
 # The version output is part of the contract too: its first line must keep the form VERSION_LINE reads.
 
+# The agents' journals: the header of a line, and the nine kinds of lines the diagnosis reads (agent_log.py).
+JOURNAL_LINE = LOG_LINE
+JOURNAL_KINDS = tuple(kind for kind, _, _ in LOG_PATTERNS)
+# The tail of each journal checked: its last dated lines, within its last bytes.
+JOURNAL_TAIL_BYTES = 64 * 1024
+JOURNAL_TAIL_LINES = 20
+_DATED = re.compile(r"^\d{4}-\d{2}-\d{2} ", re.ASCII)
+
+
+def journals(home: Path) -> list[tuple[str, Path]]:
+    """The current journal of each agent under Hermès' home, by agent name."""
+    profiles = home / "profiles"
+    if not profiles.is_dir():
+        return []
+    found = []
+    for folder in sorted(profiles.iterdir()):
+        current = [path for path in journal_paths(home, folder.name) if path.name == "agent.log"]
+        found += [(folder.name, path) for path in current]
+    return found
+
+
+def journal_problems(home: Path) -> list[str]:
+    """Every dated line, among the last ones of each agent's journal, whose header the reader does not understand."""
+    problems = []
+    for agent, path in journals(home):
+        try:
+            with path.open("rb") as journal:
+                journal.seek(max(0, path.stat().st_size - JOURNAL_TAIL_BYTES))
+                tail = journal.read().decode("utf-8", errors="replace").split("\n")[1:]
+        except OSError as error:
+            problems.append(f"journal de {agent} illisible : {error}")
+            continue
+        dated = [line.removesuffix("\r") for line in tail if _DATED.match(line)][-JOURNAL_TAIL_LINES:]
+        problems += [
+            f"journal de {agent} : en-tête de ligne inconnu : « {line[:80]} »"
+            for line in dated
+            if not JOURNAL_LINE.fullmatch(line)
+        ]
+    return problems
+
 
 def _table_problems(db: sqlite3.Connection, name: str, table: Table) -> list[str]:
     present = {row[1] for row in db.execute(f'PRAGMA table_info("{name}")')}
@@ -105,6 +148,7 @@ def check_contract(boards: list[str], environ: dict[str, str] | None = None) -> 
     """Check the contract against the base of each named board, read-only, and against the version output."""
     reader = make_board_reader(environ)
     problems = [problem for board in boards for problem in board_problems(reader, board)]
+    problems += journal_problems(reader.home)
     _, version_problem = read_runtime_version()
     if version_problem is not None:
         problems.append(version_problem)

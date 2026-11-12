@@ -1,0 +1,232 @@
+{
+  "case": "spawn",
+  "input": {
+    "anchor": {
+      "createdAt": 1792116600,
+      "id": 86,
+      "kind": "gave_up",
+      "payload": {
+        "error": "workspace: task t_2fe761e4 has workspace_kind=worktree but no workspace_path, and board 'factory' has no default_workdir set. Set a board default workdir (a git repo) or create the task with --workspace worktree:<absolute-repo-path>.",
+        "failures": 2,
+        "trigger_outcome": "spawn_failed"
+      },
+      "runId": 12,
+      "taskId": "t_2fe761e4"
+    },
+    "board": "factory",
+    "branch": null,
+    "events": [
+      {
+        "createdAt": 1792116356,
+        "id": 65,
+        "kind": "created",
+        "payload": {},
+        "runId": null,
+        "taskId": "t_2fe761e4"
+      },
+      {
+        "createdAt": 1792116548,
+        "id": 79,
+        "kind": "promoted",
+        "payload": {},
+        "runId": null,
+        "taskId": "t_2fe761e4"
+      },
+      {
+        "createdAt": 1792116548,
+        "id": 81,
+        "kind": "spawn_failed",
+        "payload": {
+          "error": "workspace: task t_2fe761e4 has workspace_kind=worktree but no workspace_path, and board 'factory' has no default_workdir set. Set a board default workdir (a git repo) or create the task with --workspace worktree:<absolute-repo-path>.",
+          "failures": 1
+        },
+        "runId": 10,
+        "taskId": "t_2fe761e4"
+      },
+      {
+        "createdAt": 1792116600,
+        "id": 86,
+        "kind": "gave_up",
+        "payload": {
+          "error": "workspace: task t_2fe761e4 has workspace_kind=worktree but no workspace_path, and board 'factory' has no default_workdir set. Set a board default workdir (a git repo) or create the task with --workspace worktree:<absolute-repo-path>.",
+          "failures": 2,
+          "trigger_outcome": "spawn_failed"
+        },
+        "runId": 12,
+        "taskId": "t_2fe761e4"
+      }
+    ],
+    "evidence": null,
+    "logs": [],
+    "now": 1792116603,
+    "prUrl": null,
+    "profile": null,
+    "runs": [
+      {
+        "endedAt": 1792116548,
+        "error": "workspace: task t_2fe761e4 has workspace_kind=worktree but no workspace_path, and board 'factory' has no default_workdir set. Set a board default workdir (a git repo) or create the task with --workspace worktree:<absolute-repo-path>.",
+        "id": 10,
+        "metadata": {},
+        "outcome": "spawn_failed",
+        "profile": "coder",
+        "startedAt": 1792116548,
+        "status": "spawn_failed",
+        "summary": null,
+        "taskId": "t_2fe761e4"
+      },
+      {
+        "endedAt": 1792116600,
+        "error": "workspace: task t_2fe761e4 has workspace_kind=worktree but no workspace_path, and board 'factory' has no default_workdir set. Set a board default workdir (a git repo) or create the task with --workspace worktree:<absolute-repo-path>.",
+        "id": 12,
+        "metadata": {},
+        "outcome": "gave_up",
+        "profile": "coder",
+        "startedAt": 1792116600,
+        "status": "gave_up",
+        "summary": null,
+        "taskId": "t_2fe761e4"
+      }
+    ],
+    "sessions": [],
+    "task": {
+      "assignee": "coder",
+      "blockKind": null,
+      "blockRecurrences": 0,
+      "body": "",
+      "branchName": null,
+      "completedAt": null,
+      "consecutiveFailures": 0,
+      "createdAt": 1792116356,
+      "currentRunId": null,
+      "id": "t_2fe761e4",
+      "idempotencyKey": null,
+      "lastFailureError": null,
+      "lastHeartbeatAt": null,
+      "maxRuntimeSeconds": 7200,
+      "modelOverride": null,
+      "providerOverride": null,
+      "skills": [
+        "factory-author-proof",
+        "factory-cli-lane"
+      ],
+      "startedAt": null,
+      "status": "blocked",
+      "title": "impl claude-cockpit#8 : island event-open + blur fold",
+      "workspacePath": "/home/user/perso/claude-cockpit/.worktrees/t_2fe761e4"
+    }
+  },
+  "journal": {
+    "facts": [],
+    "lines": [],
+    "timeZone": "Europe/Paris"
+  },
+  "output": {
+    "computedAt": "2026-10-16T02:10:03.000Z",
+    "episode": {
+      "from": "2026-10-16T02:09:08.000Z",
+      "runIds": [
+        10,
+        12
+      ]
+    },
+    "others": [],
+    "primary": {
+      "actor": "you_factory",
+      "cause": {
+        "state": "present"
+      },
+      "code": "spawn_failed",
+      "confidence": "certain",
+      "evidence": [
+        {
+          "at": "2026-10-16T02:10:00.000Z",
+          "count": 2,
+          "fact": {
+            "code": "diagnosis.evidence.spawnError",
+            "params": {}
+          },
+          "quote": "workspace: task t_2fe761e4 has workspace_kind=worktree but no workspace_path, and board 'factory' has no default_workdir set. Set a board default workdir (a git repo) or create the task with --workspace worktree:<absolute-repo-path>.",
+          "runId": 12,
+          "source": "kanban",
+          "until": null
+        }
+      ],
+      "runIds": [
+        10,
+        12
+      ],
+      "setting": null,
+      "steps": [
+        {
+          "command": null,
+          "done": false,
+          "text": {
+            "code": "diagnosis.step.fixWorkspace",
+            "params": {}
+          }
+        }
+      ],
+      "subject": {
+        "plugin": null,
+        "profile": "coder",
+        "tool": null
+      },
+      "summary": {
+        "code": "diagnosis.summary.spawnFailed",
+        "params": {}
+      },
+      "why": {
+        "code": "diagnosis.why.spawnFailed",
+        "params": {}
+      }
+    },
+    "runs": [
+      {
+        "finding": "spawn_failed",
+        "role": "cause",
+        "runId": 10,
+        "sessionId": null,
+        "text": {
+          "code": "diagnosis.run.spawnFailed",
+          "params": {}
+        }
+      },
+      {
+        "finding": "spawn_failed",
+        "role": "cause",
+        "runId": 12,
+        "sessionId": null,
+        "text": {
+          "code": "diagnosis.run.spawnFailed",
+          "params": {}
+        }
+      }
+    ],
+    "sources": {
+      "agentLog": true,
+      "config": false,
+      "transcript": true,
+      "workspace": false
+    },
+    "unblock": {
+      "nextBlock": "blocked",
+      "template": {
+        "code": "diagnosis.unblock.causeFixed",
+        "params": {
+          "branch": null
+        }
+      },
+      "when": "after_fix"
+    },
+    "work": {
+      "branch": null,
+      "commits": "none",
+      "commitsRefused": 0,
+      "editedFiles": 0,
+      "evidence": [],
+      "prUrl": null,
+      "pushed": "no"
+    }
+  },
+  "test": "les autres incidents réels du kanban > claude-cockpit#8 : le worker ne se lance pas, le board n’a pas de dossier de travail"
+}

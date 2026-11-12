@@ -7,7 +7,7 @@ comes from the adapter too, in `RuntimeTerms`: the rules never name the runtime 
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 
@@ -89,3 +89,42 @@ class CardFactsReader(Protocol):
     def read_board_facts(self, board: str) -> list[CardFacts]:
         """Every card of the board with its runs and its events."""
         ...
+
+
+LogFactKind = Literal[
+    "hook_timeout",
+    "hook_skipped",
+    "hook_abandoned",
+    "hook_raised",
+    "plugin_load_failed",
+    "stop_nudge",
+    "turn_ended",
+    "tool_deadline",
+    "api_failed",
+]
+
+
+class LogFact(BaseModel):
+    """A catalogued line of an agent's journal, already dated: the same values as factory-live's `LogFact`."""
+
+    # Unix seconds, decimals kept.
+    at: float
+    session_id: str | None
+    kind: LogFactKind
+    hook: str | None
+    callback: str | None
+    # The plugin's Python module, when the runtime names it.
+    module: str | None
+    seconds: int | None
+    plugin: str | None
+    detail: str | None
+    count: int | None
+    # The line's message, quoted (secrets masked, cut).
+    line: str
+
+
+class AgentLogPort(Protocol):
+    """Reads an agent's journal: its catalogued facts between two instants (Unix seconds), sorted by time; `None`
+    when the agent has no journal."""
+
+    def facts(self, agent: str, since: float, until: float) -> list[LogFact] | None: ...

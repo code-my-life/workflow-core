@@ -1,0 +1,777 @@
+{
+  "case": "budget",
+  "input": {
+    "anchor": {
+      "createdAt": 1792274180,
+      "id": 1019,
+      "kind": "gave_up",
+      "payload": {
+        "error": "Iteration budget exhausted (150/150) \u2014 task could not complete within the allowed iterations",
+        "failures": 2,
+        "trigger_outcome": "timed_out"
+      },
+      "runId": 77,
+      "taskId": "t_96eecbad"
+    },
+    "board": "factory",
+    "branch": null,
+    "events": [
+      {
+        "createdAt": 1792266837,
+        "id": 877,
+        "kind": "created",
+        "payload": {},
+        "runId": null,
+        "taskId": "t_96eecbad"
+      },
+      {
+        "createdAt": 1792266844,
+        "id": 883,
+        "kind": "promoted",
+        "payload": {},
+        "runId": null,
+        "taskId": "t_96eecbad"
+      },
+      {
+        "createdAt": 1792267947,
+        "id": 912,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 72,
+        "taskId": "t_96eecbad"
+      },
+      {
+        "createdAt": 1792268882,
+        "id": 929,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "fail-first non démonstratif : base échoue car site/dist absent (build non lancé), pas à cause du comportement testé ; spec différent entre base (10 tests) et tip (6 tests)"
+        },
+        "runId": 73,
+        "taskId": "t_96eecbad"
+      },
+      {
+        "createdAt": 1792269821,
+        "id": 946,
+        "kind": "review_requested",
+        "payload": {},
+        "runId": 74,
+        "taskId": "t_96eecbad"
+      },
+      {
+        "createdAt": 1792271988,
+        "id": 982,
+        "kind": "crashed",
+        "payload": {
+          "exit_code": 1,
+          "exit_kind": "nonzero_exit",
+          "worker_output": " -c \"impl code-my-life/claude-cockpit#49 : reprise GitHub Pages (5 corrections) #2\" -p gate-claude Session:        20261017_224400_8b99c0 Title:          impl code-my-life/claude-cockpit#49 : reprise GitHub Pages (5 corrections) #2 Duration:       35m 37s Messages:       143 (2 user, 141 tool calls)"
+        },
+        "runId": 75,
+        "taskId": "t_96eecbad"
+      },
+      {
+        "createdAt": 1792272652,
+        "id": 995,
+        "kind": "changes_requested",
+        "payload": {
+          "reason": "fail-first non vérifiable (sandbox), déploiement schedule ne déclenche pas de déploiement, génération de roadmap dépend de champ API inexistant (labels), manque de couverture de tests pour la fonctionnalité roadmap"
+        },
+        "runId": 76,
+        "taskId": "t_96eecbad"
+      },
+      {
+        "createdAt": 1792274180,
+        "id": 1019,
+        "kind": "gave_up",
+        "payload": {
+          "error": "Iteration budget exhausted (150/150) \u2014 task could not complete within the allowed iterations",
+          "failures": 2,
+          "trigger_outcome": "timed_out"
+        },
+        "runId": 77,
+        "taskId": "t_96eecbad"
+      }
+    ],
+    "evidence": null,
+    "logs": [
+      {
+        "at": 1792272686.48,
+        "callback": null,
+        "count": null,
+        "detail": "NotFoundError",
+        "hook": null,
+        "kind": "api_failed",
+        "line": "API call failed (attempt 1/3, not retryable) error_type=NotFoundError thread=Thread-4 (_chat_run_agent):126522700748480 provider=custom base_url=http://127.0.0.1:3001/v1 model=claude-sonnet-5-5 summary=HTTP 404: Model 'claude-sonnet-5-5' is not in the catalog. Use 'auto' (or omit the 'model' field)…",
+        "module": null,
+        "plugin": "custom",
+        "seconds": null,
+        "sessionId": "20261017_233125_066ce0"
+      },
+      {
+        "at": 1792273057.677,
+        "callback": null,
+        "count": null,
+        "detail": "RateLimitError",
+        "hook": null,
+        "kind": "api_failed",
+        "line": "API call failed (attempt 1/3) error_type=RateLimitError thread=Thread-4 (_chat_run_agent):126522700748480 provider=freellmapi base_url=http://127.0.0.1:3001/v1/ model=dots3-note-preview summary=HTTP 429: All models exhausted: 2 routes checked (2 rate-limited or on cooldown). Add more API keys or wa…",
+        "module": null,
+        "plugin": "freellmapi",
+        "seconds": null,
+        "sessionId": "20261017_233125_066ce0"
+      },
+      {
+        "at": 1792274180.265,
+        "callback": null,
+        "count": null,
+        "detail": "max_iterations_reached(150/150)",
+        "hook": null,
+        "kind": "turn_ended",
+        "line": "Turn ended: reason=max_iterations_reached(150/150) model=nvidia/nemotron-3-super-120b-a12b api_calls=150/150 budget=150/150 tool_turns=137 last_msg_role=assistant response_len=2306 session=20261017_233125_066ce0",
+        "module": null,
+        "plugin": null,
+        "seconds": null,
+        "sessionId": "20261017_233125_066ce0"
+      }
+    ],
+    "now": 1792274183,
+    "prUrl": null,
+    "profile": null,
+    "runs": [
+      {
+        "endedAt": 1792271988,
+        "error": "pid 66899 exited with code 1 Worker's last output: 'is preserved) Resume this session with: hermes --resume 20261017_224400_8b99c0 -p gate-claude hermes -c \"impl code-my-life/claude-cockpit#49 : reprise GitHub Pages (5 corrections) #2\" -p gate-claude Session:        20261017_224400_8b99c0 Title:    ",
+        "id": 75,
+        "metadata": {
+          "exit_code": 1,
+          "worker_output": " -c \"impl code-my-life/claude-cockpit#49 : reprise GitHub Pages (5 corrections) #2\" -p gate-claude Session:        20261017_224400_8b99c0 Title:          impl code-my-life/claude-cockpit#49 : reprise GitHub Pages (5 corrections) #2 Duration:       35m 37s Messages:       143 (2 user, 141 tool calls)"
+        },
+        "outcome": "crashed",
+        "profile": "gate-claude",
+        "startedAt": 1792269839,
+        "status": "crashed",
+        "summary": null,
+        "taskId": "t_96eecbad"
+      },
+      {
+        "endedAt": 1792274180,
+        "error": "Iteration budget exhausted (150/150) \u2014 task could not complete within the allowed iterations",
+        "id": 77,
+        "metadata": {},
+        "outcome": "gave_up",
+        "profile": "coder-claude",
+        "startedAt": 1792272683,
+        "status": "gave_up",
+        "summary": null,
+        "taskId": "t_96eecbad"
+      }
+    ],
+    "sessions": [
+      {
+        "calls": [
+          {
+            "at": 1792269913.408,
+            "callId": "call_2ee77096d73b47e1af3da590",
+            "input": "apt-get install -y libnspr4 libnss3 2>&1 | tail -5; echo \"---\"; dpkg -l | grep -i nspr 2>&1; find / -name \"libnspr4.so\" 2>/dev/null",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792270385.306,
+            "callId": "call_8b30bb5bdffc47bea6b114eb",
+            "input": "find / -name \"libnspr4.so*\" 2>/dev/null; echo \"---\"; find / -name \"libnss3.so*\" 2>/dev/null; echo \"---\"; ls /usr/lib/x86_64-linux-gnu/ 2>/dev/null | grep -iE \"n",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792270838.397,
+            "callId": "call_31330c64801b434bad83948d",
+            "input": "find / -name \"libnspr4.so*\" 2>/dev/null; echo \"---\"; find / -name \"libnss3.so*\" 2>/dev/null; echo \"---\"; ls /var/cache/apt/archives/ 2>/dev/null | head -20; ech",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792270914.54,
+            "callId": "call_3ea5c983b9aa4b84896ff933",
+            "input": "export LD_LIBRARY_PATH=\"/home/user/.hermes/profiles/gate-claude/cache/playwright-libs:$LD_LIBRARY_PATH\" && cd /tmp/gate-ff-base && TMPDIR=/tmp node -e \"\nconst {",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792270921.716,
+            "callId": "call_6704ab7a018b488492297bed",
+            "input": "export LD_LIBRARY_PATH=\"/home/user/.hermes/profiles/gate-claude/cache/playwright-libs:$LD_LIBRARY_PATH\" && cd /tmp/gate-ff-base && TMPDIR=/tmp node -e \"\nconst {",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792270928.22,
+            "callId": "call_2751cfac988b4fe1abb2c393",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/probe.mjs",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271144.527,
+            "callId": "call-7f241fed-3967-4c42-b813-56fc4582fc68",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/debug-base.mjs",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271171.234,
+            "callId": "call-21a9178e-4fe4-4623-ac6f-1a9aed31c7a6",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/debug-test.mjs",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271184.81,
+            "callId": "call-6fd7a021-7ad1-4cd4-b6cc-24410724779e",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/debug.test.mjs",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271201.358,
+            "callId": "call-67a1548e-0e30-487c-8fe3-5daf6195f223",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/debug-test.test.mjs",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271256.567,
+            "callId": "call-2488104e-4119-4079-b260-b2346b142f6b",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/01-fail-first-on-base.txt",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271260.706,
+            "callId": "call-1d05fe9c-e252-4dc3-a40e-dd3793c21ca4",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/02-fail-first-on-tip.txt",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271354.236,
+            "callId": "call-ea2f9d06-9e0f-4b02-aa40-2570fd44d68a",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/15-pr-checks.json",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271371.963,
+            "callId": "call-0ae73107-8efa-4337-968f-252382afc94f",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/99-ui-screenshots.mjs",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271396.873,
+            "callId": "call-d53a01dd-b849-4354-b496-f2a64152fbce",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/99-ui-screenshots.cjs",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271661.603,
+            "callId": "call-6f478f6a-ce5f-4b2d-8dd5-aa9ef29696ab",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/99-ui-screenshots-final.cjs",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271703.122,
+            "callId": "call-b68c9b95-38a3-4701-8ebd-44d301517ae5",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/99-screenshots.test.cjs",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271748.357,
+            "callId": "call-26ce8495-9729-46a3-a812-a90f899651d5",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad && find . -name \"*.png\" -type f 2>/dev/null | grep -v node_modules | grep -v desktop/build",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792271753.93,
+            "callId": "call-5c83fbba-6f21-43f3-815f-24d28e4d6a9c",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad && cat site/test/visual.spec.ts",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792271804.329,
+            "callId": "call-1eebf010-d9cb-4e31-8962-124e3b7ee8f6",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/99-take-screenshots.cjs",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271816.575,
+            "callId": "call-158f5b9c-2115-461b-a4b8-92d7c2472de9",
+            "input": "export LD_LIBRARY_PATH=\"/home/user/.hermes/profiles/gate-claude/cache/playwright-libs:$LD_LIBRARY_PATH\" && cd /home/user/.hermes/kanban/boards/factory/workspace",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792271819.47,
+            "callId": "call-fb8b039f-d692-4083-a2d8-4f82963a1050",
+            "input": "cat /home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/99-take-screenshots.out",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792271856.282,
+            "callId": "call-36bd0267-50b0-4c29-a5a7-86584c27405d",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/99-take-screenshots-final.cjs",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271868.516,
+            "callId": "call-f7460f43-315f-44dd-b5d5-b6f1eecc27c1",
+            "input": "export LD_LIBRARY_PATH=\"/home/user/.hermes/profiles/gate-claude/cache/playwright-libs:$LD_LIBRARY_PATH\" && cd /home/user/.hermes/kanban/boards/factory/workspace",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792271873.989,
+            "callId": "call-13912d23-bca1-4a0b-8baa-7887dd0af23d",
+            "input": "cat /home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/99-take-screenshots-final.out",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792271898.639,
+            "callId": "call-f3c0cbf8-6fde-417c-91e5-6abb8fa190f2",
+            "input": "/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/99-ui-screenshots-working.cjs",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271913.01,
+            "callId": "call-5e6aca6c-70ce-4e82-89da-0c28b11a6a9e",
+            "input": "export LD_LIBRARY_PATH=\"/home/user/.hermes/profiles/gate-claude/cache/playwright-libs:$LD_LIBRARY_PATH\" && cd /home/user/.hermes/kanban/boards/factory/workspace",
+            "tool": "terminal"
+          }
+        ],
+        "id": "20261017_224400_8b99c0",
+        "results": [
+          {
+            "at": 1792270356.718,
+            "callId": "call_2ee77096d73b47e1af3da590",
+            "content": "Error executing tool 'terminal': timed out after 420.0s",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792270827.341,
+            "callId": "call_8b30bb5bdffc47bea6b114eb",
+            "content": "Error executing tool 'terminal': timed out after 420.0s",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792270870.243,
+            "callId": "call_31330c64801b434bad83948d",
+            "content": "{\"output\": \"/home/user/.cache/ms-playwright/firefox-1555/firefox/libnspr4.so\\n/tmp/chroot/usr/lib/x86_64-linux-gnu/libnspr4.so\\n\\n[Command timed out after 30s]\"…eground max 600s) or run it with background=true and notify_on_complete=true.\"}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792270914.551,
+            "callId": "call_3ea5c983b9aa4b84896ff933",
+            "content": "{\"error\": \"gate-readonly : redirection vers { refusée, écris sous evidence/.\"}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792270921.796,
+            "callId": "call_6704ab7a018b488492297bed",
+            "content": "{\"error\": \"gate-readonly : redirection vers { refusée, écris sous evidence/.\"}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792270914.551,
+            "callId": "call_3ea5c983b9aa4b84896ff933",
+            "content": "{\"error\": \"gate-readonly : redirection vers { refusée, écris sous evidence/.\"}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792270921.796,
+            "callId": "call_6704ab7a018b488492297bed",
+            "content": "{\"error\": \"gate-readonly : redirection vers { refusée, écris sous evidence/.\"}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792271748.418,
+            "callId": "call-26ce8495-9729-46a3-a812-a90f899651d5",
+            "content": "{\"output\": \"\", \"exit_code\": 1, \"error\": null, \"exit_code_meaning\": \"No matches found (not an error)\"}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792271753.994,
+            "callId": "call-5c83fbba-6f21-43f3-815f-24d28e4d6a9c",
+            "content": "{\"output\": \"import { test, expect, type Browser, type Page } from '@playwright/test';\\nimport { createServer, type Serve",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792271809.522,
+            "callId": "call-1eebf010-d9cb-4e31-8962-124e3b7ee8f6",
+            "content": "{\"bytes_written\": 3302, \"dirs_created\": true, \"verified\": true, \"lint\": {\"status\": \"skipped\", \"message\": \"No linter for ",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271816.992,
+            "callId": "call-158f5b9c-2115-461b-a4b8-92d7c2472de9",
+            "content": "{\"output\": \"EXIT=1\\nls: cannot access '/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/roun",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792271819.534,
+            "callId": "call-fb8b039f-d692-4083-a2d8-4f82963a1050",
+            "content": "{\"output\": \"Serving dist from undefined\\nServing mockup from undefined\\n/home/user/.hermes/kanban/boards/factory/workspa",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792271861.47,
+            "callId": "call-36bd0267-50b0-4c29-a5a7-86584c27405d",
+            "content": "{\"bytes_written\": 3357, \"dirs_created\": true, \"verified\": true, \"lint\": {\"status\": \"skipped\", \"message\": \"No linter for ",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271868.604,
+            "callId": "call-f7460f43-315f-44dd-b5d5-b6f1eecc27c1",
+            "content": "{\"output\": \"EXIT=1\\nls: cannot access '/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/roun",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792271874.054,
+            "callId": "call-13912d23-bca1-4a0b-8baa-7887dd0af23d",
+            "content": "{\"output\": \"/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad/evidence/gate/round1/99-take-screenshots-fina",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792271903.819,
+            "callId": "call-f3c0cbf8-6fde-417c-91e5-6abb8fa190f2",
+            "content": "{\"bytes_written\": 3115, \"dirs_created\": true, \"verified\": true, \"lint\": {\"status\": \"skipped\", \"message\": \"No linter for ",
+            "tool": "write_file"
+          },
+          {
+            "at": 1792271917.987,
+            "callId": "call-5e6aca6c-70ce-4e82-89da-0c28b11a6a9e",
+            "content": "{\"output\": \"EXIT=0\\n-rw-rw-r-- 1 user user 3689032 Oct 17 23:18 /home/user/.hermes/kanban/boards/factory/workspaces/t_96",
+            "tool": "terminal"
+          }
+        ],
+        "runId": 75
+      },
+      {
+        "calls": [
+          {
+            "at": 1792273940.679,
+            "callId": "call-11e2f096-66d0-4c5f-bbfa-1fcf601f0083",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad && git push -u origin fix/49-pages-reprise-rev4",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274079.351,
+            "callId": "call-e3b0cd0f-15d3-46ed-8ccb-6b1d1cefaf6f",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad && git show 4ab5415:site/build.mjs | grep -A 5 'const links = (m\\.labels || \\[\\]' >> evidence/",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274083.078,
+            "callId": "call-e5bcaf5e-11f9-4ee3-8d99-67ee82d45999",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad && git show 4ab5415:site/build.mjs | grep 'const links' >> evidence/03-mutation-check.txt",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274087.456,
+            "callId": "call-e16c019a-41c9-48e6-9791-dcbe75dd3614",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad && echo '    const links = (m.labels || [])\\n      .map(l => (typeof l === \\'string\\' ? l : l ",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274091.342,
+            "callId": "call-395d195b-a43d-4c2e-975b-990b93f7c6ff",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad && echo -e \"\\n=== INVERTED GUARD (original labels parsing) ===\" >> evidence/03-mutation-check.",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274098.532,
+            "callId": "call-1db467c4-4f41-4197-a1c1-6e856360e948",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad && echo -e \"\\n=== TEST WOULD BE RED WITH INVERTED GUARD, GREEN WITH CURRENT GUARD (DUE TO MISS",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274102.803,
+            "callId": "call-b7d81528-0e7b-41fe-96ba-994c2338ff34",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad && TMPDIR=/tmp npx playwright test 2>&1 | head -100 > evidence/04-full-suite.txt && echo \"Full",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274106.906,
+            "callId": "call-f4062b7e-609d-4de9-baf5-34d28ebe0cbd",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad && cp evidence/02-typecheck.txt evidence/05-typecheck.txt",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274110.152,
+            "callId": "call-6092d6d2-f35b-4973-bd84-fd4eb74344d7",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad && cp evidence/03-build.txt evidence/06-build.txt",
+            "tool": "parameter"
+          },
+          {
+            "at": 1792274115.978,
+            "callId": "call-b5f6d001-425e-48d0-8d51-88fc8828c206",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad && cp evidence/03-build.txt evidence/06-build.txt",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274120.032,
+            "callId": "call-f6626089-1491-4f05-a225-90c035953040",
+            "input": "cd /home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad && head -5 evidence/17-ui-screenshots-en.txt",
+            "tool": "terminal"
+          }
+        ],
+        "id": "20261017_233125_066ce0",
+        "results": [
+          {
+            "at": 1792273941.7,
+            "callId": "call-11e2f096-66d0-4c5f-bbfa-1fcf601f0083",
+            "content": "{\"output\": \"remote: Invalid username or token. Password authentication is not supported for Git operations.\\nfatal: Auth",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274079.414,
+            "callId": "call-e3b0cd0f-15d3-46ed-8ccb-6b1d1cefaf6f",
+            "content": "{\"output\": \"\", \"exit_code\": 0, \"error\": null}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274083.14,
+            "callId": "call-e5bcaf5e-11f9-4ee3-8d99-67ee82d45999",
+            "content": "{\"output\": \"\", \"exit_code\": 0, \"error\": null}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274087.518,
+            "callId": "call-e16c019a-41c9-48e6-9791-dcbe75dd3614",
+            "content": "{\"output\": \"/usr/bin/bash: eval: line 5: syntax error near unexpected token `)'\\n/usr/bin/bash: eval: line 5: `cd /home/",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274091.428,
+            "callId": "call-395d195b-a43d-4c2e-975b-990b93f7c6ff",
+            "content": "{\"output\": \"\", \"exit_code\": 0, \"error\": null}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274098.591,
+            "callId": "call-1db467c4-4f41-4197-a1c1-6e856360e948",
+            "content": "{\"output\": \"\", \"exit_code\": 0, \"error\": null}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274104.007,
+            "callId": "call-b7d81528-0e7b-41fe-96ba-994c2338ff34",
+            "content": "{\"output\": \"\", \"exit_code\": 0, \"error\": null}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274106.965,
+            "callId": "call-f4062b7e-609d-4de9-baf5-34d28ebe0cbd",
+            "content": "{\"output\": \"\", \"exit_code\": 0, \"error\": null}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274110.152,
+            "callId": "call-6092d6d2-f35b-4973-bd84-fd4eb74344d7",
+            "content": "Tool 'parameter' does not exist. Available tools: clarify, kanban_attach, kanban_attach_url, kanban_attachments, kanban_",
+            "tool": "parameter"
+          },
+          {
+            "at": 1792274116.037,
+            "callId": "call-b5f6d001-425e-48d0-8d51-88fc8828c206",
+            "content": "{\"output\": \"\", \"exit_code\": 0, \"error\": null}",
+            "tool": "terminal"
+          },
+          {
+            "at": 1792274120.089,
+            "callId": "call-f6626089-1491-4f05-a225-90c035953040",
+            "content": "{\"output\": \"=== EN VERSION ROADMAP CONTENT ===\\n<section id=\\\"roadmap\\\" class=\\\"cc-section\\\" aria-labelledby=\\\"h-roadmap",
+            "tool": "terminal"
+          }
+        ],
+        "runId": 77
+      }
+    ],
+    "task": {
+      "assignee": "coder-claude",
+      "blockKind": null,
+      "blockRecurrences": 0,
+      "body": "",
+      "branchName": null,
+      "completedAt": null,
+      "consecutiveFailures": 0,
+      "createdAt": 1792266837,
+      "currentRunId": null,
+      "id": "t_96eecbad",
+      "idempotencyKey": null,
+      "lastFailureError": null,
+      "lastHeartbeatAt": null,
+      "maxRuntimeSeconds": null,
+      "modelOverride": null,
+      "providerOverride": null,
+      "skills": [
+        "factory-author-proof",
+        "factory-cli-lane"
+      ],
+      "startedAt": null,
+      "status": "blocked",
+      "title": "impl code-my-life/claude-cockpit#49 : reprise GitHub Pages (5 corrections)",
+      "workspacePath": "/home/user/.hermes/kanban/boards/factory/workspaces/t_96eecbad"
+    }
+  },
+  "journal": {
+    "facts": [
+      {
+        "at": 1792272686.48,
+        "callback": null,
+        "count": null,
+        "detail": "NotFoundError",
+        "hook": null,
+        "kind": "api_failed",
+        "line": "API call failed (attempt 1/3, not retryable) error_type=NotFoundError thread=Thread-4 (_chat_run_agent):126522700748480 provider=custom base_url=http://127.0.0.1:3001/v1 model=claude-sonnet-5-5 summary=HTTP 404: Model 'claude-sonnet-5-5' is not in the catalog. Use 'auto' (or omit the 'model' field)…",
+        "module": null,
+        "plugin": "custom",
+        "seconds": null,
+        "sessionId": "20261017_233125_066ce0"
+      },
+      {
+        "at": 1792273057.677,
+        "callback": null,
+        "count": null,
+        "detail": "RateLimitError",
+        "hook": null,
+        "kind": "api_failed",
+        "line": "API call failed (attempt 1/3) error_type=RateLimitError thread=Thread-4 (_chat_run_agent):126522700748480 provider=freellmapi base_url=http://127.0.0.1:3001/v1/ model=dots3-note-preview summary=HTTP 429: All models exhausted: 2 routes checked (2 rate-limited or on cooldown). Add more API keys or wa…",
+        "module": null,
+        "plugin": "freellmapi",
+        "seconds": null,
+        "sessionId": "20261017_233125_066ce0"
+      },
+      {
+        "at": 1792274180.265,
+        "callback": null,
+        "count": null,
+        "detail": "max_iterations_reached(150/150)",
+        "hook": null,
+        "kind": "turn_ended",
+        "line": "Turn ended: reason=max_iterations_reached(150/150) model=nvidia/nemotron-3-super-120b-a12b api_calls=150/150 budget=150/150 tool_turns=137 last_msg_role=assistant response_len=2306 session=20261017_233125_066ce0",
+        "module": null,
+        "plugin": null,
+        "seconds": null,
+        "sessionId": "20261017_233125_066ce0"
+      }
+    ],
+    "lines": [
+      "2026-10-17 23:31:26,480 WARNING [20261017_233125_066ce0] agent.conversation_loop: API call failed (attempt 1/3, not retryable) error_type=NotFoundError thread=Thread-4 (_chat_run_agent):126522700748480 provider=custom base_url=http://127.0.0.1:3001/v1 model=claude-sonnet-5-5 summary=HTTP 404: Model 'claude-sonnet-5-5' is not in the catalog. Use 'auto' (or omit the 'model' field) to auto-route, or ",
+      "2026-10-17 23:37:37,677 WARNING [20261017_233125_066ce0] agent.conversation_loop: API call failed (attempt 1/3) error_type=RateLimitError thread=Thread-4 (_chat_run_agent):126522700748480 provider=freellmapi base_url=http://127.0.0.1:3001/v1/ model=dots3-note-preview summary=HTTP 429: All models exhausted: 2 routes checked (2 rate-limited or on cooldown). Add more API keys or wait for rate limits ",
+      "2026-10-17 23:56:20,265 INFO [20261017_233125_066ce0] agent.conversation_loop: Turn ended: reason=max_iterations_reached(150/150) model=nvidia/nemotron-3-super-120b-a12b api_calls=150/150 budget=150/150 tool_turns=137 last_msg_role=assistant response_len=2306 session=20261017_233125_066ce0"
+    ],
+    "timeZone": "Europe/Paris"
+  },
+  "output": {
+    "computedAt": "2026-10-17T21:56:23.000Z",
+    "episode": {
+      "from": "2026-10-17T21:30:52.000Z",
+      "runIds": [
+        77
+      ]
+    },
+    "others": [],
+    "primary": {
+      "actor": "you_factory",
+      "cause": {
+        "state": "unknown"
+      },
+      "code": "iteration_budget",
+      "confidence": "certain",
+      "evidence": [
+        {
+          "at": "2026-10-17T21:56:20.000Z",
+          "count": 2,
+          "fact": {
+            "code": "diagnosis.evidence.budget",
+            "params": {
+              "max": 150,
+              "used": 150
+            }
+          },
+          "quote": "Iteration budget exhausted (150/150) \u2014 task could not complete within the allowed iterations",
+          "runId": 77,
+          "source": "kanban",
+          "until": null
+        }
+      ],
+      "runIds": [
+        77
+      ],
+      "setting": {
+        "current": null,
+        "defaultValue": null,
+        "effective": null,
+        "key": "agent.max_turns",
+        "observed": 150,
+        "profile": "coder-claude",
+        "repo": null,
+        "unit": "turns"
+      },
+      "steps": [
+        {
+          "command": null,
+          "done": false,
+          "text": {
+            "code": "diagnosis.step.raiseLimit",
+            "params": {
+              "key": "agent.max_turns",
+              "profile": "coder-claude"
+            }
+          }
+        }
+      ],
+      "subject": {
+        "plugin": null,
+        "profile": "coder-claude",
+        "tool": null
+      },
+      "summary": {
+        "code": "diagnosis.summary.iterationBudget",
+        "params": {
+          "max": 150
+        }
+      },
+      "why": {
+        "code": "diagnosis.why.iterationBudget",
+        "params": {
+          "max": 150,
+          "used": 150
+        }
+      }
+    },
+    "runs": [
+      {
+        "finding": "iteration_budget",
+        "role": "cause",
+        "runId": 77,
+        "sessionId": "20261017_233125_066ce0",
+        "text": {
+          "code": "diagnosis.run.timedOut",
+          "params": {}
+        }
+      }
+    ],
+    "sources": {
+      "agentLog": true,
+      "config": false,
+      "transcript": true,
+      "workspace": false
+    },
+    "unblock": {
+      "nextBlock": "blocked",
+      "template": {
+        "code": "diagnosis.unblock.causeFixed",
+        "params": {
+          "branch": null
+        }
+      },
+      "when": "now"
+    },
+    "work": {
+      "branch": null,
+      "commits": "none",
+      "commitsRefused": 0,
+      "editedFiles": 15,
+      "evidence": [],
+      "prUrl": null,
+      "pushed": "yes"
+    }
+  },
+  "test": "les autres incidents réels du kanban > claude-cockpit#49 : 150 tours épuisés par coder-claude, à relever dans sa config"
+}
