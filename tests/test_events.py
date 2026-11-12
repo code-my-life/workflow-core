@@ -334,3 +334,30 @@ def test_the_read_routes_carry_the_current_cursor(runtime_home, state_dir):
 
     epoch, n = read["cursor"].split(":")
     assert (cursor, kind, event["item"]) == (f"{epoch}:{int(n) + 1}", "changed", "t_0002")
+
+
+def test_a_new_card_event_goes_on_the_stream_with_the_full_item(runtime_home, state_dir):
+    with running_service() as base:
+        stream = Stream(base)
+        time.sleep(0.5)  # the first probe has read the boards
+
+        written = write(
+            board_base(runtime_home, "factory"),
+            "INSERT INTO task_events (task_id, run_id, kind, payload, created_at) VALUES (?, ?, ?, ?, ?)",
+            "t_0002",
+            None,
+            "blocked",
+            '{"reason": "il manque une preuve"}',
+            1762811500,
+        )
+        _, kind, event = stream.next(timeout=2)
+        elapsed = time.monotonic() - written
+        items = httpx.get(f"{base}/api/workflows/factory/items", headers=AUTH).json()["items"]
+        stream.close()
+
+    assert kind == "changed"
+    assert (event["workflow"], event["item"]) == ("factory", "t_0002")
+    assert event["state"]["events"][-1]["kind"] == "blocked"
+    assert event["state"]["events"][-1]["payload"] == {"reason": "il manque une preuve"}
+    assert event["state"] == next(item for item in items if item["id"] == "t_0002")
+    assert elapsed < 1.0, f"the event took {elapsed:.3f} s to reach the stream"

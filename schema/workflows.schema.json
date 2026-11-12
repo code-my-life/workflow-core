@@ -1,0 +1,60 @@
+{
+  "$defs": {
+    "ListedWorkflow": {
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "board": {
+          "title": "Board",
+          "type": "string"
+        },
+        "sheet_valid": {
+          "title": "Sheet Valid",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "key",
+        "board",
+        "sheet_valid"
+      ],
+      "title": "ListedWorkflow",
+      "type": "object"
+    }
+  },
+  "description": "GET /api/workflows: the declared workflows.",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "cursor": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cursor"
+    },
+    "workflows": {
+      "items": {
+        "$ref": "#/$defs/ListedWorkflow"
+      },
+      "title": "Workflows",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "workflows"
+  ],
+  "title": "WorkflowsResponse",
+  "type": "object"
+}

@@ -284,3 +284,30 @@ def test_a_config_of_a_modified_format_breaks_the_contract(runtime_home):
     (profile / "config.yaml").write_text("plugins:\n  - coder-guard\n")
 
     assert check().problems == ["agent coder : config.yaml : plugins n'est plus une table"]
+
+
+def test_the_full_card_state_columns_are_in_the_contract(runtime_home):
+    from workflow_core.adapters.hermes.board import ITEM_CARD_COLUMNS, ITEM_RUN_COLUMNS
+    from workflow_core.adapters.hermes.contract import CONTRACT
+
+    # Every column the items are read from is declared, the full card state included.
+    assert set(ITEM_CARD_COLUMNS) <= set(CONTRACT["tasks"].columns)
+    assert {
+        "idempotency_key",
+        "workspace_path",
+        "current_run_id",
+        "last_heartbeat_at",
+        "model_override",
+        "provider_override",
+        "skills",
+    } <= set(ITEM_CARD_COLUMNS)
+    assert set(ITEM_RUN_COLUMNS) <= set(CONTRACT["task_runs"].columns)
+    assert "metadata" in ITEM_RUN_COLUMNS
+    assert check().ok is True
+
+    for table, column in (("task_events", "payload"), ("tasks", "idempotency_key"), ("task_runs", "metadata")):
+        rebuild_tasks_column(board_base(runtime_home, "factory"), table, column)
+        verdict = check()
+        assert verdict.ok is False
+        assert f"factory: {table}.{column} absente" in verdict.problems
+        assert verdict.mode == "observer"
