@@ -136,10 +136,12 @@ def test_the_twins_of_a_pr_are_served_as_generic_values(factory):
         "factory-live#24",
     )
     values = named(answer, "twins")["values"]
-    assert [value["type"] for value in values] == ["status", "table"]
+    assert [value["type"] for value in values] == ["status", "table", "text"]
     assert values[0] == {"type": "status", "label": "État", "status": "ok", "text": "ready"}
-    assert values[1]["columns"] == ["Surface", "Sorte", "Touchée", "Différences"]
-    assert values[1]["rows"] == [["App", "web", True, 2], ["Site", "site", False, None]]
+    # Since #120, each surface also carries its id and the commits and images of its base and head.
+    assert values[1]["columns"][1:5] == ["Surface", "Sorte", "Touchée", "Différences"]
+    assert [row[1:5] for row in values[1]["rows"]] == [["App", "web", True, 2], ["Site", "site", False, None]]
+    assert values[2] == {"type": "text", "label": "Miroir", "text": "18100"}
     # No divergence: no text; and nothing of the streams, which carry a password.
     assert "neko-secret" not in json.dumps(answer)
     assert twins.read_bytes() == before
@@ -325,3 +327,122 @@ def test_a_declared_path_outside_its_root_is_not_read(factory, tmp_path):
     [entry] = reader.read(workflow, "pr", "factory-live#24")
     assert entry.values == []
     assert secret.read_text(encoding="utf-8") == json.dumps({"state": "ready"})
+
+
+# The state file the twin bench writes for a ready pair (scripts/factory-twins.py of the factory, `write_state`): each
+# twin's Neko session carries the viewers' password, and its HTTP port on this machine.
+BENCH_STATE = {
+    "state": "ready",
+    "divergence": None,
+    "mirror": 52004,
+    "surfaces": [
+        {
+            "id": "app",
+            "label": "App",
+            "kind": "web",
+            "changed": True,
+            "differences": 3,
+            "base": {
+                "sha": "1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "stream": "http://127.0.0.1:52000/?usr=proprietaire&pwd=s3cr3t-viewers",
+                "poster": "",
+            },
+            "head": {
+                "sha": "2222222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "stream": "http://127.0.0.1:52001/?usr=proprietaire&pwd=s3cr3t-viewers",
+                "poster": "",
+            },
+        }
+    ],
+}
+
+
+def test_the_twins_publish_ids_commits_posters_and_the_mirror(factory):
+    write(factory["board"] / "twins" / "factory-live-24.json", json.dumps(BENCH_STATE))
+
+    values = named(data(factory, "pr", "factory-live#24"), "twins")["values"]
+
+    table = next(value for value in values if value["type"] == "table")
+    assert table["label"] == "Surfaces"
+    assert table["columns"] == [
+        "Identifiant",
+        "Surface",
+        "Sorte",
+        "Touchée",
+        "Différences",
+        "Commit de base",
+        "Image de base",
+        "Commit de tête",
+        "Image de tête",
+    ]
+    assert table["rows"] == [
+        [
+            "app",
+            "App",
+            "web",
+            True,
+            3,
+            "1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "",
+            "2222222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "",
+        ]
+    ]
+    assert {"type": "text", "label": "Miroir", "text": "52004"} in values
+
+
+def test_no_neko_session_nor_password_leaves_the_core(factory):
+    write(factory["board"] / "twins" / "factory-live-24.json", json.dumps(BENCH_STATE))
+
+    text = json.dumps(data(factory, "pr", "factory-live#24"))
+
+    assert "s3cr3t-viewers" not in text
+    assert "pwd=" not in text
+    assert "proprietaire" not in text
+    # Nor the HTTP port of a twin on this machine.
+    assert "52000" not in text
+    assert "52001" not in text
+
+
+def test_the_gate_proofs_of_a_given_commit(factory):
+    gate = factory["board"] / "evidence" / CARD / "gate"
+    write(gate / "aaaaaaa" / "01-tests.txt", "tests of aaaaaaa")
+    older = gate / "aaaaaaa"
+    write(gate / "bbbbbbb" / "01-tests.txt", "tests of bbbbbbb")
+    # bbbbbbb is the newest pass.
+    os.utime(older, (1_700_000_000, 1_700_000_000))
+
+    def proofs(item: str) -> list[str]:
+        return [value["text"] for value in named(data(factory, "card", item), "gate-proofs")["values"]]
+
+    assert proofs(f"{CARD}@aaaaaaa") == ["tests of aaaaaaa"]
+    assert proofs(f"{CARD}@aaaaaaa0123456789") == ["tests of aaaaaaa"]
+    assert proofs(CARD) == ["tests of bbbbbbb"]
+    assert proofs(f"{CARD}@ccccccc") == []
+
+
+def test_a_card_id_with_a_malformed_commit_is_invalid(factory):
+    for item in (f"{CARD}@zz", f"{CARD}@", f"{CARD}@abc"):
+        response = factory["client"].get(
+            "/api/workflows/factory/data", params={"subject": "card", "id": item}, headers=GOOD
+        )
+        assert (response.status_code, response.json()["error"]) == (422, "invalid_id"), item
+    # The other subjects keep their ids.
+    for subject, item in (("pr", "factory-live#24"), ("run", str(RUN)), ("agent", "coder"), ("card", CARD)):
+        response = factory["client"].get(
+            "/api/workflows/factory/data", params={"subject": subject, "id": item}, headers=GOOD
+        )
+        assert response.status_code == 200, (subject, item)
+
+
+def test_a_dotted_column_reads_a_nested_key(factory):
+    state = json.loads(json.dumps(BENCH_STATE))
+    del state["surfaces"][0]["head"]
+    state["surfaces"][0]["base"].pop("sha")
+    write(factory["board"] / "twins" / "factory-live-24.json", json.dumps(state))
+
+    values = named(data(factory, "pr", "factory-live#24"), "twins")["values"]
+
+    [row] = next(value for value in values if value["type"] == "table")["rows"]
+    # base.sha absent, base.poster present, head absent: empty cells.
+    assert row[5:] == [None, "", None, None]

@@ -19,11 +19,12 @@ SUBJECTS: tuple[str, ...] = ("pr", "card", "run", "agent")
 Reader = Literal["json", "texts", "session", "claude", "log", "drift"]
 Cell = str | int | float | bool | None
 
-# The form of an id, by subject: `<repository>#<n>` for a pull request, a card's id, a run's number, an agent's name.
+# The form of an id, by subject: `<repository>#<n>` for a pull request, a card's id (with a commit, `<card>@<sha>`, 7 to
+# 40 hexadecimal characters, for what a card has per commit, as the gate's proofs), a run's number, an agent's name.
 _NAME = r"[A-Za-z0-9_.-]{1,100}"
 ID_FORMS = {
     "pr": js_regex(rf"^(?P<repo>{_NAME})#(?P<pr>[1-9][0-9]{{0,9}})$"),
-    "card": js_regex(rf"^{_NAME}$"),
+    "card": js_regex(rf"^{_NAME}(?:@[0-9a-f]{{7,40}})?$"),
     "run": js_regex(r"^[1-9][0-9]{0,15}$"),
     "agent": js_regex(r"^[A-Za-z0-9_-]{1,100}$"),
 }
@@ -32,7 +33,8 @@ ID_FORMS = {
 class DataField(BaseModel):
     """A field of a JSON file read, and the generic type it is served as. `key` may be dotted (`a.b`). A status maps
     the field's values to its states (`statuses`); a table reads a list of objects, one row per object, one column per
-    key of `columns`, headed by `headers` (the keys by default)."""
+    key of `columns`, headed by `headers` (the keys by default). A column may be dotted too (`base.sha`): an absent
+    key is an empty cell."""
 
     key: str = Field(min_length=1)
     label: str
