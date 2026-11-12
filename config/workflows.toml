@@ -1,7 +1,7 @@
 # The workflows the core serves: one [[workflow]] table each, with its key, its board and the path of its sheet, and
 # optionally the settings of the diagnosis: its triggers (held_after_minutes, approval_card_title, main_red_reason),
 # its sources (repo, profiles, plugins) and the workflow's words (guard_suffixes, default_agent, relay_agent,
-# pr_acceptance).
+# pr_acceptance, body_branch).
 # The key of a workflow is the name of its board (ADR 0003). The manifests of the engine epic will replace this list.
 
 [[workflow]]
@@ -20,6 +20,8 @@ guard_suffixes = ["-guard", "-readonly"]
 default_agent = "coder"
 relay_agent = "scribe"
 pr_acceptance = "PR acceptance"
+# The factory's brief names a card's branch: « - branch_name : fix/8-island-blur ».
+body_branch = '^- branch_name : (\S{1,250})\s*$'
 
 [[workflow]]
 key = "studio"

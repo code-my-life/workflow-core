@@ -97,6 +97,9 @@ class RuntimeTerms(BaseModel):
     # How a held card's and a cooling provider's events read, quoted as proofs.
     held_quote: str
     cooldown_quote: str
+    # The block recurrence at which the runtime sends a card to triage, and the tools that edit a file.
+    block_recurrence_limit: int
+    edit_tools: list[str]
 
 
 class CardFactsReader(Protocol):
@@ -105,6 +108,10 @@ class CardFactsReader(Protocol):
 
     terms: RuntimeTerms
     texts: RuntimeTexts
+
+    def diagnosis_sources(self) -> DiagnosisSources:
+        """The other sources of the diagnosis, from the same runtime home."""
+        ...
 
     def read_card_facts(self, board: str, card: str) -> CardFacts | None: ...
 
@@ -325,3 +332,25 @@ class RuntimeTexts(Protocol):
     def relay_command(self, board: str, card: str, relay: str, owner: str) -> str:
         """The command that hands a held card to the relay agent, then back to its agent."""
         ...
+
+
+class ProfilesPort(Protocol):
+    def facts(self, agent: str, workflow: Any) -> ProfileFacts | None:
+        """The agent's configuration in service, with its workflow's repository value; `None` when unreadable."""
+        ...
+
+
+class EvidencePort(Protocol):
+    def evidence(self, board: str, card: str) -> list[EvidenceFile] | None:
+        """The proofs of a card; `None` when it has no evidence folder."""
+        ...
+
+
+class DiagnosisSources(Protocol):
+    """Every source the diagnosis reads besides the board, served by the runtime's adapter."""
+
+    texts: RuntimeTexts
+    sessions: SessionsPort
+    logs: AgentLogPort
+    profiles: ProfilesPort
+    evidence: EvidencePort

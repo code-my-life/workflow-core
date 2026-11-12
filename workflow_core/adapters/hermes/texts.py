@@ -37,6 +37,9 @@ COMPLETE_TOOL = "kanban_complete"
 RATE_LIMIT_COOLDOWN_MINUTES = 5
 HELD_QUOTE = 'respawn_guarded {"reason": "active_pr"}'
 COOLDOWN_QUOTE = 'respawn_guarded {"reason": "rate_limit_cooldown"}'
+# At the 2nd block of the same type in a row, the kanban core sends the card to triage.
+BLOCK_RECURRENCE_LIMIT = 2
+EDIT_TOOLS = ["write_file", "patch"]
 STALLED = js_regex(r"Turn made no progress for (\d+)s")
 FAILING = js_regex(r"fallback chain kept failing over|No reply: every provider in the fallback chain kept failing over")
 NO_REQUIRED_CHECKS = js_regex(r"No repository-required checks are configured")
@@ -58,6 +61,8 @@ TERMS = RuntimeTerms(
     rate_limit_cooldown_minutes=RATE_LIMIT_COOLDOWN_MINUTES,
     held_quote=HELD_QUOTE,
     cooldown_quote=COOLDOWN_QUOTE,
+    block_recurrence_limit=BLOCK_RECURRENCE_LIMIT,
+    edit_tools=EDIT_TOOLS,
 )
 
 # A tool's refusal when a `pre_tool_call` hook passes its delay, or has not finished.

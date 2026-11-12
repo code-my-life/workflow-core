@@ -151,6 +151,11 @@ class HermesBoardReader:
                 by_card[row["task_id"]]["comments"].append({k: row[k] for k in COMMENT_COLUMNS if k != "task_id"})
         return [Item(**dict(row), **by_card[row["id"]]) for row in cards]
 
+    def diagnosis_sources(self, environ: dict[str, str] | None = None) -> HermesDiagnosisSources:
+        """The other sources of the diagnosis under the same Hermès home: sessions, journals, configurations,
+        proofs. The journals are dated in the zone named by `HERMES_TZ`."""
+        return HermesDiagnosisSources(self.home, environ)
+
     def read_card_facts(self, board: str, card: str) -> CardFacts | None:
         """The card, its runs and its events, read in one short read transaction; `None` if the card is absent."""
         found = self._read_facts(board, "WHERE id = ?", "WHERE task_id = ?", (card,))
@@ -197,6 +202,23 @@ class HermesBoardReader:
             )
             for row in cards
         ]
+
+
+class HermesDiagnosisSources:
+    """Every source the diagnosis reads besides the board, under one Hermès home (`DiagnosisSources`)."""
+
+    def __init__(self, home: Path, environ: dict[str, str] | None = None) -> None:
+        from workflow_core.adapters.hermes.agent_log import DEFAULT_TIME_ZONE, TIME_ZONE_VARIABLE, AgentLogReader
+        from workflow_core.adapters.hermes.evidence import EvidenceReader
+        from workflow_core.adapters.hermes.profiles import ProfileReader
+        from workflow_core.adapters.hermes.sessions import SessionReader
+
+        env = os.environ if environ is None else environ
+        self.texts = TEXTS
+        self.sessions = SessionReader(home)
+        self.logs = AgentLogReader(home, env.get(TIME_ZONE_VARIABLE) or DEFAULT_TIME_ZONE, self.sessions.open_sessions)
+        self.profiles = ProfileReader(home)
+        self.evidence = EvidenceReader(home)
 
 
 class HermesBoardWatcher:
