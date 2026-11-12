@@ -28,3 +28,52 @@ key = "studio"
 board = "studio"
 sheet = "~/perso/video-factory/hermes/workflow.json"
 repo = "~/perso/video-factory"
+
+# The checks of the machine besides the runtime's own (ADR 0008): one [[check]] table each, with its id, its label,
+# its group on the screen (hermes, models, tools, intake), its kind (http: the address answers below 500; tcp: the port
+# listens; vram: nvidia-smi; funnel: tailscale funnel status) and optionally its target and its cadence in seconds
+# (30 at least, the default). No secret is read: freellmapi answers 401 without a key, which says it runs.
+
+[[check]]
+id = "dashboard"
+label = "Dashboard Hermès"
+group = "hermes"
+kind = "http"
+target = "http://127.0.0.1:9119/api/status"
+
+[[check]]
+id = "vram"
+label = "VRAM"
+group = "models"
+kind = "vram"
+# Under WSL, nvidia-smi comes with the Windows driver in this folder, out of a service's PATH.
+target = "/usr/lib/wsl/lib/nvidia-smi"
+every_seconds = 60
+
+[[check]]
+id = "freellmapi"
+label = "freellmapi"
+group = "models"
+kind = "http"
+target = "http://127.0.0.1:3001/v1/models"
+
+[[check]]
+id = "graphify"
+label = "MCP graphify"
+group = "tools"
+kind = "tcp"
+target = "8081"
+
+[[check]]
+id = "webhook"
+label = "Écouteur webhook"
+group = "intake"
+kind = "tcp"
+target = "8644"
+
+[[check]]
+id = "funnel"
+label = "Tailscale Funnel"
+group = "intake"
+kind = "funnel"
+every_seconds = 300

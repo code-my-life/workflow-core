@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import secrets
 import time
 from collections.abc import Callable
@@ -19,7 +21,9 @@ from workflow_core.config import Workflow
 from workflow_core.diagnosis import diagnose_board, diagnose_card
 from workflow_core.diagnosis.service import run_verdicts
 from workflow_core.events import BoardWatcher, EventHub
+from workflow_core.machine import MachineChecks
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
+from workflow_core.model.checks import CHECK_EVERY_SECONDS, DeclaredCheck, RuntimeChecks
 from workflow_core.model.diagnosis import diagnosis_json
 from workflow_core.model.facts import CardFactsReader, DiagnosisSources
 from workflow_core.model.live import LiveReader, LiveWatcher
@@ -64,6 +68,9 @@ def create_app(
     spy: Callable[[str], Any] | None = None,
     live: LiveReader | None = None,
     live_watcher: LiveWatcher | None = None,
+    runtime_checks: RuntimeChecks | None = None,
+    checks: list[DeclaredCheck] | None = None,
+    checks_every: float = CHECK_EVERY_SECONDS,
 ) -> FastAPI:
     """The API. With a board watcher and a journal path, it also probes the boards and serves GET /api/events. The
     facts of a card, for its diagnosis, are read by `facts`, by default the board reader itself, and the other
@@ -76,14 +83,36 @@ def create_app(
     live_reader: LiveReader | None = live if live is not None else getattr(boards, "live_reader", lambda: None)()
     expected = secret.encode("utf-8")
     hub: EventHub | None = None
+    # The machine's checks run apart from the routes: /api/machine serves their last results (ADR 0008).
+    machine_checks = (
+        MachineChecks(runtime=runtime_checks, declared=list(checks or []), clock=clock, every_seconds=checks_every)
+        if runtime_checks is not None or checks
+        else None
+    )
+
+    async def watch_machine() -> None:
+        # The first round is done at startup; then a check whose status changes is announced once.
+        while True:
+            await asyncio.sleep(min(1.0, checks_every / 2))
+            if await asyncio.to_thread(machine_checks.run_due) and hub is not None and hub.journal is not None:
+                hub.publish("machine", [check.model_dump() for check in machine_checks.current()])
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if hub is not None:
             await hub.start()
+        watching = None
+        if machine_checks is not None:
+            await asyncio.to_thread(machine_checks.run_due)
+            watching = asyncio.create_task(watch_machine(), name="workflow-core machine checks")
         try:
             yield
         finally:
+            if watching is not None:
+                watching.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await watching
+                machine_checks.close()
             if hub is not None:
                 await hub.stop()
 
@@ -299,6 +328,9 @@ def create_app(
             "mode": core.mode,
             "boards": {board: {"last_read_at": at} for board, at in sorted(core.last_read_at.items())},
         }
+        # The machine's checks, when the core runs any (ADR 0018: an optional field).
+        if machine_checks is not None:
+            payload["checks"] = [check.model_dump() for check in machine_checks.current()]
         return with_cursor(payload, cursor)
 
     return app
