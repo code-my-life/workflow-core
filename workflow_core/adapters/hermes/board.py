@@ -150,6 +150,21 @@ class HermesBoardReader:
                 by_card[row["task_id"]]["comments"].append({k: row[k] for k in COMMENT_COLUMNS if k != "task_id"})
         return [Item(**dict(row), **by_card[row["id"]]) for row in cards]
 
+    def read_issue_urls(self, board: str) -> dict[str, str | None]:
+        """The GitHub issue address of each card of the board, by card id, found as the factory finds it
+        (`issues.py`): `None` for a card without one."""
+        from workflow_core.adapters.hermes.issues import issue_urls
+
+        return issue_urls(self.read_items(board))
+
+    def relaunch_command(self, board: str, card: str, assignee: str, relay: str) -> str:
+        """The command that relaunches a card held by Hermès' active pull request guard: a reassignment to a relay
+        agent, then back to its assignee (the factory's RUNBOOK, « Incidents connus »). Proposed, never run."""
+        return (
+            f'hermes kanban --board {board} reassign {card} {relay} --reason "relais active_pr" && '
+            f'hermes kanban --board {board} reassign {card} {assignee} --reason "reprise sur la PR"'
+        )
+
     def diagnosis_sources(self, environ: dict[str, str] | None = None) -> HermesDiagnosisSources:
         """The other sources of the diagnosis under the same Hermès home: sessions, journals, configurations,
         proofs. The journals are dated in the zone named by `HERMES_TZ`."""

@@ -4,7 +4,8 @@
 A systemd timer runs it every minute, apart from the core: standard library only, nothing imported from the core's
 package. Each run asks /healthz once, with the shared secret, and keeps in its state file when the outage began and
 whether it was written. Lines start with the syslog priority journald reads: "<3>" (err) for the outage, "<6>" (info)
-for the recovery. Opening an issue on GitHub comes with the GitHub notifier epic.
+for the recovery. Its unit then runs the core's outage command, which opens, comments or closes the outage issue on
+GitHub from this state file.
 """
 
 from __future__ import annotations

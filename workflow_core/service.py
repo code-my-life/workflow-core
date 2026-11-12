@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from types import ModuleType
 from typing import Any
 
@@ -17,6 +18,10 @@ from workflow_core.config import Workflow
 from workflow_core.events import JOURNAL_FILE, state_dir
 from workflow_core.model.contract import ContractVerdict
 from workflow_core.model.state import CoreState
+from workflow_core.notify import Notifier, NotifierRunner, NotifySettings
+from workflow_core.notify.contract_issue import ContractIssueTask, report_contract
+from workflow_core.notify.notifier import journal_line
+from workflow_core.notify.register import REGISTER_FILE
 
 # journald reads a leading "<n>" on a service's output as the syslog priority of the line.
 ERROR = "<3>"
@@ -34,9 +39,15 @@ def build_service(
     adapter: ModuleType,
     clock: Callable[[], float] = time.time,
     spy: Callable[[str], Any] | None = None,
+    environ: dict[str, str] | None = None,
+    post_comment: Callable[[str, int, str], str] | None = None,
+    read_comments: Callable[[str, int], list] | None = None,
+    github: Any = None,
+    now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> FastAPI:
-    """The API, with the core's state after the contract check. A broken contract keeps the observer mode and is
-    written to the journal; the service still answers."""
+    """The API, with the core's state after the contract check. A broken contract keeps the observer mode, is written
+    to the journal and to its issue in code-my-life/workflow-core (the one write of the observer mode); the service
+    still answers. `github` replaces the core's GitHub client (tests)."""
     boards = sorted({workflow.board for workflow in workflows.values()})
     try:
         verdict = adapter.check_contract(boards)
@@ -49,16 +60,52 @@ def build_service(
     else:
         journal(ERROR, f"contrat cassé, mode {state.mode} : " + " ; ".join(verdict.problems))
 
-    return create_app(
+    reader = adapter.make_board_reader()
+    settings = NotifySettings.from_environ(environ)
+    for line in settings.describe():
+        journal(INFO if settings.on or settings.problem is None else ERROR, line)
+    if github is None:
+        from workflow_core.adapters.github import AppTokens, GitHubClient
+
+        github = GitHubClient(AppTokens(environ=environ))
+    if post_comment is None or read_comments is None:
+        post_comment = post_comment or github.post_comment
+        read_comments = read_comments or github.list_comments
+    notifier = Notifier(
+        workflows=workflows,
+        reader=reader,
+        state=state,
+        settings=settings,
+        post_comment=post_comment,
+        read_comments=read_comments,
+        register_path=state_dir(environ) / REGISTER_FILE,
+        clock=clock,
+    )
+
+    def report() -> None:
+        report_contract(
+            verdict,
+            runtime=getattr(adapter, "RUNTIME_NAME", "runtime"),
+            version=version,
+            client=github,
+            state_dir=state_dir(environ),
+            now=now(),
+            log=journal_line,
+        )
+
+    app = create_app(
         secret=secret,
         workflows=workflows,
-        boards=adapter.make_board_reader(),
+        boards=reader,
         state=state,
         watcher=adapter.make_board_watcher(),
-        journal_path=state_dir() / JOURNAL_FILE,
+        journal_path=state_dir(environ) / JOURNAL_FILE,
         clock=clock,
         spy=spy,
+        background=[ContractIssueTask(report), NotifierRunner(notifier)],
     )
+    app.state.notifier = notifier
+    return app
 
 
 # Seconds uvicorn waits for open connections at a stop: an SSE client never closes its own, so the core ends them.
