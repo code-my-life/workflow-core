@@ -173,6 +173,8 @@ def test_a_card_change_reaches_the_stream_in_under_a_second(runtime_home, state_
 
 
 def test_each_event_carries_the_full_item_state_and_the_next_cursor(runtime_home, state_dir):
+    # A dependency wait is no intervention: only `changed` events go on the stream here (#37).
+    write(board_base(runtime_home, "factory"), "UPDATE tasks SET block_kind = 'dependency' WHERE id = 't_0002'")
     with running_service() as base:
         stream = Stream(base)
         time.sleep(0.5)
@@ -263,6 +265,8 @@ def test_a_cursor_of_an_old_epoch_gets_the_reset_first(runtime_home, state_dir):
 
 
 def test_a_current_cursor_gets_the_missed_events_in_order(runtime_home, state_dir):
+    # A dependency wait is no intervention: only `changed` events go on the stream here (#37).
+    write(board_base(runtime_home, "factory"), "UPDATE tasks SET block_kind = 'dependency' WHERE id = 't_0002'")
     with running_service() as base:
         stream = Stream(base)
         time.sleep(0.5)
@@ -410,3 +414,54 @@ def test_a_check_status_change_goes_on_the_stream_once(runtime_home, state_dir, 
     assert {c["id"]: c["status"] for c in event["state"]}["graphify"] == "down"
     schema = json.loads((Path(__file__).resolve().parent.parent / "schema" / "event.schema.json").read_text())
     jsonschema.Draft202012Validator(schema).validate(event)
+
+
+def _frames_for(stream: Stream, seconds: float) -> list[tuple[str, str, dict]]:
+    frames = []
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            frames.append(stream.next(timeout=0.1))
+        except queue.Empty:
+            continue
+    return frames
+
+
+def test_an_intervention_opening_and_closing_go_on_the_stream_once(runtime_home, state_dir):
+    # t_0002 waits for an answer from the start: its intervention is open, known without an announce.
+    with running_service() as base:
+        stream = Stream(base)
+        time.sleep(0.5)
+        factory = board_base(runtime_home, "factory")
+        write(factory, "UPDATE tasks SET status = 'ready', block_kind = NULL WHERE id = 't_0002'")
+        closing = _frames_for(stream, 1.5)
+        write(factory, "UPDATE tasks SET status = 'blocked', block_kind = 'capability' WHERE id = 't_0001'")
+        opening = _frames_for(stream, 1.5)
+        listed = httpx.get(f"{base}/api/workflows/factory/interventions", headers=AUTH).json()["interventions"]
+        stream.close()
+
+    closed = [event for _, kind, event in closing + opening if kind == "intervention_closed"]
+    opened = [event for _, kind, event in closing + opening if kind == "intervention_opened"]
+    assert [event["state"] for event in closed] == [{"id": "needs_input:t_0002:1762810000"}]
+    assert closed[0]["item"] == "t_0002"
+    assert len(opened) == 1
+    assert (opened[0]["workflow"], opened[0]["item"]) == ("factory", "t_0001")
+    assert opened[0]["state"] == listed[0]
+    assert opened[0]["state"]["kind"] == "capability"
+    schema = json.loads((Path(__file__).resolve().parent.parent / "schema" / "event.schema.json").read_text())
+    for event in closed + opened:
+        jsonschema.Draft202012Validator(schema).validate(event)
+
+
+def test_a_rebuild_does_not_announce_open_interventions_again(runtime_home, state_dir):
+    # A first start rebuilds the journal; a second one opens it again; a third one, the journal gone, rebuilds it.
+    for remove in (False, False, True):
+        if remove:
+            (state_dir / "events.db").unlink()
+        with running_service() as base:
+            stream = Stream(base)
+            frames = _frames_for(stream, 1.2)
+            listed = httpx.get(f"{base}/api/workflows/factory/interventions", headers=AUTH).json()["interventions"]
+            stream.close()
+        assert [item["id"] for item in listed] == ["needs_input:t_0002:1762810000"]
+        assert [kind for _, kind, _ in frames if kind.startswith("intervention_")] == []

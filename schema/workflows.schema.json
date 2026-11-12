@@ -1,5 +1,40 @@
 {
   "$defs": {
+    "ListedGesture": {
+      "description": "A gesture the workflow declares: `comment` posts `/<key> <name> [note]` on an item's issue, `issue` opens an\nissue in `repo` (given for that kind only).",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "comment",
+            "issue"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "repo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repo"
+        }
+      },
+      "required": [
+        "name",
+        "kind"
+      ],
+      "title": "ListedGesture",
+      "type": "object"
+    },
     "ListedWorkflow": {
       "properties": {
         "key": {
@@ -13,6 +48,14 @@
         "sheet_valid": {
           "title": "Sheet Valid",
           "type": "boolean"
+        },
+        "gestures": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ListedGesture"
+          },
+          "title": "Gestures",
+          "type": "array"
         }
       },
       "required": [

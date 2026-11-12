@@ -8,15 +8,25 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from workflow_core.model.checks import DeclaredCheck
 from workflow_core.model.data import DataDeclaration
 
-__all__ = ["DEFAULT_CONFIG", "DataDeclaration", "Workflow", "load_checks", "load_workflows"]
+__all__ = ["DEFAULT_CONFIG", "DataDeclaration", "Gesture", "Workflow", "load_checks", "load_workflows"]
 
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "workflows.toml"
+
+
+class Gesture(BaseModel):
+    """A gesture the workflow declares (`[[workflow.gestures]]`, ADR 0010): `comment` posts `/<key> <name> [note]` on
+    the issue of an item, `issue` opens an issue in the declared `repo`. The core publishes them; it never posts one."""
+
+    name: str = Field(min_length=1, pattern=r"^[a-z][a-z0-9-]*$")
+    kind: Literal["comment", "issue"]
+    repo: str | None = None
 
 
 class Workflow(BaseModel):
@@ -50,6 +60,8 @@ class Workflow(BaseModel):
     # The data the workflow shows besides its cards (`[[workflow.data]]`, ADR 0011): read by the runtime's adapter at
     # the declared paths, served as generic values. None by default.
     data: list[DataDeclaration] = Field(default_factory=list)
+    # The gestures the workflow declares (`[[workflow.gestures]]`), until the manifests. None by default.
+    gestures: list[Gesture] = Field(default_factory=list)
 
     @property
     def repo_path(self) -> Path | None:
