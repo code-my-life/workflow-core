@@ -91,7 +91,11 @@ Text = Message | str
 
 
 def message(code: str, **params: Param) -> Message:
-    return Message(code=code, params=params)
+    # JSON has one number type: a whole float is written as an integer, as JavaScript writes it.
+    whole = {
+        key: int(value) if isinstance(value, float) and value.is_integer() else value for key, value in params.items()
+    }
+    return Message(code=code, params=whole)
 
 
 class CausePresent(_Contract):

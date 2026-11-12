@@ -16,7 +16,7 @@ from starlette.exceptions import HTTPException
 
 from workflow_core.clock import utc_now
 from workflow_core.config import Workflow
-from workflow_core.diagnosis import diagnose
+from workflow_core.diagnosis import diagnose, input_of
 from workflow_core.events import BoardWatcher, EventHub
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
 from workflow_core.model.diagnosis import diagnosis_json
@@ -188,7 +188,7 @@ def create_app(
         found = card_facts.read_card_facts(workflow.board, item)
         if found is None:
             raise UnknownItemError(workflow.board, item)
-        computed = diagnose(found, card_facts.terms, clock())
+        computed = diagnose(input_of(found, workflow.board, clock()), card_facts.texts, workflow)
         return {
             "schema_version": SCHEMA_VERSION,
             "workflow": workflow.key,

@@ -72,17 +72,26 @@ class CardFacts(BaseModel):
 
 
 class RuntimeTerms(BaseModel):
-    """The runtime's own words that a diagnosis quotes, given by the adapter."""
+    """The runtime's own words and values that a diagnosis quotes, given by the adapter."""
 
     # The card's setting that bounds the duration of a run.
     runtime_limit_key: str
+    # The agent's settings of a hook's delay and of a tool call's ceiling, with the runtime's defaults (seconds).
+    hook_key: str
+    deadline_key: str
+    hook_timeout_default: float
+    hook_timeout_max: float
+    tool_deadline_default: float
+    # Where a workflow's repository keeps its agents' profiles when its entry does not say.
+    repo_profiles_default: str
 
 
 class CardFactsReader(Protocol):
     """Reads the facts of one card of a named board. A card absent from the board is `None`; a board that cannot
-    be read raises `BoardUnavailableError`."""
+    be read raises `BoardUnavailableError`. It gives the runtime's texts the diagnosis quotes."""
 
     terms: RuntimeTerms
+    texts: RuntimeTexts
 
     def read_card_facts(self, board: str, card: str) -> CardFacts | None: ...
 
@@ -205,3 +214,60 @@ class EvidenceFile(BaseModel):
     name: str
     bytes: int
     at: float
+
+
+class ToolOutcome(BaseModel):
+    """What a tool's result says: a refusal by a guard or by the runtime, a delay, an error, or nothing to report.
+    Only the fields of its kind are set."""
+
+    kind: Literal[
+        "hook_timeout", "hook_raised", "guard", "pr_acceptance", "tool_deadline", "command_timeout", "error", "ok"
+    ]
+    callback: str | None = None
+    error: str | None = None
+    plugin: str | None = None
+    message: str | None = None
+    classification: str | None = None
+    detail: str | None = None
+    tool: str | None = None
+    seconds: float | None = None
+
+
+class DiagnosisInput(BaseModel):
+    """Everything a diagnosis reads of a card, at an instant: the facts of its board and of its sources. A source
+    that could not be read is `None`, never empty. Times are Unix seconds."""
+
+    now: float
+    board: str
+    card: CardDetail
+    runs: list[RunFact]
+    events: list[EventFact]
+    # The event told (the block, the give-up, the loop); `None`: the last failure.
+    anchor: EventFact | None = None
+    sessions: list[SessionFacts] | None = None
+    logs: list[LogFact] | None = None
+    profile: ProfileFacts | None = None
+    evidence: list[EvidenceFile] | None = None
+    branch: str | None = None
+    pr_url: str | None = None
+    # The agent a held card came from, for the relay command.
+    owner: str | None = None
+
+
+class RuntimeTexts(Protocol):
+    """The runtime's texts, as the adapter knows them: the rules of the diagnosis read through this port only."""
+
+    terms: RuntimeTerms
+
+    def classify_tool_result(self, content: str, guard_suffixes: list[str], pr_acceptance: str | None) -> ToolOutcome:
+        """What a tool's result says. A guard is recognised by the workflow's guard suffixes only, the pull request
+        acceptance check by the workflow's text only."""
+        ...
+
+    def set_command(self, agent: str, key: str, value: float) -> str:
+        """The command that sets an agent's setting."""
+        ...
+
+    def plugin_of_module(self, module: str | None) -> str | None:
+        """A plugin's name from its Python module, as the runtime names it."""
+        ...

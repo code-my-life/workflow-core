@@ -3,6 +3,6 @@
 This package only sees the core's model (`workflow_core.model`): it never names the runtime (ADR 0001).
 """
 
-from workflow_core.diagnosis.diagnose import diagnose
+from workflow_core.diagnosis.diagnose import diagnose, input_of
 
-__all__ = ["diagnose"]
+__all__ = ["diagnose", "input_of"]
