@@ -458,8 +458,8 @@ def test_the_existing_routes_answer_as_before(runtime_home):
     assert listed == {
         "schema_version": 1,
         "workflows": [
-            {"key": "factory", "board": "factory", "sheet_valid": False},
-            {"key": "studio", "board": "studio", "sheet_valid": False},
+            {"key": "factory", "board": "factory", "sheet_valid": False, "gestures": []},
+            {"key": "studio", "board": "studio", "sheet_valid": False, "gestures": []},
         ],
     }
     machine = client.get("/api/machine", headers=GOOD).json()

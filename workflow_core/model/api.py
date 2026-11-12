@@ -16,6 +16,7 @@ from workflow_core.model.board import Item
 from workflow_core.model.checks import MachineCheck
 from workflow_core.model.contract import ContractVerdict, Mode
 from workflow_core.model.data import DeclaredData, Subject
+from workflow_core.model.interventions import Intervention, InterventionClosed
 from workflow_core.model.live import ActivityFact, AgentLive, Usage
 from workflow_core.model.sheet import WorkflowSheet
 
@@ -30,11 +31,22 @@ class _AtCursor(_Response):
     cursor: str | None = None
 
 
+class ListedGesture(BaseModel):
+    """A gesture the workflow declares: `comment` posts `/<key> <name> [note]` on an item's issue, `issue` opens an
+    issue in `repo` (given for that kind only)."""
+
+    name: str
+    kind: Literal["comment", "issue"]
+    repo: str | None = None
+
+
 class ListedWorkflow(BaseModel):
     key: str
     board: str
     # Whether the declared sheet is readable and passes the judge.
     sheet_valid: bool
+    # The gestures the workflow declares; none by default.
+    gestures: list[ListedGesture] = []
 
 
 class WorkflowsResponse(_AtCursor):
@@ -98,15 +110,16 @@ class StreamEvent(BaseModel):
     """One event of GET /api/events. `reset` opens an epoch: the client reads the full state again; it names no
     workflow, no item and carries no state. `changed` carries the full state of the item, `live` the live state of an
     agent (its item: the card it holds), `activity` one new fact of the board, `machine` the full list of the machine's
-    checks when a status changed (no workflow, no item)."""
+    checks when a status changed (no workflow, no item), `intervention_opened` an intervention that opened (its item:
+    the card), `intervention_closed` the id of one that closed."""
 
     cursor: str
     workflow: str | None
     item: str | None
-    kind: Literal["changed", "reset", "live", "activity", "machine"]
+    kind: Literal["changed", "reset", "live", "activity", "machine", "intervention_opened", "intervention_closed"]
     # ISO 8601, UTC.
     at: str
-    state: Item | AgentLive | ActivityFact | list[MachineCheck] | None
+    state: Item | AgentLive | ActivityFact | list[MachineCheck] | Intervention | InterventionClosed | None
 
 
 class ErrorResponse(BaseModel):
@@ -114,6 +127,13 @@ class ErrorResponse(BaseModel):
 
     error: str
     detail: str
+
+
+class InterventionsResponse(_Response):
+    """GET /api/workflows/<key>/interventions: the open interventions of the workflow's board, by opening time."""
+
+    workflow: str
+    interventions: list[Intervention]
 
 
 class DeclaredDataResponse(_Response):
@@ -145,4 +165,5 @@ API_SCHEMAS: dict[str, Callable[[], str]] = {
     "activity.schema.json": _schema_text(ActivityResponse),
     "usage.schema.json": _schema_text(UsageResponse),
     "declared-data.schema.json": _schema_text(DeclaredDataResponse),
+    "interventions.schema.json": _schema_text(InterventionsResponse),
 }

@@ -117,8 +117,8 @@ def test_both_workflows_are_served_with_their_judged_sheets(service, sheets):
     assert listed.json() == {
         "schema_version": 1,
         "workflows": [
-            {"key": "factory", "board": "factory", "sheet_valid": True},
-            {"key": "studio", "board": "studio", "sheet_valid": True},
+            {"key": "factory", "board": "factory", "sheet_valid": True, "gestures": []},
+            {"key": "studio", "board": "studio", "sheet_valid": True, "gestures": []},
         ],
     }
     for name, path in sheets.items():
@@ -363,3 +363,16 @@ def test_the_existing_item_fields_are_unchanged(client):
 
     assert [before(item) for item in items] == FACTORY_ITEMS_BEFORE
     assert [before(item) for item in studio] == STUDIO_ITEMS_BEFORE
+
+
+def test_the_workflows_list_their_declared_gestures(runtime_home):
+    client = TestClient(
+        build_service(
+            secret=SECRET, workflows=load_workflows(ROOT / "config" / "workflows.toml"), adapter=runtime_adapter()
+        )
+    )
+
+    listed = {workflow["key"]: workflow for workflow in client.get("/api/workflows", headers=GOOD).json()["workflows"]}
+
+    assert listed["factory"]["gestures"] == [{"name": "unblock", "kind": "comment"}]
+    assert listed["studio"]["gestures"] == []

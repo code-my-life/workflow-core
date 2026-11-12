@@ -21,12 +21,14 @@ from workflow_core.config import Workflow
 from workflow_core.diagnosis import diagnose_board, diagnose_card
 from workflow_core.diagnosis.service import run_verdicts
 from workflow_core.events import BoardWatcher, EventHub
+from workflow_core.interventions import interventions_of
 from workflow_core.machine import MachineChecks
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
 from workflow_core.model.checks import CHECK_EVERY_SECONDS, DeclaredCheck, RuntimeChecks
 from workflow_core.model.data import ID_FORMS, SUBJECTS, DeclaredDataReader
 from workflow_core.model.diagnosis import diagnosis_json
 from workflow_core.model.facts import CardFactsReader, DiagnosisSources
+from workflow_core.model.interventions import Intervention
 from workflow_core.model.live import LiveReader, LiveWatcher
 from workflow_core.model.state import CoreState
 from workflow_core.model.triggers import Trigger
@@ -150,6 +152,11 @@ def create_app(
         core.last_read_at[board] = utc_now()
         return items
 
+    def open_interventions(workflow: Workflow) -> list[Intervention]:
+        # The interventions of the workflow's board, computed from its cards' facts (ADR 0012).
+        cards = card_facts.read_board_facts(workflow.board)
+        return interventions_of(cards, workflow, clock(), card_facts.texts)
+
     if watcher is not None and journal_path is not None:
         hub = EventHub(
             workflows=workflows,
@@ -160,6 +167,7 @@ def create_app(
             spy=spy,
             live=live_reader,
             live_watcher=live_watcher,
+            interventions=open_interventions,
         )
     app.state.events = hub
 
@@ -232,7 +240,14 @@ def create_app(
                 valid = True
             except (InvalidSheetError, SheetUnavailableError):
                 valid = False
-            listed.append({"key": workflow.key, "board": workflow.board, "sheet_valid": valid})
+            listed.append(
+                {
+                    "key": workflow.key,
+                    "board": workflow.board,
+                    "sheet_valid": valid,
+                    "gestures": [gesture.model_dump(exclude_none=True) for gesture in workflow.gestures],
+                }
+            )
         return with_cursor({"schema_version": SCHEMA_VERSION, "workflows": listed}, cursor)
 
     @app.get("/api/workflows/{key}/sheet")
@@ -330,6 +345,16 @@ def create_app(
         workflow = declared(key)
         report = reading_live().usage(workflow, days, clock())
         return {"schema_version": SCHEMA_VERSION, "workflow": workflow.key, **report.model_dump()}
+
+    @app.get("/api/workflows/{key}/interventions")
+    def interventions(key: str) -> dict:
+        # The open interventions of the workflow's board, by opening time; the core posts no gesture (ADR 0011).
+        workflow = declared(key)
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "workflow": workflow.key,
+            "interventions": [found.model_dump(mode="json") for found in open_interventions(workflow)],
+        }
 
     @app.get("/api/workflows/{key}/data")
     def declared_data(key: str, subject: str, id: str) -> dict:

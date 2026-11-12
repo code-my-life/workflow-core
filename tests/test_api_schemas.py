@@ -30,6 +30,7 @@ PUBLISHED = (
     "activity.schema.json",
     "usage.schema.json",
     "declared-data.schema.json",
+    "interventions.schema.json",
 )
 
 

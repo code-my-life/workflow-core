@@ -21,6 +21,7 @@ from typing import Any, Protocol
 from workflow_core.clock import utc_now
 from workflow_core.config import Workflow
 from workflow_core.model.board import BoardUnavailableError, Item
+from workflow_core.model.interventions import Intervention
 from workflow_core.model.live import LiveReader, LiveWatcher
 
 STATE_DIR_VARIABLE = "WORKFLOW_CORE_STATE_DIR"
@@ -36,6 +37,16 @@ SCHEMA = (
     "CREATE TABLE items (workflow TEXT NOT NULL, item TEXT NOT NULL, state TEXT NOT NULL,"
     " PRIMARY KEY (workflow, item))",
 )
+# The open interventions of each workflow, and the workflows whose set is known (#37): a journal rebuilt, or one written
+# before these tables, learns each workflow's set once without announcing it. Created where missing.
+INTERVENTION_TABLES = (
+    "CREATE TABLE IF NOT EXISTS interventions (workflow TEXT NOT NULL, id TEXT NOT NULL, item TEXT NOT NULL,"
+    " PRIMARY KEY (workflow, id))",
+    "CREATE TABLE IF NOT EXISTS interventions_known (workflow TEXT PRIMARY KEY)",
+)
+# How often the open interventions are computed again without a write on the board: a card held by the active pull
+# request guard becomes an intervention with time alone.
+INTERVENTIONS_EVERY_SECONDS = 60.0
 
 
 def state_dir(environ: dict[str, str] | None = None) -> Path:
@@ -83,6 +94,8 @@ class EventJournal:
             first = db.execute("SELECT body FROM events WHERE n = 1").fetchone()
             if "epoch" not in meta or first is None or json.loads(first[0])["kind"] != "reset":
                 raise JournalUnreadableError(f"{path} is not a journal of the core")
+            for statement in INTERVENTION_TABLES:
+                db.execute(statement)
         except (sqlite3.Error, ValueError, KeyError, TypeError) as error:
             if db is not None:
                 db.close()
@@ -100,7 +113,7 @@ class EventJournal:
             leftover.unlink(missing_ok=True)
         db = sqlite3.connect(path, isolation_level=None)
         db.execute("BEGIN")
-        for statement in SCHEMA:
+        for statement in (*SCHEMA, *INTERVENTION_TABLES):
             db.execute(statement)
         db.execute("INSERT INTO meta (key, value) VALUES ('epoch', ?)", (epoch,))
         db.executemany(
@@ -155,6 +168,39 @@ class EventJournal:
             raise
         return events
 
+    def record_interventions(self, workflow: str, current: list[dict]) -> list[dict]:
+        """Compare the open interventions of a workflow with the last known set: one `intervention_opened` per one that
+        appears, carrying it, one `intervention_closed` per one gone, carrying its id. The first set known of a
+        workflow (journal rebuilt, or older than this table) is stored without announce: a client reads the route."""
+        known = dict(self._db.execute("SELECT id, item FROM interventions WHERE workflow = ?", (workflow,)).fetchall())
+        seeded = self._db.execute("SELECT 1 FROM interventions_known WHERE workflow = ?", (workflow,)).fetchone()
+        ids = {found["id"] for found in current}
+        opened = [found for found in current if found["id"] not in known]
+        closed = [(found_id, item) for found_id, item in known.items() if found_id not in ids]
+        if seeded is not None and not opened and not closed:
+            return []
+        events = []
+        self._db.execute("BEGIN")
+        try:
+            for found_id, item in closed:
+                self._db.execute("DELETE FROM interventions WHERE workflow = ? AND id = ?", (workflow, found_id))
+                if seeded is not None:
+                    events.append(self._append("intervention_closed", workflow, item, {"id": found_id}))
+            for found in opened:
+                self._db.execute(
+                    "INSERT INTO interventions (workflow, id, item) VALUES (?, ?, ?)",
+                    (workflow, found["id"], found["item"]),
+                )
+                if seeded is not None:
+                    events.append(self._append("intervention_opened", workflow, found["item"], found))
+            self._db.execute("INSERT OR IGNORE INTO interventions_known (workflow) VALUES (?)", (workflow,))
+            self._db.execute("COMMIT")
+        except BaseException:
+            self._db.execute("ROLLBACK")
+            self.last -= len(events)
+            raise
+        return events
+
     def events_after(self, n: int) -> list[dict]:
         rows = self._db.execute("SELECT body FROM events WHERE n > ? ORDER BY n", (n,)).fetchall()
         return [json.loads(body) for (body,) in rows]
@@ -194,8 +240,12 @@ class EventHub:
         spy: Callable[[str], Any] | None = None,
         live: LiveReader | None = None,
         live_watcher: LiveWatcher | None = None,
+        interventions: Callable[[Workflow], list[Intervention]] | None = None,
     ) -> None:
         self.workflows = workflows
+        # The open interventions of a workflow's board, and when each workflow's were last computed (clock seconds).
+        self.interventions = interventions
+        self._interventions_at: dict[str, float] = {}
         self.live = live
         self.live_watcher = live_watcher
         # The last live state of each agent and the last facts sent, per workflow: only what differs goes out.
@@ -269,6 +319,20 @@ class EventHub:
         self._live_known[key], self._activity_known[key] = agents, facts
         return events
 
+    def _intervention_events(self, key: str, workflow: Workflow, board_changed: bool) -> list[dict]:
+        if self.interventions is None:
+            return []
+        now = self.clock()
+        last = self._interventions_at.get(key)
+        if not board_changed and last is not None and now - last < INTERVENTIONS_EVERY_SECONDS:
+            return []
+        try:
+            current = [found.model_dump(mode="json") for found in self.interventions(workflow)]
+        except Exception:  # a board that cannot be read leaves the known set as it was, never stops the probe
+            return []
+        self._interventions_at[key] = now
+        return self.journal.record_interventions(key, current)
+
     async def start(self) -> None:
         self.open_journal()
         self.seed_live()
@@ -300,6 +364,7 @@ class EventHub:
                     events += self.journal.record(key, [item.model_dump() for item in items])
             except BoardUnavailableError:
                 pass
+            events += self._intervention_events(key, workflow, board_changed)
             if self.live is None:
                 continue
             try:

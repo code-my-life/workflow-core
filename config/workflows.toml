@@ -94,6 +94,12 @@ plugins_from = "{workflow}/factory.yaml"
 plugins_key = "profiles.{agent}.plugins"
 reader = "drift"
 
+# The gestures the factory declares (ADR 0010): the owner's answers factory-live posts in the owner's name. Until the
+# manifests, only the unblocking: `/factory unblock [note]` on the issue of a blocked card.
+[[workflow.gestures]]
+name = "unblock"
+kind = "comment"
+
 [[workflow]]
 key = "studio"
 board = "studio"

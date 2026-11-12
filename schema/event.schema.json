@@ -208,6 +208,43 @@
       "title": "CardEvent",
       "type": "object"
     },
+    "CodedText": {
+      "description": "A text of factory-live's catalogue: its code and its parameters.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "title": "CodedText",
+      "type": "object"
+    },
     "Comment": {
       "properties": {
         "id": {
@@ -234,6 +271,190 @@
         "created_at"
       ],
       "title": "Comment",
+      "type": "object"
+    },
+    "CopyAction": {
+      "description": "A command to copy, written by the runtime's adapter, and its label.",
+      "properties": {
+        "kind": {
+          "const": "copy",
+          "default": "copy",
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "$ref": "#/$defs/CodedText"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "command"
+      ],
+      "title": "CopyAction",
+      "type": "object"
+    },
+    "GestureAction": {
+      "description": "A gesture the workflow declares, that applies to the card (`unblock`): the client posts it.",
+      "properties": {
+        "kind": {
+          "const": "gesture",
+          "default": "gesture",
+          "title": "Kind",
+          "type": "string"
+        },
+        "gesture": {
+          "title": "Gesture",
+          "type": "string"
+        }
+      },
+      "required": [
+        "gesture"
+      ],
+      "title": "GestureAction",
+      "type": "object"
+    },
+    "Intervention": {
+      "description": "A point where the workflow waits for its owner.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "needs_input",
+            "capability",
+            "transient",
+            "gave_up",
+            "triage_loop",
+            "held_active_pr"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "item": {
+          "title": "Item",
+          "type": "string"
+        },
+        "event": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Event"
+        },
+        "opened_at": {
+          "title": "Opened At",
+          "type": "string"
+        },
+        "agent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Agent"
+        },
+        "severity": {
+          "enum": [
+            "critical",
+            "warning",
+            "info"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "push": {
+          "title": "Push",
+          "type": "boolean"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodedText"
+            },
+            {
+              "$ref": "#/$defs/QuotedText"
+            }
+          ],
+          "title": "Title"
+        },
+        "question": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodedText"
+            },
+            {
+              "$ref": "#/$defs/QuotedText"
+            }
+          ],
+          "title": "Question"
+        },
+        "actions": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "copy": "#/$defs/CopyAction",
+                "gesture": "#/$defs/GestureAction",
+                "link": "#/$defs/LinkAction"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/GestureAction"
+              },
+              {
+                "$ref": "#/$defs/CopyAction"
+              },
+              {
+                "$ref": "#/$defs/LinkAction"
+              }
+            ]
+          },
+          "title": "Actions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "item",
+        "event",
+        "opened_at",
+        "agent",
+        "severity",
+        "push",
+        "title",
+        "question",
+        "actions"
+      ],
+      "title": "Intervention",
+      "type": "object"
+    },
+    "InterventionClosed": {
+      "description": "The state of an `intervention_closed` event: the intervention gone.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "InterventionClosed",
       "type": "object"
     },
     "Item": {
@@ -445,6 +666,29 @@
       "title": "Item",
       "type": "object"
     },
+    "LinkAction": {
+      "properties": {
+        "kind": {
+          "const": "link",
+          "default": "link",
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "$ref": "#/$defs/CodedText"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "url"
+      ],
+      "title": "LinkAction",
+      "type": "object"
+    },
     "LiveAction": {
       "description": "What the agent is doing: a tool call (`tool`), a delegated command line (`cli`, its label the command's name),\nor waiting for the model (`llm`). `detail`: the command, the path or the name given to the tool, secrets masked,\n2 000 characters at most; for `llm`, the model.",
       "properties": {
@@ -573,6 +817,20 @@
       "title": "MachineCheck",
       "type": "object"
     },
+    "QuotedText": {
+      "description": "The agent's own words, as written.",
+      "properties": {
+        "quote": {
+          "title": "Quote",
+          "type": "string"
+        }
+      },
+      "required": [
+        "quote"
+      ],
+      "title": "QuotedText",
+      "type": "object"
+    },
     "Run": {
       "description": "One run of a card: who worked on it, how it ended. Dates are Unix seconds.",
       "properties": {
@@ -652,7 +910,7 @@
       "type": "object"
     }
   },
-  "description": "One event of GET /api/events. `reset` opens an epoch: the client reads the full state again; it names no\nworkflow, no item and carries no state. `changed` carries the full state of the item, `live` the live state of an\nagent (its item: the card it holds), `activity` one new fact of the board, `machine` the full list of the machine's\nchecks when a status changed (no workflow, no item).",
+  "description": "One event of GET /api/events. `reset` opens an epoch: the client reads the full state again; it names no\nworkflow, no item and carries no state. `changed` carries the full state of the item, `live` the live state of an\nagent (its item: the card it holds), `activity` one new fact of the board, `machine` the full list of the machine's\nchecks when a status changed (no workflow, no item), `intervention_opened` an intervention that opened (its item:\nthe card), `intervention_closed` the id of one that closed.",
   "properties": {
     "cursor": {
       "title": "Cursor",
@@ -686,7 +944,9 @@
         "reset",
         "live",
         "activity",
-        "machine"
+        "machine",
+        "intervention_opened",
+        "intervention_closed"
       ],
       "title": "Kind",
       "type": "string"
@@ -711,6 +971,12 @@
             "$ref": "#/$defs/MachineCheck"
           },
           "type": "array"
+        },
+        {
+          "$ref": "#/$defs/Intervention"
+        },
+        {
+          "$ref": "#/$defs/InterventionClosed"
         },
         {
           "type": "null"
