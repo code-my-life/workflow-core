@@ -1,0 +1,233 @@
+{
+  "$defs": {
+    "DeclaredData": {
+      "description": "One declared data, read: an absent one has no value, an unreadable one a status `error` that says so.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "link": "#/$defs/LinkValue",
+                "status": "#/$defs/StatusValue",
+                "table": "#/$defs/TableValue",
+                "text": "#/$defs/TextValue"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/TextValue"
+              },
+              {
+                "$ref": "#/$defs/LinkValue"
+              },
+              {
+                "$ref": "#/$defs/TableValue"
+              },
+              {
+                "$ref": "#/$defs/StatusValue"
+              }
+            ]
+          },
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "label",
+        "values"
+      ],
+      "title": "DeclaredData",
+      "type": "object"
+    },
+    "LinkValue": {
+      "properties": {
+        "type": {
+          "const": "link",
+          "default": "link",
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "url"
+      ],
+      "title": "LinkValue",
+      "type": "object"
+    },
+    "StatusValue": {
+      "properties": {
+        "type": {
+          "const": "status",
+          "default": "status",
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "running",
+            "warning",
+            "error",
+            "unknown"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "status",
+        "text"
+      ],
+      "title": "StatusValue",
+      "type": "object"
+    },
+    "TableValue": {
+      "properties": {
+        "type": {
+          "const": "table",
+          "default": "table",
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "columns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Columns",
+          "type": "array"
+        },
+        "rows": {
+          "items": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "title": "Rows",
+          "type": "array"
+        }
+      },
+      "required": [
+        "label",
+        "columns",
+        "rows"
+      ],
+      "title": "TableValue",
+      "type": "object"
+    },
+    "TextValue": {
+      "properties": {
+        "type": {
+          "const": "text",
+          "default": "text",
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "text"
+      ],
+      "title": "TextValue",
+      "type": "object"
+    }
+  },
+  "description": "GET /api/workflows/<key>/data?subject=<subject>&id=<id>: every data the workflow declares for this subject,\nread at the request, in the order declared.",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "workflow": {
+      "title": "Workflow",
+      "type": "string"
+    },
+    "subject": {
+      "enum": [
+        "pr",
+        "card",
+        "run",
+        "agent"
+      ],
+      "title": "Subject",
+      "type": "string"
+    },
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "data": {
+      "items": {
+        "$ref": "#/$defs/DeclaredData"
+      },
+      "title": "Data",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "workflow",
+    "subject",
+    "id",
+    "data"
+  ],
+  "title": "DeclaredDataResponse",
+  "type": "object"
+}

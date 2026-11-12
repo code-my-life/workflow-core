@@ -12,6 +12,9 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from workflow_core.model.checks import DeclaredCheck
+from workflow_core.model.data import DataDeclaration
+
+__all__ = ["DEFAULT_CONFIG", "DataDeclaration", "Workflow", "load_checks", "load_workflows"]
 
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "workflows.toml"
 
@@ -44,6 +47,9 @@ class Workflow(BaseModel):
     pr_acceptance: str | None = None
     # How a card's body names its branch, as a regular expression whose first group is the branch (multiline).
     body_branch: str | None = None
+    # The data the workflow shows besides its cards (`[[workflow.data]]`, ADR 0011): read by the runtime's adapter at
+    # the declared paths, served as generic values. None by default.
+    data: list[DataDeclaration] = Field(default_factory=list)
 
     @property
     def repo_path(self) -> Path | None:

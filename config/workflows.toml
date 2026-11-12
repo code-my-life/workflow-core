@@ -23,6 +23,77 @@ pr_acceptance = "PR acceptance"
 # The factory's brief names a card's branch: « - branch_name : fix/8-island-blur ».
 body_branch = '^- branch_name : (\S{1,250})\s*$'
 
+# The data the factory shows besides its cards (ADR 0011), read by the core at these paths until the factory's command
+# renders them (epic of the factory on the core). A path starts with its root ({runtime}: the runtime's home, {board}:
+# the board's folder, {workflow}: the repository above, {claude}: Claude Code's projects) and names the subject's
+# parameters ({repo} and {pr} of a pull request, {card}, {run} and its {card} and {agent}, {agent}). The twins' streams
+# carry a password: only the fields listed here are read.
+[[workflow.data]]
+name = "twins"
+subject = "pr"
+label = "Jumeaux"
+path = "{board}/twins/{repo}-{pr}.json"
+reader = "json"
+
+[[workflow.data.fields]]
+key = "state"
+label = "État"
+kind = "status"
+statuses = { ready = "ok", starting = "running", stopped = "unknown" }
+
+[[workflow.data.fields]]
+key = "divergence"
+label = "Divergence"
+kind = "text"
+
+[[workflow.data.fields]]
+key = "surfaces"
+label = "Surfaces"
+kind = "table"
+columns = ["label", "kind", "changed", "differences"]
+headers = ["Surface", "Sorte", "Touchée", "Différences"]
+
+# The gate's proofs of a card: one text per rule, NN-<rule>.txt, of its newest pass; in the card's work folder, else in
+# the copy the board keeps.
+[[workflow.data]]
+name = "gate-proofs"
+subject = "card"
+label = "Preuves de la gate"
+path = ["{board}/workspaces/{card}/evidence/gate/*", "{board}/evidence/{card}/gate/*"]
+reader = "texts"
+
+[[workflow.data]]
+name = "agent-session"
+subject = "run"
+label = "Session de l'agent"
+path = "{runtime}/profiles/{agent}/state.db"
+reader = "session"
+
+[[workflow.data]]
+name = "claude-sessions"
+subject = "run"
+label = "Sessions de Claude Code"
+path = "{claude}"
+reader = "claude"
+
+[[workflow.data]]
+name = "card-log"
+subject = "run"
+label = "Journal de la carte"
+path = "{board}/logs/{card}.log"
+reader = "log"
+
+# The drift of an agent: its configuration in service against the repository's, the plugins as factory.yaml lists them.
+[[workflow.data]]
+name = "drift"
+subject = "agent"
+label = "Dérive de la configuration"
+path = "{runtime}/profiles/{agent}/config.yaml"
+compare = "{workflow}/profiles/{agent}/config.yaml"
+plugins_from = "{workflow}/factory.yaml"
+plugins_key = "profiles.{agent}.plugins"
+reader = "drift"
+
 [[workflow]]
 key = "studio"
 board = "studio"

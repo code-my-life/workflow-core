@@ -24,6 +24,7 @@ from workflow_core.adapters.hermes.board import (
     HermesBoardReader,
     make_board_reader,
 )
+from workflow_core.adapters.hermes.data import TRANSCRIPT_MESSAGE_COLUMNS
 from workflow_core.adapters.hermes.live import LIVE_LOG_PATTERNS, USAGE_COLUMNS
 from workflow_core.adapters.hermes.machine import CRON_JOBS, ESTOP, HEARTBEAT_COLUMNS, LLAMA_SERVER, cron_jobs
 from workflow_core.adapters.hermes.profiles import (
@@ -105,9 +106,10 @@ _DATED = re.compile(r"^\d{4}-\d{2}-\d{2} ", re.ASCII)
 
 
 # The agents' session bases: the tables and columns read, and the JSON fields read in each tool call (sessions.py).
+# The transcript of a run's session (data.py) reads the reasoning too.
 SESSION_CONTRACT: dict[str, Table] = {
     "sessions": Table(columns=SESSION_COLUMNS),
-    "messages": Table(columns=MESSAGE_COLUMNS),
+    "messages": Table(columns=tuple(dict.fromkeys(MESSAGE_COLUMNS + TRANSCRIPT_MESSAGE_COLUMNS))),
     "session_model_usage": Table(columns=USAGE_COLUMNS),
 }
 # The last tool calls checked in each base: each must still carry the fields read.
@@ -296,10 +298,26 @@ def board_problems(reader: HermesBoardReader, board: str) -> list[str]:
     return [f"{board}: {problem}" for problem in problems]
 
 
+# The folder of a board where the cards' raw logs are, one `<card>.log` each (data.py reads them as declared data).
+CARD_LOG_FOLDER = "logs"
+
+
+def card_log_problems(reader: HermesBoardReader, board: str) -> list[str]:
+    """The cards' logs of a board, when present, are in a folder."""
+    try:
+        folder = reader.base_path(board).parent / CARD_LOG_FOLDER
+    except BoardUnavailableError:
+        return []
+    if folder.exists() and not folder.is_dir():
+        return [f"{board}: {CARD_LOG_FOLDER} n'est pas un dossier"]
+    return []
+
+
 def check_contract(boards: list[str], environ: dict[str, str] | None = None) -> ContractVerdict:
     """Check the contract against the base of each named board, read-only, and against the version output."""
     reader = make_board_reader(environ)
     problems = [problem for board in boards for problem in board_problems(reader, board)]
+    problems += [problem for board in boards for problem in card_log_problems(reader, board)]
     problems += session_problems(reader.home)
     problems += config_problems(reader.home)
     problems += journal_problems(reader.home)

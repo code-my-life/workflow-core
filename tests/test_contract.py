@@ -371,3 +371,26 @@ def test_the_machine_check_formats_are_in_the_contract(runtime_home):
     (runtime_home / "runtimes" / "llamacpp" / "server.json").write_text('{"base_url": "x"}')
     rebuild_tasks_column(runtime_home / "state.db", "gateway_heartbeats", "last_heartbeat")
     assert check().problems == ["state.db : gateway_heartbeats.last_heartbeat absente"]
+
+
+def test_the_session_and_card_log_formats_are_in_the_contract(runtime_home):
+    from workflow_core.adapters.hermes.contract import CARD_LOG_FOLDER, SESSION_CONTRACT
+    from workflow_core.adapters.hermes.data import TRANSCRIPT_MESSAGE_COLUMNS
+
+    from conftest import make_session_base
+
+    # The transcript of a run reads these columns of a session base, the reasoning included.
+    assert set(TRANSCRIPT_MESSAGE_COLUMNS) <= set(SESSION_CONTRACT["messages"].columns)
+    assert "reasoning" in SESSION_CONTRACT["messages"].columns
+    base = make_session_base(runtime_home, "coder")
+    assert check().ok is True
+
+    # A card's log lives in a folder of the board: a file in its place breaks the contract.
+    logs = board_base(runtime_home, "factory").parent / CARD_LOG_FOLDER
+    logs.write_text("not a folder", encoding="utf-8")
+    assert check().problems == [f"factory: {CARD_LOG_FOLDER} n'est pas un dossier"]
+    logs.unlink()
+
+    base.execute("DROP TABLE messages")
+    base.close()
+    assert "agent coder : table messages absente" in check().problems
