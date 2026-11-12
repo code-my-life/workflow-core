@@ -70,3 +70,26 @@ journal.
 
 Éteindre le notificateur : retirer `WORKFLOW_CORE_NOTIFY` du `.env`, puis
 `systemctl --user restart workflow-core.service`.
+
+## Le chien de garde et l'issue de panne
+
+`workflow-core-watchdog.timer` lance chaque minute `workflow-core-watchdog.service`, qui exécute dans l'ordre :
+
+1. `scripts/healthz_watchdog.py`, avec le Python du système : il interroge `/healthz` et, après 5 minutes d'échec,
+   écrit une ligne d'erreur dans journald ; son état est `~/.local/state/workflow-core/watchdog.json` ;
+2. `python -m workflow_core.notify.outage`, avec le Python de l'environnement du socle, sans le service : il lit
+   `watchdog.json` sans le modifier et garde son propre état, `outage-issue.json` (le numéro de l'issue de la panne en
+   cours et l'heure de son début).
+
+Quand le chien de garde a écrit une panne, la commande commente l'issue de panne ouverte de l'App, sinon rouvre et
+commente celle fermée depuis moins de 24 heures, sinon ouvre « Le socle workflow-core ne répond plus » dans
+`code-my-life/workflow-core`. Chaque issue de panne porte la marque cachée `<!-- workflow-core:panne -->` ; une issue
+ouverte par un autre compte n'est jamais reprise. Au retour de `/healthz`, elle commente « Le socle répond de
+nouveau, après <n> min de panne » et ferme l'issue. Une panne ne donne qu'une issue et au plus un commentaire.
+
+Elle n'utilise que l'App (permission Issues en écriture), le `.env` et GitHub. Un échec de GitHub est écrit dans
+journald (`journalctl --user -u workflow-core-watchdog.service`), rien n'est noté, et le passage suivant réessaie ;
+elle sort toujours en code 0.
+
+Réessayer à la main, dans `~/perso/workflow-core` : `set -a; . ~/.config/workflow-core/.env; set +a`, puis
+`.venv/bin/python -m workflow_core.notify.outage`.
