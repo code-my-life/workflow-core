@@ -1,7 +1,7 @@
 # The workflows the core serves: one [[workflow]] table each, with its key, its board and the path of its sheet, and
 # optionally the settings of the diagnosis: its triggers (held_after_minutes, approval_card_title, main_red_reason),
 # its sources (repo, profiles, plugins), the workflow's words (guard_suffixes, default_agent, relay_agent,
-# pr_acceptance, body_branch), and its alerts (notify, notify_skip_assignees).
+# pr_acceptance, body_branch), and its alerts (notify, notify_skip_assignees, notify_relay_agents).
 # The key of a workflow is the name of its board (ADR 0003). The manifests of the engine epic will replace this list.
 
 [[workflow]]
@@ -26,6 +26,8 @@ body_branch = '^- branch_name : (\S{1,250})\s*$'
 # publish their own message.
 notify = true
 notify_skip_assignees = ["factory-gate", "factory-release"]
+# A card held by the active pull request guard is relaunched through a relay agent, then given back to its assignee.
+notify_relay_agents = ["scribe", "coder"]
 
 [[workflow]]
 key = "studio"

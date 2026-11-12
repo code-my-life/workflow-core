@@ -296,3 +296,36 @@ def test_a_base_missing_the_block_events_breaks_the_contract(runtime_home):
 
     assert verdict.ok is False
     assert verdict.problems == ["factory: task_events.payload absente"]
+
+
+def test_a_guard_event_without_a_reason_breaks_the_contract(runtime_home):
+    # The notifier reads the reason of the runtime's respawn guard: a JSON object with a text `reason`.
+    from workflow_core.model.state import CoreState
+    from workflow_core.notify import Notifier, NotifySettings
+
+    with sqlite3.connect(board_base(runtime_home, "factory")) as db:
+        db.execute(
+            "INSERT INTO task_events (task_id, kind, payload, created_at) VALUES "
+            "('t_0002', 'respawn_guarded', '{\"reason\": \"active_pr\"}', 1), "
+            "('t_0002', 'respawn_guarded', '\"active_pr\"', 2), "
+            "('t_0002', 'respawn_guarded', '{\"why\": \"active_pr\"}', 3)"
+        )
+    db.close()
+
+    verdict = check()
+
+    assert verdict.ok is False
+    assert verdict.problems == ["factory: task_events.payload de respawn_guarded sans reason texte (2 événements)"]
+    posted = []
+    Notifier(
+        workflows={"factory": Workflow(key="factory", board="factory", sheet=Path("f.json"), notify=True)},
+        reader=runtime_adapter().make_board_reader(),
+        state=CoreState(contract=verdict),
+        settings=NotifySettings.from_environ(
+            {"WORKFLOW_CORE_NOTIFY": "on", "WORKFLOW_CORE_NOTIFY_SINCE": "2020-01-01T00:00:00+00:00"}
+        ),
+        post_comment=lambda *args: posted.append(args) or "",
+        read_comments=lambda *args: [],
+        register_path=runtime_home.parent / "alerts.db",
+    ).run_pass()
+    assert posted == []

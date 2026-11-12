@@ -54,7 +54,11 @@ Pour fabriquer le jeton : `GET /orgs/code-my-life/installation` et `POST /app/in
 
 Toutes les 30 secondes, une passe lit les cartes des workflows dont l'entrée de `config/workflows.toml` porte
 `notify = true` (seulement `factory`). Une carte bloquée reçoit une alerte dans son issue, sauf un blocage
-`dependency` et une carte assignée à une voie de `notify_skip_assignees`. Chaque alerte finit par la marque cachée
+`dependency` et une carte assignée à une voie de `notify_skip_assignees`. Une carte prête mais retenue par la garde
+`active_pr` d'Hermès depuis `held_after_minutes` minutes (30 par défaut) reçoit l'alerte « ⚠️ Carte prête mais
+retenue », avec la commande de relance par le premier agent de `notify_relay_agents` qui n'est pas son assigné ; une
+carte relancée puis retenue de nouveau reçoit une nouvelle alerte. Le test de contrat vérifie que le `payload` de
+`respawn_guarded` reste un objet JSON avec un texte `reason`. Chaque alerte finit par la marque cachée
 `<!-- workflow-core:attente <clé> -->`, et sa clé est notée dans `~/.local/state/workflow-core/alerts.db` : une clé
 notée n'est jamais repostée.
 
