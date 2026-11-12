@@ -87,10 +87,12 @@ def create_app(
     checks_every: float = CHECK_EVERY_SECONDS,
     data: DeclaredDataReader | None = None,
     agents: AgentsReader | None = None,
+    background: list[Any] = (),
 ) -> FastAPI:
     """The API. With a board watcher and a journal path, it also probes the boards and serves GET /api/events. The
     facts of a card, for its diagnosis, are read by `facts`, by default the board reader itself, and the other
-    sources of the diagnosis by `sources`, by default the board reader's."""
+    sources of the diagnosis by `sources`, by default the board reader's. `background` holds tasks started and
+    stopped with the service (each with `async start()` and `async stop()`), such as the notifier."""
     if not secret:
         raise ValueError("the shared secret is empty")
     card_facts: CardFactsReader = facts if facts is not None else boards
@@ -125,6 +127,8 @@ def create_app(
     async def lifespan(app: FastAPI):
         if hub is not None:
             await hub.start()
+        for task in background:
+            await task.start()
         watching = None
         if machine_checks is not None:
             await asyncio.to_thread(machine_checks.run_due)
@@ -137,6 +141,8 @@ def create_app(
                 with contextlib.suppress(asyncio.CancelledError):
                     await watching
                 machine_checks.close()
+            for task in reversed(background):
+                await task.stop()
             if hub is not None:
                 await hub.stop()
 

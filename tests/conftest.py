@@ -100,6 +100,7 @@ OTHER_TABLES = (
 )
 RUN_COLUMNS = ("id", "task_id", "profile", "status", "outcome", "started_at", "ended_at", "summary")
 COMMENT_COLUMNS = ("id", "task_id", "author", "body", "created_at")
+EVENT_COLUMNS = ("id", "task_id", "run_id", "kind", "payload", "created_at")
 
 FACTORY_RUNS = [
     {
@@ -192,6 +193,7 @@ def make_board(
     runs: list[dict] = (),
     links: list[tuple[str, str]] = (),
     comments: list[dict] = (),
+    events: list[dict] = (),
 ) -> Path:
     """Create `<home>/kanban/boards/<board>/kanban.db` in WAL mode, as the runtime does, holding these rows."""
     folder = home / "kanban" / "boards" / board
@@ -216,6 +218,10 @@ def make_board(
             f"INSERT INTO task_comments ({', '.join(COMMENT_COLUMNS)}) VALUES ({marks})",
             [tuple(comment[column] for column in COMMENT_COLUMNS) for comment in comments],
         )
+        db.executemany(
+            f"INSERT INTO task_events ({', '.join(EVENT_COLUMNS)}) VALUES ({', '.join('?' * len(EVENT_COLUMNS))})",
+            [tuple(event.get(column) for column in EVENT_COLUMNS) for event in events],
+        )
     db.close()
     return base
 
@@ -227,6 +233,25 @@ def fake_version_command(folder: Path, first_line: str = VERSION_LINE) -> Path:
     command.write_text(f"#!/bin/sh\nprintf '%s\\n' '{first_line}' 'Install method: git'\n", encoding="utf-8")
     command.chmod(0o755)
     return folder
+
+
+@pytest.fixture(autouse=True)
+def own_state_dir(tmp_path, monkeypatch):
+    """Every test gets its own state folder: no test ever reads or writes the machine's core state (its event
+    journal, its register of alerts, its token cache)."""
+    monkeypatch.setenv("WORKFLOW_CORE_STATE_DIR", str(tmp_path / "state"))
+
+
+@pytest.fixture(autouse=True)
+def no_real_github(tmp_path, monkeypatch):
+    """No test ever reads the machine's `.env` for the App, nor reaches api.github.com: a client a test does not
+    replace finds no App and an address where nothing answers."""
+    import workflow_core.adapters.github as github
+
+    monkeypatch.setattr(github, "ENV_FILE", tmp_path / "no-core.env")
+    monkeypatch.setattr(github, "API_URL", "http://127.0.0.1:9")
+    for name in ("GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY_PATH"):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture

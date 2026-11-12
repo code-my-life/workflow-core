@@ -72,6 +72,9 @@ CONTRACT: dict[str, Table] = {
     "task_comments": Table(columns=COMMENT_COLUMNS),
     "task_events": Table(columns=EVENT_COLUMNS),
 }
+# The payloads the adapter reads in task_events: for each kind of event, the keys whose value must be a text. The
+# notifier reads the reason of the runtime's respawn guard (`active_pr` for a held card).
+EVENT_PAYLOADS: dict[str, tuple[str, ...]] = {"respawn_guarded": ("reason",)}
 # The pragmas the adapter reads, on a read-only connection: data_version must be an integer (HermesBoardWatcher).
 PRAGMAS = ("data_version",)
 
@@ -293,12 +296,29 @@ def machine_problems(home: Path) -> list[str]:
     return problems
 
 
+def payload_problems(db: sqlite3.Connection) -> list[str]:
+    """Every kind of event whose payload is not a JSON object with the declared text keys, with its count."""
+    problems = []
+    for kind, keys in EVENT_PAYLOADS.items():
+        shaped = " AND ".join(f"json_type(payload, '$.{key}') = 'text'" for key in keys)
+        (count,) = db.execute(
+            "SELECT count(*) FROM task_events WHERE kind = ? AND NOT coalesce(json_valid(payload) "
+            f"AND json_type(payload) = 'object' AND {shaped}, 0)",
+            (kind,),
+        ).fetchone()
+        if count:
+            problems.append(f"task_events.payload de {kind} sans {', '.join(keys)} texte ({count} événements)")
+    return problems
+
+
 def board_problems(reader: HermesBoardReader, board: str) -> list[str]:
     """Every gap between the contract and the base of this board, each prefixed by the board."""
     try:
         with reader.open_board(board) as db:
             problems = [problem for name, table in CONTRACT.items() for problem in _table_problems(db, name, table)]
             problems += pragma_problems(db)
+            if not problems:
+                problems += payload_problems(db)
     except BoardUnavailableError as error:
         return [f"{board}: base absente ou illisible ({error})"]
     except sqlite3.Error as error:

@@ -65,6 +65,13 @@ class Workflow(BaseModel):
     # The workflow's own manifest of its agents, relative to its repository (`profiles.<agent>.skills`): the agents it
     # declares and their skills (#129). Without it, its agents are those of its board's runs.
     manifest: str | None = None
+    # The notifier (optional): whether the workflow's waits are alerted in their issues, and the assignees whose
+    # blocked cards are not (lanes run by scripts that publish their own message).
+    notify: bool = False
+    notify_skip_assignees: list[str] = Field(default_factory=list)
+    # The agents a held card's relaunch command relays through, the first one that is not its assignee; without any,
+    # the alert of a held card leaves the command out.
+    notify_relay_agents: list[str] = Field(default_factory=list)
 
     @property
     def repo_path(self) -> Path | None:

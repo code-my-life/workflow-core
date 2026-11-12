@@ -196,6 +196,13 @@ class HermesBoardReader:
         env[HOME_VARIABLE] = str(self.home)
         return HermesAgentsReader(self.home, self, make_agent_log_reader(env))
 
+    def read_issue_urls(self, board: str) -> dict[str, str | None]:
+        """The GitHub issue address of each card of the board, by card id, found as the factory finds it
+        (`issues.py`): `None` for a card without one."""
+        from workflow_core.adapters.hermes.issues import issue_urls
+
+        return issue_urls(self.read_items(board))
+
     def diagnosis_sources(self, environ: dict[str, str] | None = None) -> HermesDiagnosisSources:
         """The other sources of the diagnosis under the same Hermès home: sessions, journals, configurations,
         proofs. The journals are dated in the zone named by `HERMES_TZ`."""
