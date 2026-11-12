@@ -217,3 +217,31 @@ def test_reading_leaves_the_session_base_unchanged(base):
     reader.close()
 
     assert path.read_bytes() == before
+
+
+def test_the_session_base_is_read_from_any_thread(base, reader):
+    import threading
+
+    first = (reader.open_sessions("coder", 1_793_263_100), resolved(reader, [run()]))
+    other: list = []
+    thread = threading.Thread(
+        target=lambda: other.append((reader.open_sessions("coder", 1_793_263_100), resolved(reader, [run()])))
+    )
+    thread.start()
+    thread.join()
+
+    assert first == ([SESSION], [(SESSION, 191)])
+    assert other == [first]
+
+
+def test_no_connection_is_kept_after_a_reading(base):
+    base.db.close()
+    path = base.home / "profiles" / "coder" / "state.db"
+    before = path.read_bytes()
+    reader = SessionReader(base.home)
+
+    assert reader.run_facts("coder", CARD, [run()]) is not None
+    assert reader.open_sessions("coder", 1_793_263_100) == [SESSION]
+
+    assert not vars(reader).get("_open")
+    assert path.read_bytes() == before
