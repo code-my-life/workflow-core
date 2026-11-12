@@ -17,6 +17,7 @@ CROSS_RULES = (
     "duplicate-edge-id",
     "unknown-edge-end",
     "unknown-model-station",
+    "shared-agent",
 )
 
 

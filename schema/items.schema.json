@@ -251,6 +251,18 @@
           },
           "title": "Events",
           "type": "array"
+        },
+        "station": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Station"
         }
       },
       "required": [

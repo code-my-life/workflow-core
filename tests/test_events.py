@@ -42,13 +42,18 @@ def free_port() -> int:
 
 @contextmanager
 def running_service(
-    clock=time.time, spy=None, stopped: dict | None = None, checks=(), checks_every: float | None = None
+    clock=time.time,
+    spy=None,
+    stopped: dict | None = None,
+    checks=(),
+    checks_every: float | None = None,
+    workflows: dict | None = None,
 ) -> Iterator[str]:
     """The service as `python -m workflow_core` builds it, served by a real uvicorn on a free port."""
     extra = {"checks_every": checks_every} if checks_every is not None else {}
     app = build_service(
         secret=SECRET,
-        workflows=WORKFLOWS,
+        workflows=workflows or WORKFLOWS,
         adapter=runtime_adapter(),
         clock=clock,
         spy=spy,
@@ -465,3 +470,68 @@ def test_a_rebuild_does_not_announce_open_interventions_again(runtime_home, stat
             stream.close()
         assert [item["id"] for item in listed] == ["needs_input:t_0002:1762810000"]
         assert [kind for _, kind, _ in frames if kind.startswith("intervention_")] == []
+
+
+def test_an_item_whose_station_changes_goes_on_the_stream(runtime_home, state_dir, tmp_path):
+    sheet = tmp_path / "factory.json"
+    stations = [
+        {"key": "implementation", "label": "Impl", "icon": "code", "kind": "ai", "col": 0, "row": 0},
+        {
+            "key": "redaction",
+            "label": "Redaction",
+            "icon": "pencil",
+            "kind": "ai",
+            "col": 1,
+            "row": 0,
+            "agents": ["redacteur"],
+        },
+        {"key": "fin", "label": "Fin", "icon": "check", "kind": "end", "col": 2, "row": 0},
+    ]
+    sheet.write_text(
+        json.dumps({"item": {"type": "issue", "label": "Issue"}, "stations": stations, "edges": [], "models": []}),
+        encoding="utf-8",
+    )
+    workflows = {"factory": Workflow(key="factory", board="factory", sheet=sheet)}
+    with running_service(workflows=workflows) as base:
+        stream = Stream(base)
+        time.sleep(0.5)  # the first probe has read the boards
+
+        written = write(
+            board_base(runtime_home, "factory"), "UPDATE tasks SET assignee = 'redacteur' WHERE id = 't_0002'"
+        )
+        _, kind, event = stream.next(timeout=2)
+        elapsed = time.monotonic() - written
+        items = httpx.get(f"{base}/api/workflows/factory/items", headers=AUTH).json()["items"]
+        stream.close()
+
+    assert kind == "changed"
+    assert (event["item"], event["state"]["station"]) == ("t_0002", "redaction")
+    assert {item["id"]: item["station"] for item in items} == {"t_0001": "fin", "t_0002": "redaction"}
+    assert elapsed < 1.0, f"the change took {elapsed:.3f} s to reach the stream"
+
+
+def test_a_sheet_change_moves_the_items_on_the_stream(runtime_home, state_dir, tmp_path):
+    sheet = tmp_path / "factory.json"
+
+    def write_sheet(agents: list[str]) -> None:
+        stations = [
+            {"key": "implementation", "label": "Impl", "icon": "code", "kind": "ai", "col": 0, "row": 0},
+            {"key": "fin", "label": "Fin", "icon": "check", "kind": "end", "col": 1, "row": 0, "agents": agents},
+        ]
+        body = {"item": {"type": "issue", "label": "Issue"}, "stations": stations, "edges": [], "models": []}
+        sheet.write_text(json.dumps(body), encoding="utf-8")
+
+    write_sheet([])
+    write(board_base(runtime_home, "factory"), "UPDATE tasks SET assignee = 'relecteur' WHERE id = 't_0002'")
+    workflows = {"factory": Workflow(key="factory", board="factory", sheet=sheet)}
+    with running_service(workflows=workflows) as base:
+        stream = Stream(base)
+        time.sleep(0.5)
+
+        # The sheet now names the card's agent at the end station: the card moves there, with no write to the board.
+        write_sheet(["relecteur"])
+        _, kind, event = stream.next(timeout=2)
+        stream.close()
+
+    assert kind == "changed"
+    assert (event["item"], event["state"]["station"]) == ("t_0002", "fin")

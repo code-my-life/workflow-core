@@ -162,6 +162,22 @@
           ],
           "default": null,
           "title": "Types"
+        },
+        "agents": {
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agents"
         }
       },
       "required": [

@@ -258,6 +258,8 @@ class EventHub:
         self.probe_seconds = probe_seconds
         self.keepalive_seconds = keepalive_seconds
         self.spy = spy
+        # The last seen stamp of each workflow's sheet file: a changed sheet moves its items' stations (#140).
+        self._sheet_stamps: dict[str, tuple[int, int] | None] = {}
         self.journal: EventJournal | None = None
         self._subscribers: set[asyncio.Queue] = set()
         self._task: asyncio.Task | None = None
@@ -351,12 +353,27 @@ class EventHub:
         if self.journal is not None:
             self.journal.close()
 
+    def _sheet_changed(self, key: str, workflow: Workflow) -> bool:
+        """True when the workflow's sheet file changed since the last probe; never at the first one."""
+        try:
+            found = workflow.sheet_path.stat()
+            stamp: tuple[int, int] | None = (found.st_mtime_ns, found.st_size)
+        except OSError:
+            stamp = None
+        if key not in self._sheet_stamps:
+            self._sheet_stamps[key] = stamp
+            return False
+        changed = self._sheet_stamps[key] != stamp
+        self._sheet_stamps[key] = stamp
+        return changed
+
     def probe_once(self) -> list[dict]:
         events: list[dict] = []
         for key, workflow in self.workflows.items():
             board_changed = False
             try:
-                if self.watcher.changed(workflow.board):
+                sheet_changed = self._sheet_changed(key, workflow)
+                if self.watcher.changed(workflow.board) or sheet_changed:
                     items = self.read_items(workflow.board)
                     board_changed = True
                     if self.spy is not None:
