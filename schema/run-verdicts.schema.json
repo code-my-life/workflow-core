@@ -1,0 +1,160 @@
+{
+  "$defs": {
+    "FindingCode": {
+      "description": "The causes the diagnosis recognises; `unexplained` when no rule applies.",
+      "enum": [
+        "guard_hook_timeout",
+        "guard_hook_hung",
+        "guard_hook_raised",
+        "plugin_load_failed",
+        "stopped_after_refusals",
+        "stopped_without_kanban_call",
+        "protocol_breaker",
+        "iteration_budget",
+        "runtime_limit",
+        "tool_deadline",
+        "command_timeout",
+        "guard_refusal",
+        "refusal_loop",
+        "provider_quota",
+        "provider_terminal",
+        "provider_unavailable",
+        "pr_acceptance_infra",
+        "pr_acceptance_missing",
+        "spawn_failed",
+        "held_active_pr",
+        "triage_loop",
+        "question",
+        "unexplained"
+      ],
+      "title": "FindingCode",
+      "type": "string"
+    },
+    "Message": {
+      "description": "A text the core makes itself: a code of factory-live's catalogue and its parameters.",
+      "properties": {
+        "code": {
+          "pattern": "^diagnosis\\.[A-Za-z]+(\\.[A-Za-z]+)+$",
+          "title": "Code",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "params"
+      ],
+      "title": "Message",
+      "type": "object"
+    },
+    "RunVerdict": {
+      "properties": {
+        "runId": {
+          "exclusiveMinimum": 0,
+          "title": "Runid",
+          "type": "integer"
+        },
+        "finding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FindingCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "anyOf": [
+            {
+              "enum": [
+                "cause",
+                "consequence"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Role"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Message"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Text"
+        },
+        "sessionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sessionid"
+        }
+      },
+      "required": [
+        "runId",
+        "finding",
+        "role",
+        "text",
+        "sessionId"
+      ],
+      "title": "RunVerdict",
+      "type": "object"
+    }
+  },
+  "description": "The answer of the run verdicts of a card: the verdict of each failed run, newest run first.",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "verdicts": {
+      "items": {
+        "$ref": "#/$defs/RunVerdict"
+      },
+      "title": "Verdicts",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "verdicts"
+  ],
+  "title": "RunVerdicts",
+  "type": "object",
+  "x-diagnosis-version": 1
+}

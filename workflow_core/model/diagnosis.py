@@ -240,3 +240,18 @@ def diagnosis_schema_text() -> str:
     """The JSON Schema of the diagnosis, as published in schema/diagnosis.schema.json."""
     schema = Diagnosis.model_json_schema(by_alias=True)
     return json.dumps(schema, indent=2, ensure_ascii=False) + "\n"
+
+
+class RunVerdicts(_Contract):
+    """The answer of the run verdicts of a card: the verdict of each failed run, newest run first."""
+
+    model_config = ConfigDict(json_schema_extra={"x-diagnosis-version": DIAGNOSIS_VERSION})
+
+    schema_version: Literal[1] = Field(alias="schema_version")
+    verdicts: list[RunVerdict]
+
+
+def run_verdicts_schema_text() -> str:
+    """The JSON Schema of the run verdicts' answer, as published in schema/run-verdicts.schema.json."""
+    schema = RunVerdicts.model_json_schema(by_alias=True)
+    return json.dumps(schema, indent=2, ensure_ascii=False) + "\n"

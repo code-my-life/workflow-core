@@ -17,6 +17,7 @@ from starlette.exceptions import HTTPException
 from workflow_core.clock import iso_ms, utc_now
 from workflow_core.config import Workflow
 from workflow_core.diagnosis import diagnose_board, diagnose_card
+from workflow_core.diagnosis.service import run_verdicts
 from workflow_core.events import BoardWatcher, EventHub
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
 from workflow_core.model.diagnosis import diagnosis_json
@@ -210,6 +211,21 @@ def create_app(
             "item": item,
             "trigger": trigger_json(trigger) if trigger is not None else None,
             "diagnosis": diagnosis_json(result) if result is not None else None,
+        }
+
+    @app.get("/api/workflows/{key}/items/{item}/run-verdicts")
+    def verdicts(key: str, item: str) -> dict:
+        # The verdict of each failed run of the card, finished or not, newest run first; computed on demand.
+        workflow = declared(key)
+        found = card_facts.read_card_facts(workflow.board, item)
+        if found is None:
+            raise UnknownItemError(workflow.board, item)
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "verdicts": [
+                verdict.model_dump(mode="json", by_alias=True)
+                for verdict in run_verdicts(found, workflow, clock(), diagnosis_sources)
+            ],
         }
 
     @app.get("/api/workflows/{key}/diagnoses")
