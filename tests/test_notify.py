@@ -617,3 +617,17 @@ def test_a_card_blocked_after_giving_up_gets_an_alert_of_its_trigger(home, tmp_p
     assert body.startswith("### ⏸ Bloquée\n")
     assert "> trop d'échecs de suite" in body
     assert body.endswith("<!-- workflow-core:attente factory:gave_up:t_00000001:2 -->")
+
+
+def test_a_blocked_alert_names_the_owner_not_an_account(home, tmp_path):
+    make_board(home, "factory", [card("t_00000001", body=ISSUE)], events=[blocked(1, "t_00000001", NOON + 60)])
+    make_board(home, "studio", [])
+    github = FakeGitHub()
+
+    notifier(tmp_path, github).run_pass()
+
+    body = github.posted[0][2]
+    assert "**Pour répondre** (seul le propriétaire est écouté) : commente sur cette issue" in body
+    # No GitHub account is named: no mention, and no login between backquotes but the workflow's and the card's.
+    assert "@" not in body
+    assert "seul `" not in body

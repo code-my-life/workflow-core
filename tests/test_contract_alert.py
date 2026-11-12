@@ -219,3 +219,55 @@ def test_an_unreadable_runtime_version_is_written_in_the_contract_issue(runtime_
     body = github.issues[0]["body"]
     assert "lue : `illisible`" in body
     assert "--version" in body
+
+
+def test_a_recently_closed_contract_issue_beyond_the_first_page_is_reopened(runtime_home, tmp_path):
+    import subprocess
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from workflow_core.adapters.github import AppTokens, GitHubClient
+
+    from test_outage_issue import FakeGitHub as HttpGitHub
+    from test_outage_issue import PagedGitHub
+
+    break_the_contract(runtime_home)
+    HttpGitHub.calls = []
+    HttpGitHub.failing = False
+    recent = [
+        {
+            "number": n,
+            "title": f"Issue {n}",
+            "body": "Rien.",
+            "state": "closed",
+            "closed_at": iso(NOW),
+            "user": {"login": BOT},
+            "comments": [],
+        }
+        for n in range(1, 101)
+    ]
+    contract = {**contract_issue(150, state="closed", closed=NOW - timedelta(hours=3)), "comments": []}
+    HttpGitHub.issues = [*recent, contract]
+    server = ThreadingHTTPServer(("127.0.0.1", 0), PagedGitHub)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    key = tmp_path / "key.pem"
+    subprocess.run(["openssl", "genrsa", "-out", str(key), "2048"], check=True, capture_output=True)
+    env_file = tmp_path / "core.env"
+    env_file.write_text(f"GITHUB_APP_ID=1\nGITHUB_APP_PRIVATE_KEY_PATH={key}\n", encoding="utf-8")
+    client = GitHubClient(
+        AppTokens(
+            environ={},
+            env_file=env_file,
+            cache_dir=tmp_path / "tokens",
+            api_url=f"http://127.0.0.1:{server.server_address[1]}",
+        )
+    )
+    try:
+        start(tmp_path, client)
+    finally:
+        server.shutdown()
+
+    assert len(HttpGitHub.issues) == 101
+    assert HttpGitHub.issues[100]["state"] == "open"
+    assert len(HttpGitHub.issues[100]["comments"]) == 1
+    assert noted(tmp_path) == {"issue": 150}
