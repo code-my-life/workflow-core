@@ -9,6 +9,8 @@ are not ported: the diagnosis does not use them.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote as url_quote
 
@@ -115,25 +117,27 @@ def open_session_base(path: Path) -> sqlite3.Connection:
 
 
 class SessionReader:
-    """Reads the agents' session bases under Hermès' home, read-only, one connection per agent."""
+    """Reads the agents' session bases under Hermès' home, read-only. Each reading opens its own connection and
+    closes it: the API serves its requests from several threads, and a SQLite connection belongs to its thread."""
 
     def __init__(self, home: Path) -> None:
         self.home = home
-        self._open: dict[str, sqlite3.Connection] = {}
 
-    def _db(self, agent: str) -> sqlite3.Connection | None:
-        known = self._open.get(agent)
-        if known is not None:
-            return known
+    @contextmanager
+    def _db(self, agent: str) -> Iterator[sqlite3.Connection | None]:
         path = session_base(self.home, agent)
         if path is None:
-            return None
+            yield None
+            return
         try:
             db = open_session_base(path)
         except sqlite3.Error:
-            return None
-        self._open[agent] = db
-        return db
+            yield None
+            return
+        try:
+            yield db
+        finally:
+            db.close()
 
     def _session_of(self, db: sqlite3.Connection, card: str, run: RunFact) -> str | None:
         """A run's session, never guessed: the one Hermès noted, else the one of `hermes --resume`, else the only
@@ -152,45 +156,43 @@ class SessionReader:
         return str(rows[0]["id"]) if len(rows) == 1 else None
 
     def run_facts(self, agent: str, card: str, runs: list[RunFact]) -> list[SessionFacts] | None:
-        db = self._db(agent)
-        if db is None:
-            return None
-        try:
-            facts: list[SessionFacts] = []
-            seen: set[str] = set()
-            for run in runs:
-                session = self._session_of(db, card, run)
-                if not session or session in seen:
-                    continue
-                seen.add(session)
-                facts.append(
-                    SessionFacts(
-                        id=session,
-                        run_id=run.id,
-                        calls=[_call_fact(row) for row in db.execute(CALLS_SQL, (session,))],
-                        results=[_result_fact(row) for row in db.execute(RESULTS_SQL, (session,))],
+        with self._db(agent) as db:
+            if db is None:
+                return None
+            try:
+                facts: list[SessionFacts] = []
+                seen: set[str] = set()
+                for run in runs:
+                    session = self._session_of(db, card, run)
+                    if not session or session in seen:
+                        continue
+                    seen.add(session)
+                    facts.append(
+                        SessionFacts(
+                            id=session,
+                            run_id=run.id,
+                            calls=[_call_fact(row) for row in db.execute(CALLS_SQL, (session,))],
+                            results=[_result_fact(row) for row in db.execute(RESULTS_SQL, (session,))],
+                        )
                     )
-                )
-        except sqlite3.Error:
-            return None
-        return facts
+            except sqlite3.Error:
+                return None
+            return facts
 
     def open_sessions(self, agent: str, at: float) -> list[str] | None:
-        db = self._db(agent)
-        if db is None:
-            return None
-        try:
-            rows = db.execute(
-                "SELECT id FROM sessions WHERE started_at <= ? AND (ended_at IS NULL OR ended_at >= ?)", (at, at)
-            ).fetchall()
-        except sqlite3.Error:
-            return None
-        return [str(row["id"]) for row in rows]
+        with self._db(agent) as db:
+            if db is None:
+                return None
+            try:
+                rows = db.execute(
+                    "SELECT id FROM sessions WHERE started_at <= ? AND (ended_at IS NULL OR ended_at >= ?)", (at, at)
+                ).fetchall()
+            except sqlite3.Error:
+                return None
+            return [str(row["id"]) for row in rows]
 
     def close(self) -> None:
-        for db in self._open.values():
-            db.close()
-        self._open.clear()
+        """Nothing to close: no connection is kept between readings."""
 
 
 def make_session_reader(environ: dict[str, str] | None = None) -> SessionReader:
