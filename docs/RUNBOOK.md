@@ -47,8 +47,24 @@ Pour fabriquer le jeton : `GET /orgs/code-my-life/installation` et `POST /app/in
 
 ### Permissions accordées à l'App
 
-À compléter par la tâche du propriétaire qui suit l'issue de l'alerte d'une carte bloquée
-(code-my-life/workflow-core#41) : chaque permission, son niveau, et ce qui s'en sert (socle ou factory).
+Relevées le 2026-11-12 par `uv run python -m workflow_core.adapters.github check`, sur l'installation de l'organisation
+`code-my-life` (code-my-life/workflow-core#41). Aucune n'a été retirée : la factory se sert encore de l'App comme
+d'un besoin, jusqu'à l'epic « La factory sur le moteur du socle ».
+
+| Permission | Niveau | Qui s'en sert |
+|---|---|---|
+| Issues | écriture | le socle (alertes, issue de panne, issue du contrat cassé) et la factory (fil de l'issue, commandes `/factory`) |
+| Metadata | lecture | tous (obligatoire pour toute App) |
+| Contents | écriture | la factory (push des branches, fusion par la release) |
+| Pull requests | écriture | la factory (ouverture, mise à jour, revue demandée, auto-merge) |
+| Commit statuses | écriture | la factory (statut `factory/gate`) |
+| Checks | lecture | la factory (lecture de la CI par la gate) |
+| Actions | lecture | la factory (lecture des runs de CI) |
+| Workflows | écriture | la factory (pousser une PR qui modifie `.github/workflows/`) |
+| Deployments | écriture | la factory (déploiements de la release) |
+
+Le socle n'a besoin que d'Issues en écriture (et de Metadata). Une permission retirée dans les réglages de l'App doit
+être acceptée sur l'installation de l'organisation, puis ce tableau mis à jour.
 
 ## Le notificateur
 
