@@ -464,3 +464,25 @@ def test_the_existing_routes_answer_as_before(runtime_home):
     }
     machine = client.get("/api/machine", headers=GOOD).json()
     assert set(machine) == {"schema_version", "runtime_version", "contract", "mode", "boards"}
+
+
+def test_the_diagnosis_of_a_card_is_the_same_from_any_thread(two_boards):
+    import threading
+
+    workflows = load_workflows(ROOT / "config" / "workflows.toml")
+    app = create_app(
+        secret=SECRET, workflows=workflows, boards=runtime_adapter().make_board_reader(), clock=lambda: BLOCKED_AT + 60
+    )
+    client = TestClient(app)
+    answers: list = []
+
+    def ask() -> None:
+        answers.append(diagnosis_of(client, "t_000000a1").json())
+
+    for _ in range(3):
+        thread = threading.Thread(target=ask)
+        thread.start()
+        thread.join()
+
+    assert answers[0]["diagnosis"]["sources"]["transcript"] is True
+    assert answers[1:] == [answers[0], answers[0]]
