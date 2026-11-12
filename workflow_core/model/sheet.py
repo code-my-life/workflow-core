@@ -58,6 +58,8 @@ class SheetStation(_Form):
     group: Key | None = None
     # The item types the station handles, written under its name.
     types: list[str] | None = None
+    # The agents that work at the station (#140): a card one of them holds stands there (workflow_core/stations.py).
+    agents: list[Key] | None = None
 
 
 class SheetEdge(_Form):
@@ -123,6 +125,14 @@ def _broken_rule(sheet: WorkflowSheet) -> tuple[str, str] | None:
         cells[(station.col, station.row)] = station.key
         if station.group is not None and station.group not in groups:
             return "unknown-group", f'station "{station.key}" names an unknown group "{station.group}"'
+
+    agents: dict[str, str] = {}
+    for station in sheet.stations:
+        for agent in station.agents or []:
+            taken = agents.get(agent)
+            if taken is not None and taken != station.key:
+                return "shared-agent", f'stations "{taken}" and "{station.key}" both name the agent "{agent}"'
+            agents[agent] = station.key
 
     for key in groups:
         kinds = {station.kind for station in sheet.stations if station.group == key}

@@ -28,12 +28,14 @@ ROUTES = ("/healthz", "/api/workflows/factory/items", "/api/workflows/nope/items
 
 
 @pytest.fixture
-def client(runtime_home) -> TestClient:
-    app = create_app(
-        secret=SECRET,
-        workflows=load_workflows(ROOT / "config" / "workflows.toml"),
-        boards=runtime_adapter().make_board_reader(),
-    )
+def client(runtime_home, tmp_path) -> TestClient:
+    # The declared workflows, their sheets pointed at a missing file: the items stand at no station (#140), whatever
+    # sheet this machine has at the declared path.
+    workflows = {
+        key: workflow.model_copy(update={"sheet": tmp_path / "no-sheet.json"})
+        for key, workflow in load_workflows(ROOT / "config" / "workflows.toml").items()
+    }
+    app = create_app(secret=SECRET, workflows=workflows, boards=runtime_adapter().make_board_reader())
     return TestClient(app)
 
 
@@ -157,7 +159,8 @@ def test_the_items_carry_their_runs_links_and_comments(service):
 
     assert response.status_code == 200
     items = response.json()["items"]
-    assert items == FACTORY_ITEMS
+    # With the factory's sheet, the finished card stands at its end station `done` (#140).
+    assert items == [{**FACTORY_ITEMS[0], "station": "done"}, FACTORY_ITEMS[1]]
     assert {item["id"]: item["children"] for item in items} == {"t_0001": ["t_0002"], "t_0002": []}
 
 

@@ -31,9 +31,11 @@ from workflow_core.model.diagnosis import diagnosis_json
 from workflow_core.model.facts import CardFactsReader, DiagnosisSources
 from workflow_core.model.interventions import Intervention
 from workflow_core.model.live import LiveReader, LiveWatcher
+from workflow_core.model.sheet import WorkflowSheet
 from workflow_core.model.state import CoreState
 from workflow_core.model.triggers import Trigger
 from workflow_core.sheets import InvalidSheetError, SheetUnavailableError, read_sheet, sheet_json
+from workflow_core.stations import place
 
 # The version of the API's contract (ADR 0018): within it, responses only gain optional fields.
 SCHEMA_VERSION = 1
@@ -158,11 +160,19 @@ def create_app(
             raise UnknownWorkflowError(key)
         return workflow
 
+    def sheet_of(workflow: Workflow) -> WorkflowSheet | None:
+        try:
+            return read_sheet(workflow)
+        except (InvalidSheetError, SheetUnavailableError):
+            return None
+
     def read_items(board: str) -> list[Item]:
         items = boards.read_items(board)
         # Only a successful read moves the time: a failed one keeps the last good time.
         core.last_read_at[board] = utc_now()
-        return items
+        # Each item says where it stands, from the sheet of the workflow of its board (#140).
+        workflow = next((workflow for workflow in workflows.values() if workflow.board == board), None)
+        return place(items, sheet_of(workflow), workflow.key) if workflow is not None else items
 
     def open_interventions(workflow: Workflow) -> list[Intervention]:
         # The interventions of the workflow's board, computed from its cards' facts (ADR 0012).
