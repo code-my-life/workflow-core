@@ -24,6 +24,7 @@ from workflow_core.adapters.hermes.board import (
     HermesBoardReader,
     make_board_reader,
 )
+from workflow_core.adapters.hermes.live import LIVE_LOG_PATTERNS, USAGE_COLUMNS
 from workflow_core.adapters.hermes.profiles import (
     CONFIG_KEYS,
     CONFIG_TABLES,
@@ -94,6 +95,8 @@ CONFIG_DECLARATION = {"tables": CONFIG_TABLES, "keys": CONFIG_KEYS}
 # The agents' journals: the header of a line, and the nine kinds of lines the diagnosis reads (agent_log.py).
 JOURNAL_LINE = LOG_LINE
 JOURNAL_KINDS = tuple(kind for kind, _, _ in LOG_PATTERNS)
+# The lines the live state and the usage read besides: a model named by a call or a fallback, a failed call (live.py).
+JOURNAL_LIVE_KINDS = tuple(kind for kind, _ in LIVE_LOG_PATTERNS)
 # The tail of each journal checked: its last dated lines, within its last bytes.
 JOURNAL_TAIL_BYTES = 64 * 1024
 JOURNAL_TAIL_LINES = 20
@@ -104,6 +107,7 @@ _DATED = re.compile(r"^\d{4}-\d{2}-\d{2} ", re.ASCII)
 SESSION_CONTRACT: dict[str, Table] = {
     "sessions": Table(columns=SESSION_COLUMNS),
     "messages": Table(columns=MESSAGE_COLUMNS),
+    "session_model_usage": Table(columns=USAGE_COLUMNS),
 }
 # The last tool calls checked in each base: each must still carry the fields read.
 SESSION_CALLS_CHECKED = 50

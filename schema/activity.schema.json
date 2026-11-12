@@ -1,0 +1,108 @@
+{
+  "$defs": {
+    "ActivityFact": {
+      "description": "One recent fact of a board: a tool call and its outcome, a model call, a card's event, a guard's refusal.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "at": {
+          "title": "At",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "tool",
+            "llm",
+            "kanban",
+            "guard",
+            "system"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "agent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Agent"
+        },
+        "item": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Item"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "ok",
+                "running",
+                "error",
+                "blocked"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Status"
+        }
+      },
+      "required": [
+        "id",
+        "at",
+        "kind",
+        "agent",
+        "item",
+        "text",
+        "status"
+      ],
+      "title": "ActivityFact",
+      "type": "object"
+    }
+  },
+  "description": "GET /api/workflows/<key>/activity?limit=<n>: the last facts of the board, oldest first (200 at most).",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "workflow": {
+      "title": "Workflow",
+      "type": "string"
+    },
+    "facts": {
+      "items": {
+        "$ref": "#/$defs/ActivityFact"
+      },
+      "title": "Facts",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "workflow",
+    "facts"
+  ],
+  "title": "ActivityResponse",
+  "type": "object"
+}

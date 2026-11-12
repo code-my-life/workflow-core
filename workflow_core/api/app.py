@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.exceptions import HTTPException
@@ -22,6 +22,7 @@ from workflow_core.events import BoardWatcher, EventHub
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
 from workflow_core.model.diagnosis import diagnosis_json
 from workflow_core.model.facts import CardFactsReader, DiagnosisSources
+from workflow_core.model.live import LiveReader, LiveWatcher
 from workflow_core.model.state import CoreState
 from workflow_core.model.triggers import Trigger
 from workflow_core.sheets import InvalidSheetError, SheetUnavailableError, read_sheet, sheet_json
@@ -61,6 +62,8 @@ def create_app(
     journal_path: Path | None = None,
     clock: Callable[[], float] = time.time,
     spy: Callable[[str], Any] | None = None,
+    live: LiveReader | None = None,
+    live_watcher: LiveWatcher | None = None,
 ) -> FastAPI:
     """The API. With a board watcher and a journal path, it also probes the boards and serves GET /api/events. The
     facts of a card, for its diagnosis, are read by `facts`, by default the board reader itself, and the other
@@ -69,6 +72,8 @@ def create_app(
         raise ValueError("the shared secret is empty")
     card_facts: CardFactsReader = facts if facts is not None else boards
     diagnosis_sources: DiagnosisSources = sources if sources is not None else card_facts.diagnosis_sources()
+    # The agents' live state, activity and usage: by default, the board reader's.
+    live_reader: LiveReader | None = live if live is not None else getattr(boards, "live_reader", lambda: None)()
     expected = secret.encode("utf-8")
     hub: EventHub | None = None
 
@@ -102,7 +107,14 @@ def create_app(
 
     if watcher is not None and journal_path is not None:
         hub = EventHub(
-            workflows=workflows, watcher=watcher, read_items=read_items, journal_path=journal_path, clock=clock, spy=spy
+            workflows=workflows,
+            watcher=watcher,
+            read_items=read_items,
+            journal_path=journal_path,
+            clock=clock,
+            spy=spy,
+            live=live_reader,
+            live_watcher=live_watcher,
         )
     app.state.events = hub
 
@@ -241,6 +253,30 @@ def create_app(
                 for trigger, result in diagnose_board(cards, workflow, clock(), diagnosis_sources)
             ],
         }
+
+    def reading_live() -> LiveReader:
+        if live_reader is None:
+            raise HTTPException(404, "the live state is not read")
+        return live_reader
+
+    @app.get("/api/workflows/{key}/live")
+    def live_state(key: str) -> dict:
+        # What each agent holding a card in progress does now; the stream's `live` events carry the same state.
+        workflow = declared(key)
+        agents = reading_live().live(workflow)
+        return {"schema_version": SCHEMA_VERSION, "workflow": workflow.key, "agents": [a.model_dump() for a in agents]}
+
+    @app.get("/api/workflows/{key}/activity")
+    def activity(key: str, limit: int = Query(50, ge=1, le=200)) -> dict:
+        workflow = declared(key)
+        facts = reading_live().activity(workflow, limit, clock())
+        return {"schema_version": SCHEMA_VERSION, "workflow": workflow.key, "facts": [f.model_dump() for f in facts]}
+
+    @app.get("/api/workflows/{key}/usage")
+    def usage(key: str, days: int = Query(7, ge=1, le=90)) -> dict:
+        workflow = declared(key)
+        report = reading_live().usage(workflow, days, clock())
+        return {"schema_version": SCHEMA_VERSION, "workflow": workflow.key, **report.model_dump()}
 
     @app.get("/api/events")
     async def events(request: Request, cursor: str | None = None) -> StreamingResponse:

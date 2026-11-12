@@ -1,0 +1,194 @@
+{
+  "$defs": {
+    "AgentLive": {
+      "description": "The live state of an agent holding a card in progress.",
+      "properties": {
+        "agent": {
+          "title": "Agent",
+          "type": "string"
+        },
+        "item": {
+          "title": "Item",
+          "type": "string"
+        },
+        "run": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Run"
+        },
+        "state": {
+          "enum": [
+            "thinking",
+            "tool",
+            "cli",
+            "blocked"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LiveAction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LiveModel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lane_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lane Model"
+        },
+        "heartbeat_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Heartbeat At"
+        }
+      },
+      "required": [
+        "agent",
+        "item",
+        "run",
+        "state",
+        "action",
+        "model",
+        "lane_model",
+        "heartbeat_at"
+      ],
+      "title": "AgentLive",
+      "type": "object"
+    },
+    "LiveAction": {
+      "description": "What the agent is doing: a tool call (`tool`), a delegated command line (`cli`, its label the command's name),\nor waiting for the model (`llm`). `detail`: the command, the path or the name given to the tool, secrets masked,\n2 000 characters at most; for `llm`, the model.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "llm",
+            "tool",
+            "cli"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Detail"
+        },
+        "started_at": {
+          "title": "Started At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "detail",
+        "started_at"
+      ],
+      "title": "LiveAction",
+      "type": "object"
+    },
+    "LiveModel": {
+      "description": "The agent's model. `source`: `live` for a served model read in the agent's journal, `session` for the model\nits session notes (which may be the one asked for, not the one served).",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Provider"
+        },
+        "source": {
+          "enum": [
+            "live",
+            "session"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "provider",
+        "source"
+      ],
+      "title": "LiveModel",
+      "type": "object"
+    }
+  },
+  "description": "GET /api/workflows/<key>/live: the live state of each agent holding a card in progress.",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "workflow": {
+      "title": "Workflow",
+      "type": "string"
+    },
+    "agents": {
+      "items": {
+        "$ref": "#/$defs/AgentLive"
+      },
+      "title": "Agents",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "workflow",
+    "agents"
+  ],
+  "title": "LiveResponse",
+  "type": "object"
+}

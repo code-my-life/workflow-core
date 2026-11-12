@@ -171,6 +171,14 @@ class HermesBoardReader:
                 by_card[row["task_id"]]["events"].append({**fields, "payload": _json_object(row["payload"])})
         return [Item(**{**dict(row), "skills": _string_list(row["skills"])}, **by_card[row["id"]]) for row in cards]
 
+    def live_reader(self, environ: dict[str, str] | None = None):
+        """The live state, activity and usage of the agents under the same Hermès home (`LiveReader`)."""
+        from workflow_core.adapters.hermes.agent_log import DEFAULT_TIME_ZONE, TIME_ZONE_VARIABLE
+        from workflow_core.adapters.hermes.live import HermesLiveReader
+
+        env = os.environ if environ is None else environ
+        return HermesLiveReader(self.home, env.get(TIME_ZONE_VARIABLE) or DEFAULT_TIME_ZONE, self)
+
     def diagnosis_sources(self, environ: dict[str, str] | None = None) -> HermesDiagnosisSources:
         """The other sources of the diagnosis under the same Hermès home: sessions, journals, configurations,
         proofs. The journals are dated in the zone named by `HERMES_TZ`."""

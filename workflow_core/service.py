@@ -55,6 +55,8 @@ def build_service(
         boards=adapter.make_board_reader(),
         state=state,
         watcher=adapter.make_board_watcher(),
+        live=adapter.make_live_reader(),
+        live_watcher=adapter.make_live_watcher(),
         journal_path=state_dir() / JOURNAL_FILE,
         clock=clock,
         spy=spy,

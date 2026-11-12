@@ -26,6 +26,9 @@ PUBLISHED = (
     "machine.schema.json",
     "event.schema.json",
     "error.schema.json",
+    "live.schema.json",
+    "activity.schema.json",
+    "usage.schema.json",
 )
 
 
@@ -92,3 +95,70 @@ def test_every_response_is_valid_against_its_published_schema(service, tmp_path)
         validator("items.schema.json").validate({"schema_version": 1, "workflow": "factory", "items": [broken]})
     with pytest.raises(jsonschema.ValidationError):
         check.validate({**events[1], "kind": "renamed"})
+
+
+def test_the_live_activity_and_usage_responses_match_their_schemas(runtime_home, tmp_path, monkeypatch):
+    from conftest import make_session_base
+    from test_events import board_base, write
+    from test_live import CARD, SESSION, STARTED, terminal_call
+
+    monkeypatch.setenv("HER" + "MES_TZ", "UTC")
+    write(
+        board_base(runtime_home, "factory"),
+        "INSERT INTO tasks (id, title, status, assignee, created_at, current_run_id)"
+        " VALUES (?, 'x', 'running', 'coder', ?, 3)",
+        CARD,
+        STARTED,
+    )
+    write(
+        board_base(runtime_home, "factory"),
+        "INSERT INTO task_runs (id, task_id, profile, status, started_at, metadata)"
+        " VALUES (3, ?, 'coder', 'running', ?, ?)",
+        CARD,
+        STARTED,
+        json.dumps({"worker_session_id": SESSION}),
+    )
+    base = make_session_base(runtime_home, "coder")
+    base.execute(
+        "INSERT INTO sessions (id, source, model, started_at) VALUES (?, 'kanban', 'auto', ?)", (SESSION, STARTED)
+    )
+    base.execute(
+        "INSERT INTO messages (session_id, role, tool_calls, timestamp) VALUES (?, 'assistant', ?, ?)",
+        (SESSION, terminal_call("c1", "npm test"), STARTED + 5),
+    )
+    base.execute(
+        "INSERT INTO session_model_usage (session_id, model, billing_provider, api_call_count, last_seen)"
+        " VALUES (?, 'glm-5.3', 'freellmapi', 2, ?)",
+        (SESSION, STARTED),
+    )
+    base.close()
+    config = tmp_path / "workflows.toml"
+    sheet = tmp_path / "factory.json"
+    sheet.write_text((SHEETS / "factory.json").read_text(encoding="utf-8"), encoding="utf-8")
+    config.write_text(f'[[workflow]]\nkey = "factory"\nboard = "factory"\nsheet = "{sheet}"\n', encoding="utf-8")
+    service = TestClient(build_service(secret=SECRET, workflows=load_workflows(config), adapter=runtime_adapter()))
+
+    live = service.get("/api/workflows/factory/live", headers=GOOD).json()
+    activity = service.get("/api/workflows/factory/activity?limit=10", headers=GOOD).json()
+    usage = service.get("/api/workflows/factory/usage?days=90", headers=GOOD).json()
+    validator("live.schema.json").validate(live)
+    validator("activity.schema.json").validate(activity)
+    validator("usage.schema.json").validate(usage)
+    assert [agent["state"] for agent in live["agents"]] == ["tool"]
+    assert activity["facts"]
+    assert usage["models"][0]["calls"] == 2
+    for route in ("/api/workflows/factory/activity?limit=201", "/api/workflows/factory/usage?days=91"):
+        refused = service.get(route, headers=GOOD)
+        assert refused.status_code == 422
+        validator("error.schema.json").validate(refused.json())
+
+    # The stream's live and activity events carry these same states.
+    journal = EventJournal.rebuild(tmp_path / "events.db", 1762900000, {"factory": []})
+    events = [
+        journal.note("live", "factory", CARD, live["agents"][0]),
+        journal.note("activity", "factory", CARD, activity["facts"][-1]),
+    ]
+    journal.close()
+    check = validator("event.schema.json")
+    for event in events:
+        check.validate(event)

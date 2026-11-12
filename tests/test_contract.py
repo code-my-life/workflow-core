@@ -311,3 +311,34 @@ def test_the_full_card_state_columns_are_in_the_contract(runtime_home):
         assert verdict.ok is False
         assert f"factory: {table}.{column} absente" in verdict.problems
         assert verdict.mode == "observer"
+
+
+def test_the_session_messages_and_usage_columns_are_in_the_contract(runtime_home):
+    from workflow_core.adapters.hermes.contract import JOURNAL_LIVE_KINDS, SESSION_CONTRACT
+
+    from conftest import make_session_base
+
+    assert {"id", "model", "started_at", "ended_at"} <= set(SESSION_CONTRACT["sessions"].columns)
+    assert {"id", "session_id", "role", "tool_calls", "tool_call_id", "timestamp"} <= set(
+        SESSION_CONTRACT["messages"].columns
+    )
+    assert set(SESSION_CONTRACT["session_model_usage"].columns) >= {
+        "session_id",
+        "model",
+        "billing_provider",
+        "api_call_count",
+        "input_tokens",
+        "output_tokens",
+        "estimated_cost_usd",
+        "actual_cost_usd",
+        "last_seen",
+    }
+    assert set(JOURNAL_LIVE_KINDS) == {"api_call", "fallback", "api_failed"}
+    base = make_session_base(runtime_home, "coder")
+    assert check().ok is True
+
+    base.execute("ALTER TABLE session_model_usage DROP COLUMN actual_cost_usd")
+    assert check().problems == ["agent coder : session_model_usage.actual_cost_usd absente"]
+    base.execute("DROP TABLE messages")
+    base.close()
+    assert "agent coder : table messages absente" in check().problems

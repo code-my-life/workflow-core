@@ -282,13 +282,13 @@ def runtime_schema(name: str, tables: list[str]) -> str:
 
 
 def make_session_base(home: Path, agent: str) -> sqlite3.Connection:
-    """Create `<home>/profiles/<agent>/state.db` in WAL mode with the runtime's `sessions` and `messages` tables, and
-    return a writing connection for the test to fill."""
+    """Create `<home>/profiles/<agent>/state.db` in WAL mode with the runtime's `sessions`, `messages` and
+    `session_model_usage` tables, and return a writing connection for the test to fill."""
     folder = home / "profiles" / agent
     folder.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(folder / "state.db", isolation_level=None)
     db.execute("PRAGMA journal_mode=wal")
-    db.executescript(runtime_schema("state", ["sessions", "messages"]))
+    db.executescript(runtime_schema("state", ["sessions", "messages", "session_model_usage"]))
     return db
 
 

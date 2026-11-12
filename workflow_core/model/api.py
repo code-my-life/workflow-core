@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from workflow_core.model.board import Item
 from workflow_core.model.contract import ContractVerdict, Mode
+from workflow_core.model.live import ActivityFact, AgentLive, Usage
 from workflow_core.model.sheet import WorkflowSheet
 
 
@@ -68,17 +69,38 @@ class MachineResponse(_AtCursor):
     boards: dict[str, BoardRead]
 
 
+class LiveResponse(_Response):
+    """GET /api/workflows/<key>/live: the live state of each agent holding a card in progress."""
+
+    workflow: str
+    agents: list[AgentLive]
+
+
+class ActivityResponse(_Response):
+    """GET /api/workflows/<key>/activity?limit=<n>: the last facts of the board, oldest first (200 at most)."""
+
+    workflow: str
+    facts: list[ActivityFact]
+
+
+class UsageResponse(_Response, Usage):
+    """GET /api/workflows/<key>/usage?days=<n>: usage and costs over n days (90 at most)."""
+
+    workflow: str
+
+
 class StreamEvent(BaseModel):
     """One event of GET /api/events. `reset` opens an epoch: the client reads the full state again; it names no
-    workflow, no item and carries no state. `changed` carries the full state of the item."""
+    workflow, no item and carries no state. `changed` carries the full state of the item, `live` the live state of an
+    agent (its item: the card it holds), `activity` one new fact of the board."""
 
     cursor: str
     workflow: str | None
     item: str | None
-    kind: Literal["changed", "reset"]
+    kind: Literal["changed", "reset", "live", "activity"]
     # ISO 8601, UTC.
     at: str
-    state: Item | None
+    state: Item | AgentLive | ActivityFact | None
 
 
 class ErrorResponse(BaseModel):
@@ -103,4 +125,7 @@ API_SCHEMAS: dict[str, Callable[[], str]] = {
     "machine.schema.json": _schema_text(MachineResponse),
     "event.schema.json": _schema_text(StreamEvent),
     "error.schema.json": _schema_text(ErrorResponse),
+    "live.schema.json": _schema_text(LiveResponse),
+    "activity.schema.json": _schema_text(ActivityResponse),
+    "usage.schema.json": _schema_text(UsageResponse),
 }
