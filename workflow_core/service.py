@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -29,7 +28,7 @@ INFO = "<6>"
 
 
 def journal(priority: str, message: str) -> None:
-    print(f"{priority}workflow-core: {message}", file=sys.stderr, flush=True)
+    journal_line(f"{priority}workflow-core: {message}")
 
 
 def build_service(

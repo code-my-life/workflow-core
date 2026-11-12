@@ -594,3 +594,26 @@ def test_a_held_alert_already_in_the_issue_is_not_posted_again(home, tmp_path):
     notifier(tmp_path, github, now=READY + 45 * 60, workflows=HELD_WORKFLOWS).run_pass()
 
     assert len(github.posted) == 1
+
+
+def test_a_card_blocked_after_giving_up_gets_an_alert_of_its_trigger(home, tmp_path):
+    # The runtime's breaker gave up after a block: the trigger is `gave_up`, and the alert has the generic title.
+    make_board(
+        home,
+        "factory",
+        [card("t_00000001", body=ISSUE)],
+        events=[
+            blocked(1, "t_00000001", NOON + 60),
+            event(2, "t_00000001", "gave_up", NOON + 120, {"reason": "trop d'échecs de suite"}),
+        ],
+    )
+    make_board(home, "studio", [])
+    github = FakeGitHub()
+
+    notifier(tmp_path, github).run_pass()
+
+    assert len(github.posted) == 1
+    body = github.posted[0][2]
+    assert body.startswith("### ⏸ Bloquée\n")
+    assert "> trop d'échecs de suite" in body
+    assert body.endswith("<!-- workflow-core:attente factory:gave_up:t_00000001:2 -->")

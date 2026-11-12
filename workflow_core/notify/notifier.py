@@ -24,7 +24,7 @@ from workflow_core.adapters.github import APP_BOT, IssueComment
 from workflow_core.config import Workflow
 from workflow_core.diagnosis.triggers import ready_since, trigger_of
 from workflow_core.model.board import BoardUnavailableError
-from workflow_core.model.facts import CardFacts
+from workflow_core.model.facts import CardFacts, RuntimeTexts
 from workflow_core.model.state import CoreState
 from workflow_core.notify.alerts import blocked_alert, held_alert, marker, parse_issue
 from workflow_core.notify.register import AlertRegister
@@ -42,7 +42,8 @@ class WaitReader(Protocol):
 
     def read_issue_urls(self, board: str) -> dict[str, str | None]: ...
 
-    def relaunch_command(self, board: str, card: str, assignee: str, relay: str) -> str: ...
+    # The runtime's own words: `relay_command` writes the relaunch of a held card.
+    texts: RuntimeTexts
 
 
 def journal_line(line: str) -> None:
@@ -157,7 +158,7 @@ class Notifier:
         card = facts.card
         relay = next((agent for agent in workflow.notify_relay_agents if agent != card.assignee), None)
         relaunch = (
-            self.reader.relaunch_command(workflow.board, card.id, card.assignee, relay)
+            self.reader.texts.relay_command(workflow.board, card.id, relay, card.assignee)
             if relay is not None and card.assignee
             else None
         )
