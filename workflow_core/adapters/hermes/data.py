@@ -81,7 +81,7 @@ def claude_projects(environ: dict[str, str] | None = None) -> Path:
     return Path(env.get(CLAUDE_VARIABLE) or DEFAULT_CLAUDE).expanduser()
 
 
-def iso_ms(ms: float) -> str:
+def iso_of_ms(ms: float) -> str:
     """JavaScript's `toISOString`: milliseconds, UTC, ending in `Z`."""
     moment = datetime.fromtimestamp(round(ms) / 1000, UTC)
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
@@ -335,7 +335,7 @@ class HermesDataReader:
             db.close()
         entries: list[list] = []
         for row in rows:
-            at = iso_ms(round(float(row["timestamp"] or 0) * 1000))
+            at = iso_of_ms(round(float(row["timestamp"] or 0) * 1000))
             role = str(row["role"])
             content = row["content"] if isinstance(row["content"], str) else None
             if role == "assistant":
@@ -442,7 +442,7 @@ def _lane(content: str, stem: str) -> tuple[float | None, str, list[list]]:
     name: str | None = None
     first: float | None = None
     rows: list[list] = []
-    for index, line in enumerate(content.split("\n")):
+    for line in content.split("\n"):
         if not line.strip():
             continue
         try:
@@ -469,7 +469,7 @@ def _lane(content: str, stem: str) -> tuple[float | None, str, list[list]]:
             if isinstance(content_parts, list)
             else []
         )
-        when = iso_ms(at)
+        when = iso_of_ms(at)
         for part in parts:
             kind = part.get("type")
             if kind == "text":
@@ -483,7 +483,6 @@ def _lane(content: str, stem: str) -> tuple[float | None, str, list[list]]:
             elif kind == "tool_result":
                 status = "error" if part.get("is_error") is True else "ok"
                 rows.append([when, "tool_result", clip(part.get("content")), None, model, status])
-        del index
     return first, name or stem, rows
 
 
