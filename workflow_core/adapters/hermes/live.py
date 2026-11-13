@@ -245,6 +245,28 @@ def _day(seconds: float) -> str:
     return datetime.fromtimestamp(seconds, UTC).strftime("%Y-%m-%d")
 
 
+def _zero_usage(model: str, provider: str, cost: float | None) -> ModelUsage:
+    """A model's usage before any call is counted."""
+    return ModelUsage(
+        model=model,
+        provider=provider,
+        calls=0,
+        input_tokens=0,
+        output_tokens=0,
+        cost_usd=cost,
+        rate_limited=0,
+        errors=0,
+    )
+
+
+def _add_calls(total: ModelUsage | UsageRow, row: sqlite3.Row, tokens_in: int, tokens_out: int) -> None:
+    """Add a row of `USAGE_SQL` to a model's usage or to a line of the detail."""
+    total.calls += int(as_number(row["calls"]))
+    total.input_tokens += tokens_in
+    total.output_tokens += tokens_out
+    total.cost_usd = round((total.cost_usd or 0.0) + as_number(row["cost"]), 6)
+
+
 class HermesLiveReader:
     """Reads the live state, the activity and the usage of a workflow's agents under one Hermès home (`LiveReader`).
     Each reading opens its own connections and closes them."""
@@ -489,30 +511,12 @@ class HermesLiveReader:
             for row in rows:
                 key = (str(row["model"]), str(row["provider"] or "?"))
                 tokens_in, tokens_out = int(as_number(row["input"])), int(as_number(row["output"]))
-                usage = models.setdefault(
-                    key,
-                    ModelUsage(
-                        model=key[0],
-                        provider=key[1],
-                        calls=0,
-                        input_tokens=0,
-                        output_tokens=0,
-                        cost_usd=0.0,
-                        rate_limited=0,
-                        errors=0,
-                    ),
-                )
-                usage.calls += int(as_number(row["calls"]))
-                usage.input_tokens += tokens_in
-                usage.output_tokens += tokens_out
-                usage.cost_usd = round((usage.cost_usd or 0.0) + as_number(row["cost"]), 6)
+                usage = models.setdefault(key, _zero_usage(key[0], key[1], 0.0))
+                _add_calls(usage, row, tokens_in, tokens_out)
                 by_agent[agent] = by_agent.get(agent, 0) + tokens_in + tokens_out
                 by_day.setdefault(str(row["day"]), [0, 0])[0] += tokens_in + tokens_out
                 line = row_of(str(row["day"]), agent, key[0], key[1], 0.0)
-                line.calls += int(as_number(row["calls"]))
-                line.input_tokens += tokens_in
-                line.output_tokens += tokens_out
-                line.cost_usd = round((line.cost_usd or 0.0) + as_number(row["cost"]), 6)
+                _add_calls(line, row, tokens_in, tokens_out)
             for entry in self.journal.entries(agent):
                 if entry.kind != "api_failed" or entry.at < since:
                     continue
@@ -520,17 +524,7 @@ class HermesLiveReader:
                 usage = next((usage for (model, _), usage in models.items() if model == name), None)
                 if usage is None:
                     usage = models.setdefault(
-                        (name, entry.provider or "?"),
-                        ModelUsage(
-                            model=name,
-                            provider=entry.provider or "?",
-                            calls=0,
-                            input_tokens=0,
-                            output_tokens=0,
-                            cost_usd=None,
-                            rate_limited=0,
-                            errors=0,
-                        ),
+                        (name, entry.provider or "?"), _zero_usage(name, entry.provider or "?", None)
                     )
                 # The line of the model as `models` counts it: its provider is that of the model's usage.
                 line = row_of(_day(entry.at), agent, usage.model, usage.provider, None)
