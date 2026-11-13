@@ -128,3 +128,61 @@ seule écriture du socle en observateur, et elle part même notificateur éteint
 - Son numéro est noté dans `~/.local/state/workflow-core/contract-issue.json` (`{"issue": <numéro> | null}`).
 - GitHub injoignable ou App absente : le journal du service le dit (`journalctl --user -u workflow-core.service`), le
   socle reste en observateur, et le démarrage suivant réessaie (`systemctl --user restart workflow-core.service`).
+
+## Le moteur
+
+Toutes les 30 secondes, en mode normal seulement, une passe du moteur parcourt chaque workflow branché par son
+**manifeste** (`workflow-manifest.json` à la racine de son dépôt, déclaré dans la configuration par `key` et `repo`).
+Le moteur crée le board du workflow si sa base n'existe pas, relit ses cartes, et reconnaît une **carte racine** (la
+carte d'un élément) à sa clé d'idempotence `<clé>:<id local>`. Une carte racine prête, assignée au **nom de voie**
+`<clé>-<station>` d'une station `code`, fait lancer la commande de la station dans le dépôt du workflow ; une
+décision `advance` réassigne la carte au nom de voie de la station suivante. Le moteur écrit dans Hermès par la seule
+ligne de commande `hermes kanban --board <slug>`, ne prend jamais une carte (`claim`), et saute un élément qu'une
+passe précédente traite encore. En mode observateur, il ne lance rien et n'écrit rien ; le journal le dit une fois.
+
+Un manifeste absent, illisible ou d'une autre clé laisse son workflow non branché : le journal du service le dit au
+démarrage, avec la raison (« workflow essai non branché : manifeste absent : … »), et les autres workflows tournent.
+Une écriture refusée par Hermès est écrite au journal avec la commande, son code et sa sortie d'erreur ; la passe
+suivante réessaie.
+
+## La machine de test
+
+La machine de test est la machine de production, avec le même Hermès, mais un board à part, `essai-test`. Un second
+socle y tourne, lancé depuis la branche en cours, sur le port 8449, avec sa propre configuration
+(`config/essai-test.toml`, qui ne déclare que le workflow d'essai `essai` sur le board `essai-test`) et son propre
+dossier d'état. Le socle de production (port 8447, `~/perso/workflow-core`) n'est pas touché. Le dépôt du workflow
+d'essai, `code-my-life/workflow-essai`, est cloné dans `~/perso/workflow-essai`.
+
+Lancer le socle de test, depuis le dossier de la branche (`uv sync --locked` fait) :
+
+```sh
+set -a; . ~/.config/workflow-core/.env; set +a
+unset WORKFLOW_CORE_NOTIFY
+export WORKFLOW_CORE_CONFIG=config/essai-test.toml
+export WORKFLOW_CORE_STATE_DIR=~/.local/state/workflow-core-essai-test
+mkdir -p "$WORKFLOW_CORE_STATE_DIR"
+uv run python -m workflow_core --port 8449 2>&1 | tee -a "$WORKFLOW_CORE_STATE_DIR/socle.log"
+```
+
+Si le journal du socle de test dit que le contrat est cassé, l'arrêter aussitôt (Ctrl+C) : sinon, il écrirait
+l'issue du contrat cassé dans `code-my-life/workflow-core`.
+
+Le premier démarrage ne connaît pas encore le board `essai-test` : le contrat porte sur les autres lectures, et la
+première passe du moteur crée le board (« board essai-test créé » au journal).
+
+Créer une carte racine d'essai à la main, au nom de voie de la première station :
+
+```sh
+hermes kanban --board essai-test create "essai:1 · Premier essai" --assignee essai-preparer \
+  --idempotency-key essai:1 --body https://github.com/code-my-life/workflow-essai/issues/1
+```
+
+En moins d'une minute, la carte passe à `essai-revue` ; la vérifier, et vérifier qu'elle n'a jamais été prise :
+
+```sh
+hermes kanban --board essai-test show <carte>
+```
+
+Lire le journal du socle de test : `tail -f ~/.local/state/workflow-core-essai-test/socle.log`. Chaque lancement de
+commande y est écrit (« commande de preparer lancée ») ; deux minutes après le passage à `essai-revue`, aucun autre
+lancement ne doit y apparaître. Arrêter le socle de test : Ctrl+C dans son terminal.

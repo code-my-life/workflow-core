@@ -46,6 +46,16 @@ def test_a_base_missing_a_read_column_breaks_the_contract(runtime_home):
     assert verdict.problems == ["studio: tasks.block_kind absente"]
 
 
+def test_a_base_missing_the_idempotency_key_breaks_the_contract(runtime_home):
+    # The engine knows a root card by its idempotency key: a base without it cannot be read by the engine.
+    rebuild_tasks(board_base(runtime_home, "factory"), drop="idempotency_key")
+
+    verdict = check()
+
+    assert verdict.ok is False
+    assert verdict.problems == ["factory: tasks.idempotency_key absente"]
+
+
 def test_a_base_with_the_read_schema_keeps_the_contract(runtime_home):
     verdict = check()
 

@@ -18,6 +18,7 @@ from workflow_core.adapters.hermes.board import (
     CARD_FACT_COLUMNS,
     COMMENT_COLUMNS,
     EVENT_COLUMNS,
+    ITEM_CARD_COLUMNS,
     LINK_COLUMNS,
     RUN_COLUMNS,
     RUN_FACT_COLUMNS,
@@ -56,10 +57,11 @@ class Table:
     nullable: frozenset[str] = frozenset()
 
 
-# What the adapter reads of Hermès 0.22.2. Every story that reads something new adds it here.
+# What the adapter reads of Hermès 0.22.2. Every story that reads something new adds it here. The items' columns
+# (ITEM_CARD_COLUMNS) carry `idempotency_key`, by which the engine knows a root card.
 CONTRACT: dict[str, Table] = {
     "tasks": Table(
-        columns=CARD_COLUMNS + CARD_FACT_COLUMNS,
+        columns=tuple(dict.fromkeys(CARD_COLUMNS + CARD_FACT_COLUMNS + ITEM_CARD_COLUMNS)),
         values={
             "status": frozenset(
                 {"triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done", "archived"}
@@ -72,6 +74,13 @@ CONTRACT: dict[str, Table] = {
     "task_links": Table(columns=LINK_COLUMNS),
     "task_comments": Table(columns=COMMENT_COLUMNS),
     "task_events": Table(columns=EVENT_COLUMNS),
+}
+# What the adapter writes to Hermès: each `hermes kanban --board <slug>` command the writer runs (writer.py), with the
+# options it passes. Every story that runs a new command or option adds it here; the write contract test checks them.
+COMMANDS: dict[str, tuple[str, ...]] = {
+    "boards create": (),
+    "create": ("--assignee", "--idempotency-key", "--body", "--json"),
+    "assign": (),
 }
 # The payloads the adapter reads in task_events: for each kind of event, the keys whose value must be a text. The
 # notifier reads the reason of the runtime's respawn guard (`active_pr` for a held card).

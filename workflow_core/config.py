@@ -1,23 +1,44 @@
 """The core's configuration: the declared workflows, each with its key, its board, the path of its sheet, and the
 optional values its diagnosis needs (its triggers' settings, its sources, its own words).
 
-Until the manifests (engine epic), `config/workflows.toml` lists them, one `[[workflow]]` table each.
+`config/workflows.toml` lists them, one `[[workflow]]` table each; `WORKFLOW_CORE_CONFIG` names another file (the test
+machine's). A workflow plugged by its manifest (ADR 0005, amended) declares only its key and its repository, and
+optionally its board; the entries with a sheet keep their form until their migration.
 """
 
 from __future__ import annotations
 
+import os
 import tomllib
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from workflow_core.model.checks import DeclaredCheck
 from workflow_core.model.data import DataDeclaration
 
-__all__ = ["DEFAULT_CONFIG", "DataDeclaration", "Gesture", "Workflow", "load_checks", "load_workflows"]
+__all__ = [
+    "CONFIG_VARIABLE",
+    "DEFAULT_CONFIG",
+    "DataDeclaration",
+    "Gesture",
+    "Workflow",
+    "config_path",
+    "load_checks",
+    "load_workflows",
+]
 
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "workflows.toml"
+# The variable that names the configuration file; without it, DEFAULT_CONFIG.
+CONFIG_VARIABLE = "WORKFLOW_CORE_CONFIG"
+
+
+def config_path(environ: dict[str, str] | None = None) -> Path:
+    """The configuration file: the one named by WORKFLOW_CORE_CONFIG (`~` accepted), else the repository's."""
+    env = os.environ if environ is None else environ
+    named = env.get(CONFIG_VARIABLE)
+    return Path(named).expanduser() if named else DEFAULT_CONFIG
 
 
 class Gesture(BaseModel):
@@ -31,9 +52,11 @@ class Gesture(BaseModel):
 
 class Workflow(BaseModel):
     key: str = Field(min_length=1)
+    # The workflow's board; by default, its key (ADR 0003).
     board: str = Field(min_length=1)
-    # The path of the workflow's sheet; `~` is accepted.
-    sheet: Path
+    # The path of the workflow's sheet; `~` is accepted. Without it, the workflow is plugged by the manifest of its
+    # repository, and only the engine serves it.
+    sheet: Path | None = None
     # The diagnosis' triggers (optional). Minutes a ready card held by the active pull request guard waits before it
     # is a trigger.
     held_after_minutes: int = Field(default=30, ge=0)
@@ -73,17 +96,39 @@ class Workflow(BaseModel):
     # the alert of a held card leaves the command out.
     notify_relay_agents: list[str] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _board_defaults_to_the_key(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("board") is None and isinstance(data.get("key"), str):
+            return {**data, "board": data["key"]}
+        return data
+
+    @model_validator(mode="after")
+    def _sheet_or_repository(self) -> Workflow:
+        if self.sheet is None and self.repo is None:
+            raise ValueError(f'workflow "{self.key}": a sheet or a repository is required')
+        return self
+
+    @property
+    def plugged_by_manifest(self) -> bool:
+        """Whether the workflow is plugged by its manifest (no sheet): the engine serves it, the API does not yet."""
+        return self.sheet is None
+
     @property
     def repo_path(self) -> Path | None:
         return self.repo.expanduser() if self.repo is not None else None
 
     @property
     def sheet_path(self) -> Path:
+        if self.sheet is None:
+            raise ValueError(f'workflow "{self.key}" has no sheet: it is plugged by its manifest')
         return self.sheet.expanduser()
 
 
-def load_workflows(path: Path = DEFAULT_CONFIG) -> dict[str, Workflow]:
-    """The declared workflows, by key. A key declared twice is refused."""
+def load_workflows(path: Path | None = None) -> dict[str, Workflow]:
+    """The declared workflows, by key, read from `path`, by default the configuration file (`config_path`). A key
+    declared twice is refused."""
+    path = config_path() if path is None else path
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     workflows: dict[str, Workflow] = {}
     for entry in data.get("workflow", []):
@@ -94,8 +139,10 @@ def load_workflows(path: Path = DEFAULT_CONFIG) -> dict[str, Workflow]:
     return workflows
 
 
-def load_checks(path: Path = DEFAULT_CONFIG) -> list[DeclaredCheck]:
-    """The declared checks of the machine (`[[check]]`), in their order. An id declared twice is refused."""
+def load_checks(path: Path | None = None) -> list[DeclaredCheck]:
+    """The declared checks of the machine (`[[check]]`), in their order, read from `path`, by default the
+    configuration file (`config_path`). An id declared twice is refused."""
+    path = config_path() if path is None else path
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     checks: list[DeclaredCheck] = []
     for entry in data.get("check", []):

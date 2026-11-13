@@ -14,6 +14,8 @@ from fastapi import FastAPI
 from workflow_core.api.app import create_app
 from workflow_core.clock import utc_now
 from workflow_core.config import Workflow
+from workflow_core.engine import Engine, EngineRunner
+from workflow_core.engine.engine import PASS_SECONDS
 from workflow_core.events import JOURNAL_FILE, state_dir
 from workflow_core.model.checks import CHECK_EVERY_SECONDS, DeclaredCheck
 from workflow_core.model.contract import ContractVerdict
@@ -22,6 +24,7 @@ from workflow_core.notify import Notifier, NotifierRunner, NotifySettings
 from workflow_core.notify.contract_issue import ContractIssueTask, report_contract
 from workflow_core.notify.notifier import journal_line
 from workflow_core.notify.register import REGISTER_FILE
+from workflow_core.plugin.manifest import ManifestRefusedError, PluggedWorkflow, plug
 
 # journald reads a leading "<n>" on a service's output as the syslog priority of the line.
 ERROR = "<3>"
@@ -46,11 +49,22 @@ def build_service(
     read_comments: Callable[[str, int], list] | None = None,
     github: Any = None,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
+    engine_every: float = PASS_SECONDS,
 ) -> FastAPI:
     """The API, with the core's state after the contract check. A broken contract keeps the observer mode, is written
     to the journal and to its issue in code-my-life/workflow-core (the one write of the observer mode); the service
-    still answers. `github` replaces the core's GitHub client (tests)."""
-    boards = sorted({workflow.board for workflow in workflows.values()})
+    still answers. `github` replaces the core's GitHub client (tests).
+
+    The workflows with a sheet are served by the API and the notifier, as before; those plugged by their manifest are
+    served by the engine only. The contract covers the served boards and the manifests' boards that already exist: a
+    board the engine has not created yet would otherwise break it, and the engine would never create it."""
+    served = {key: workflow for key, workflow in workflows.items() if not workflow.plugged_by_manifest}
+    plugged = plug_manifests([workflow for workflow in workflows.values() if workflow.plugged_by_manifest])
+    writer = adapter.make_board_writer()
+    boards = sorted(
+        {workflow.board for workflow in served.values()}
+        | {workflow.board for workflow in plugged if writer.has_board(workflow.board)}
+    )
     try:
         verdict = adapter.check_contract(boards)
     except Exception as error:  # a check that cannot run is a broken contract, never a crash at startup
@@ -58,7 +72,7 @@ def build_service(
     version, _ = adapter.read_runtime_version()
     state = CoreState(contract=verdict, runtime_version=version)
     if verdict.ok:
-        journal(INFO, f"contrat tenu pour {', '.join(boards)} ; mode {state.mode}")
+        journal(INFO, f"contrat tenu pour {', '.join(boards) or 'aucun board'} ; mode {state.mode}")
     else:
         journal(ERROR, f"contrat cassé, mode {state.mode} : " + " ; ".join(verdict.problems))
 
@@ -74,7 +88,7 @@ def build_service(
         post_comment = post_comment or github.post_comment
         read_comments = read_comments or github.list_comments
     notifier = Notifier(
-        workflows=workflows,
+        workflows=served,
         reader=reader,
         state=state,
         settings=settings,
@@ -95,9 +109,11 @@ def build_service(
             log=journal_line,
         )
 
+    engine = Engine(workflows=plugged, reader=reader, writer=writer, state=state)
+
     app = create_app(
         secret=secret,
-        workflows=workflows,
+        workflows=served,
         boards=reader,
         state=state,
         watcher=adapter.make_board_watcher(),
@@ -109,10 +125,25 @@ def build_service(
         runtime_checks=adapter.make_machine_checks(),
         checks=checks,
         checks_every=checks_every,
-        background=[ContractIssueTask(report), NotifierRunner(notifier)],
+        background=[ContractIssueTask(report), NotifierRunner(notifier), EngineRunner(engine, engine_every)],
     )
     app.state.notifier = notifier
+    app.state.engine = engine
     return app
+
+
+def plug_manifests(workflows: list[Workflow]) -> list[PluggedWorkflow]:
+    """The workflows plugged by their manifest; each one left unplugged is written to the journal with its reason, and
+    the others run."""
+    plugged = []
+    for workflow in workflows:
+        try:
+            plugged.append(plug(workflow))
+        except ManifestRefusedError as error:
+            journal(ERROR, str(error))
+            continue
+        journal(INFO, f"workflow {workflow.key} branché par son manifeste, board {workflow.board}")
+    return plugged
 
 
 # Seconds uvicorn waits for open connections at a stop: an SSE client never closes its own, so the core ends them.

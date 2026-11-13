@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
@@ -406,3 +407,62 @@ def diagnosis_input_of(data: dict):
         pr_url=data["prUrl"],
         owner=data.get("owner"),
     )
+
+
+# The trial workflow's repository, as the tests use it: its manifest and sample commands.
+ESSAI_REPO = Path(__file__).resolve().parent / "fixtures" / "workflows" / "essai"
+
+
+class FakeRuntime:
+    """The fake runtime command of a test (tests/fake_hermes.py): its home, its calls, its forced failure."""
+
+    def __init__(self, home: Path, calls: Path, monkeypatch) -> None:
+        self.home = home
+        self.calls_file = calls
+        self.monkeypatch = monkeypatch
+
+    def calls(self) -> list[list[str]]:
+        """Every call to the runtime's command, in order, as lists of arguments."""
+        if not self.calls_file.is_file():
+            return []
+        return [json.loads(line) for line in self.calls_file.read_text(encoding="utf-8").splitlines()]
+
+    def writes(self) -> list[list[str]]:
+        """The calls that are not the version's."""
+        return [call for call in self.calls() if call != ["--version"]]
+
+    def fail(self, command: str) -> None:
+        """Make this subcommand (or `all`) fail with code 1 and an error output."""
+        self.monkeypatch.setenv("FAKE_RUNTIME_FAIL", command)
+
+
+@pytest.fixture
+def fake_runtime(tmp_path, monkeypatch) -> FakeRuntime:
+    """A runtime home without any board, named by the runtime's variable, and first on the PATH a fake runtime command
+    (tests/fake_hermes.py) and a fake `uv` that runs `uv run --directory <repo> python ...` with the tests'
+    interpreter in that repository: no test runs the machine's runtime nor its uv."""
+    home = tmp_path / "runtime"
+    home.mkdir()
+    bin_dir = tmp_path / "fake-bin"
+    bin_dir.mkdir()
+    fake = Path(__file__).resolve().parent / "fake_hermes.py"
+    runtime = bin_dir / "hermes"
+    runtime.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{fake}" "$@"\n', encoding="utf-8")
+    uv = bin_dir / "uv"
+    uv.write_text(
+        "#!/bin/sh\n"
+        '[ "$1" = run ] && [ "$2" = --directory ] || { echo "fake uv: unexpected call $*" >&2; exit 97; }\n'
+        'cd "$3" || exit 97\n'
+        "shift 3\n"
+        f'if [ "$1" = python ]; then shift; exec "{sys.executable}" "$@"; fi\n'
+        'exec "$@"\n',
+        encoding="utf-8",
+    )
+    for command in (runtime, uv):
+        command.chmod(0o755)
+    calls = tmp_path / "runtime-calls.jsonl"
+    monkeypatch.setenv(RUNTIME_HOME_VAR, str(home))
+    monkeypatch.setenv("FAKE_RUNTIME_CALLS", str(calls))
+    monkeypatch.delenv("FAKE_RUNTIME_FAIL", raising=False)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    return FakeRuntime(home, calls, monkeypatch)

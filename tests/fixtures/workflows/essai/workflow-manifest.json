@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "key": "essai",
+  "stations": [
+    {
+      "key": "preparer",
+      "nature": "code",
+      "command": ["python", "commands/preparer.py"],
+      "timeout_seconds": 60
+    },
+    {
+      "key": "revue",
+      "nature": "owner"
+    },
+    {
+      "key": "clore",
+      "nature": "code",
+      "command": ["python", "commands/clore.py"],
+      "timeout_seconds": 60
+    }
+  ]
+}
