@@ -112,7 +112,8 @@ def js_trim(text: str) -> str:
     return text.strip(_JS_SPACE_CHARS)
 
 
-def _utf16_length(text: str) -> int:
+def utf16_length(text: str) -> int:
+    """The length of a text in UTF-16 code units, as JavaScript counts it."""
     return len(text.encode("utf-16-le", "surrogatepass")) // 2
 
 
@@ -125,7 +126,7 @@ def quote(text: str | None) -> str | None:
     if not text:
         return None
     clean = js_trim(redact_secrets(text))
-    return f"{utf16_slice(clean, 299)}…" if _utf16_length(clean) > 300 else clean
+    return f"{utf16_slice(clean, 299)}…" if utf16_length(clean) > 300 else clean
 
 
 def whole(value):

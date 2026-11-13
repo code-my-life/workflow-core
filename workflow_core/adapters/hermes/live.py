@@ -31,6 +31,7 @@ from workflow_core.adapters.hermes.agent_log import (
 from workflow_core.adapters.hermes.board import HermesBoardReader, hermes_home
 from workflow_core.adapters.hermes.sessions import SessionReader, open_session_base, session_base
 from workflow_core.adapters.hermes.texts import TEXTS
+from workflow_core.adapters.hermes.values import as_number
 from workflow_core.clock import iso_ms
 from workflow_core.config import Workflow
 from workflow_core.model.facts import CardFacts, RunFact
@@ -244,10 +245,6 @@ def _day(seconds: float) -> str:
     return datetime.fromtimestamp(seconds, UTC).strftime("%Y-%m-%d")
 
 
-def _number(value: object) -> float:
-    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else 0.0
-
-
 class HermesLiveReader:
     """Reads the live state, the activity and the usage of a workflow's agents under one Hermès home (`LiveReader`).
     Each reading opens its own connections and closes them."""
@@ -348,7 +345,7 @@ class HermesLiveReader:
                     kind=described.kind,
                     label=described.label,
                     detail=described.detail,
-                    started_at=iso_ms(_number(last_call["timestamp"])),
+                    started_at=iso_ms(as_number(last_call["timestamp"])),
                 )
                 return ("cli" if described.kind == "cli" else "tool"), action, described.lane_model
         last = db.execute(LAST_MESSAGE_SQL, (session,)).fetchone()
@@ -357,7 +354,7 @@ class HermesLiveReader:
                 kind="llm",
                 label="llm",
                 detail=model.name if model is not None else None,
-                started_at=iso_ms(_number(last["timestamp"])),
+                started_at=iso_ms(as_number(last["timestamp"])),
             )
             return "thinking", action, None
         return "thinking", None, None
@@ -491,7 +488,7 @@ class HermesLiveReader:
                         rows = db.execute(USAGE_SQL, (since,)).fetchall()
             for row in rows:
                 key = (str(row["model"]), str(row["provider"] or "?"))
-                tokens_in, tokens_out = int(_number(row["input"])), int(_number(row["output"]))
+                tokens_in, tokens_out = int(as_number(row["input"])), int(as_number(row["output"]))
                 usage = models.setdefault(
                     key,
                     ModelUsage(
@@ -505,17 +502,17 @@ class HermesLiveReader:
                         errors=0,
                     ),
                 )
-                usage.calls += int(_number(row["calls"]))
+                usage.calls += int(as_number(row["calls"]))
                 usage.input_tokens += tokens_in
                 usage.output_tokens += tokens_out
-                usage.cost_usd = round((usage.cost_usd or 0.0) + _number(row["cost"]), 6)
+                usage.cost_usd = round((usage.cost_usd or 0.0) + as_number(row["cost"]), 6)
                 by_agent[agent] = by_agent.get(agent, 0) + tokens_in + tokens_out
                 by_day.setdefault(str(row["day"]), [0, 0])[0] += tokens_in + tokens_out
                 line = row_of(str(row["day"]), agent, key[0], key[1], 0.0)
-                line.calls += int(_number(row["calls"]))
+                line.calls += int(as_number(row["calls"]))
                 line.input_tokens += tokens_in
                 line.output_tokens += tokens_out
-                line.cost_usd = round((line.cost_usd or 0.0) + _number(row["cost"]), 6)
+                line.cost_usd = round((line.cost_usd or 0.0) + as_number(row["cost"]), 6)
             for entry in self.journal.entries(agent):
                 if entry.kind != "api_failed" or entry.at < since:
                     continue

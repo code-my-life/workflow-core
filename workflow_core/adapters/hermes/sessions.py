@@ -15,8 +15,9 @@ from pathlib import Path
 from urllib.parse import quote as url_quote
 
 from workflow_core.adapters.hermes.paths import CARD, NAME, safe_file
+from workflow_core.adapters.hermes.values import as_number
 from workflow_core.model.facts import RunFact, SessionFacts, ToolCallFact, ToolResultFact
-from workflow_core.text import js_regex, js_trim, redact_secrets, utf16_slice
+from workflow_core.text import js_regex, js_trim, redact_secrets, utf16_length, utf16_slice
 
 # The session `hermes --resume` names in a run's error or output.
 RESUME = js_regex(r"hermes --resume (\d{8}_\d{6}_[0-9a-f]{6}) -p (\S+)")
@@ -77,15 +78,11 @@ def resume_session_of(text: str | None) -> str | None:
     return match[1] if match else None
 
 
-def _number(value: object) -> float:
-    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else 0.0
-
-
 def _call_fact(row: sqlite3.Row) -> ToolCallFact:
     raw = _text(row["input"])
     trimmed = js_trim(raw) if raw is not None else ""
     return ToolCallFact(
-        at=_number(row["at"]),
+        at=as_number(row["at"]),
         tool=_text(row["tool"]) if _text(row["tool"]) is not None else "?",
         input=utf16_slice(redact_secrets(trimmed), INPUT_MAX) if trimmed else None,
         call_id=_text(row["id"]) if _text(row["id"]) is not None else _text(row["call_id"]),
@@ -94,10 +91,10 @@ def _call_fact(row: sqlite3.Row) -> ToolCallFact:
 
 def _result_fact(row: sqlite3.Row) -> ToolResultFact:
     head = _text(row["head"]) or ""
-    size = row["size"] if isinstance(row["size"], int) else len(head.encode("utf-16-le", "surrogatepass")) // 2
+    size = row["size"] if isinstance(row["size"], int) else utf16_length(head)
     content = f"{head}\n…\n{_text(row['tail']) or ''}" if size > RESULT_HEAD + RESULT_TAIL else head
     return ToolResultFact(
-        at=_number(row["at"]),
+        at=as_number(row["at"]),
         tool=_text(row["tool_name"]) if _text(row["tool_name"]) is not None else "?",
         call_id=_text(row["tool_call_id"]),
         content=redact_secrets(content),

@@ -23,6 +23,7 @@ from workflow_core.adapters.hermes.paths import CARD, NAME, safe_entry
 from workflow_core.adapters.hermes.profiles import MAX_CONFIG_BYTES, parse_capped
 from workflow_core.adapters.hermes.sessions import open_session_base, run_session
 from workflow_core.adapters.hermes.texts import TEXTS
+from workflow_core.adapters.hermes.values import as_record, as_strings, as_text, dotted
 from workflow_core.config import Workflow
 from workflow_core.diagnosis.support import is_refusal
 from workflow_core.model.data import (
@@ -36,7 +37,7 @@ from workflow_core.model.data import (
     TextValue,
 )
 from workflow_core.model.facts import CardFacts, RunFact
-from workflow_core.text import redact_secrets
+from workflow_core.text import redact_secrets, utf16_length
 
 # Where Claude Code keeps its sessions: one folder per working folder, one JSONL file per session.
 CLAUDE_VARIABLE = "CLAUDE_PROJECTS"
@@ -86,10 +87,6 @@ def iso_ms(ms: float) -> str:
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
 
 
-def _utf16_length(text: str) -> int:
-    return len(text.encode("utf-16-le", "surrogatepass")) // 2
-
-
 def clip(value: object) -> str | None:
     """A transcript entry's text as factory-live clips it: secrets masked, cut at 20 000 characters, the rest
     counted."""
@@ -97,7 +94,7 @@ def clip(value: object) -> str | None:
         return None
     raw = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     clean = redact_secrets(raw)
-    size = _utf16_length(clean)
+    size = utf16_length(clean)
     if size <= TEXT_MAX:
         return clean
     head = clean.encode("utf-16-le", "surrogatepass")[: TEXT_MAX * 2].decode("utf-16-le", "ignore")
@@ -112,24 +109,6 @@ def _json_object(text: object) -> dict:
     except ValueError:
         return {}
     return value if isinstance(value, dict) else {}
-
-
-def _record(value: Any) -> dict:
-    return value if isinstance(value, dict) else {}
-
-
-def _strings(value: Any) -> list[str]:
-    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
-
-
-def _str(value: Any) -> str | None:
-    return value.strip() if isinstance(value, str) and value.strip() else None
-
-
-def _dotted(value: Any, key: str) -> Any:
-    for part in key.split("."):
-        value = value.get(part) if isinstance(value, dict) else None
-    return value
 
 
 def _cell(value: Any) -> str | int | float | bool | None:
@@ -267,7 +246,7 @@ class HermesDataReader:
 
     @staticmethod
     def _field(document: Any, field: DataField):
-        value = _dotted(document, field.key)
+        value = dotted(document, field.key)
         if value is None or value == "":
             return None
         if field.kind == "text":
@@ -277,7 +256,7 @@ class HermesDataReader:
         if field.kind == "status":
             text = value if isinstance(value, str) else str(value)
             return StatusValue(label=field.label, status=field.statuses.get(text, "unknown"), text=text)
-        rows = [[_cell(_dotted(row, column)) for column in field.columns] for row in value if isinstance(row, dict)]
+        rows = [[_cell(dotted(row, column)) for column in field.columns] for row in value if isinstance(row, dict)]
         headers = field.headers if len(field.headers) == len(field.columns) else list(field.columns)
         return TableValue(label=field.label, columns=headers, rows=rows) if isinstance(value, list) else None
 
@@ -369,7 +348,7 @@ class HermesDataReader:
                     entries.append([at, "assistant", clip(content), None, None, None])
                 calls = _json_list(row["tool_calls"])
                 for call in calls:
-                    function = _record(_record(call).get("function"))
+                    function = as_record(as_record(call).get("function"))
                     arguments = function.get("arguments")
                     name = function.get("name")
                     entries.append(
@@ -446,8 +425,8 @@ class HermesDataReader:
             manifest_path = self._entry(workflow, source, params, "file")
             manifest = parse_capped(manifest_path, MAX_CONFIG_BYTES) if manifest_path is not None else None
             key = _PLACEHOLDER.sub(lambda match: params.get(match[1], ""), declaration.plugins_key)
-            found = _dotted(manifest, key) if manifest is not None else None
-            plugins = _strings(found) if isinstance(found, list) else None
+            found = dotted(manifest, key) if manifest is not None else None
+            plugins = as_strings(found) if isinstance(found, list) else None
         rows = config_drift(profile_config_of(live), profile_config_of(repo), plugins)
         return [TableValue(label=declaration.label, columns=DRIFT_COLUMNS, rows=rows)]
 
@@ -484,7 +463,7 @@ def _lane(content: str, stem: str) -> tuple[float | None, str, list[list]]:
             first = at
         if record.get("type") not in ("user", "assistant"):
             continue
-        message = _record(record.get("message"))
+        message = as_record(record.get("message"))
         model = message.get("model") if isinstance(message.get("model"), str) else None
         content_parts = message.get("content")
         parts = (
@@ -521,27 +500,27 @@ def _parse_ms(text: str) -> float:
 
 def profile_config_of(yaml: dict) -> dict:
     """What the drift compares of an agent's configuration (factory-live's `profileConfigOf`, profiles.ts)."""
-    model = _record(yaml.get("model"))
-    agent = _record(yaml.get("agent"))
-    toolsets = _record(yaml.get("platform_toolsets"))
-    hooks = _record(yaml.get("hooks"))
-    name = _str(model.get("default"))
+    model = as_record(yaml.get("model"))
+    agent = as_record(yaml.get("agent"))
+    toolsets = as_record(yaml.get("platform_toolsets"))
+    hooks = as_record(yaml.get("hooks"))
+    name = as_text(model.get("default"))
     fallbacks = yaml.get("fallback_providers") if isinstance(yaml.get("fallback_providers"), list) else []
     return {
-        "model": (name, _str(model.get("provider")) or "?") if name else None,
-        "baseUrl": _str(model.get("base_url")),
+        "model": (name, as_text(model.get("provider")) or "?") if name else None,
+        "baseUrl": as_text(model.get("base_url")),
         "fallbacks": [
-            (_str(_record(entry).get("model")), _str(_record(entry).get("provider")) or "?")
+            (as_text(as_record(entry).get("model")), as_text(as_record(entry).get("provider")) or "?")
             for entry in fallbacks
-            if _str(_record(entry).get("model"))
+            if as_text(as_record(entry).get("model"))
         ],
-        "effort": _str(agent.get("reasoning_effort")),
-        "toolsets": _strings(toolsets.get("cli")),
-        "plugins": _strings(_record(yaml.get("plugins")).get("enabled")),
+        "effort": as_text(agent.get("reasoning_effort")),
+        "toolsets": as_strings(toolsets.get("cli")),
+        "plugins": as_strings(as_record(yaml.get("plugins")).get("enabled")),
         "outboundHooks": [
             name
             for entry in (hooks.get("outbound") if isinstance(hooks.get("outbound"), list) else [])
-            if (name := _str(_record(entry).get("name")))
+            if (name := as_text(as_record(entry).get("name")))
         ],
     }
 
