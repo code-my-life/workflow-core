@@ -15,8 +15,7 @@ import os
 import re
 import sqlite3
 from collections import deque
-from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,7 +28,13 @@ from workflow_core.adapters.hermes.agent_log import (
     zoned_epoch,
 )
 from workflow_core.adapters.hermes.board import HermesBoardReader, hermes_home
-from workflow_core.adapters.hermes.sessions import SessionReader, open_session_base, session_base
+from workflow_core.adapters.hermes.sessions import (
+    SessionReader,
+    open_session_base,
+    run_session,
+    session_base,
+    session_db,
+)
 from workflow_core.adapters.hermes.texts import TEXTS
 from workflow_core.adapters.hermes.values import as_number
 from workflow_core.clock import iso_ms
@@ -277,19 +282,6 @@ class HermesLiveReader:
         self.sessions = SessionReader(home)
         self.journal = LiveJournal(home, time_zone)
 
-    @contextmanager
-    def _session_db(self, agent: str) -> Iterator[sqlite3.Connection | None]:
-        path = session_base(self.home, agent)
-        db = None
-        if path is not None:
-            with suppress(sqlite3.Error):
-                db = open_session_base(path)
-        try:
-            yield db
-        finally:
-            if db is not None:
-                db.close()
-
     # --- live -----------------------------------------------------------------------------------------------------
 
     def live(self, workflow: Workflow) -> list[AgentLive]:
@@ -308,11 +300,11 @@ class HermesLiveReader:
     def _agent_live(self, agent: str, facts: CardFacts, run: RunFact | None) -> AgentLive:
         card = facts.card
         state, action, model, lane_model = "thinking", None, None, None
-        with self._session_db(agent) as db:
+        with session_db(self.home, agent) as db:
             session = None
             if db is not None and run is not None:
                 with suppress(sqlite3.Error):
-                    session = self.sessions._session_of(db, card.id, run)
+                    session = run_session(db, card.id, run)
             if session is not None:
                 with suppress(sqlite3.Error):
                     model = self._model(agent, db, session)
@@ -503,7 +495,7 @@ class HermesLiveReader:
             )
 
         for agent in sorted(agents):
-            with self._session_db(agent) as db:
+            with session_db(self.home, agent) as db:
                 rows = []
                 if db is not None:
                     with suppress(sqlite3.Error):

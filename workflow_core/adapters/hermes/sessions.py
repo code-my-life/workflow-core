@@ -113,6 +113,25 @@ def open_session_base(path: Path) -> sqlite3.Connection:
     return db
 
 
+@contextmanager
+def session_db(home: Path, agent: str) -> Iterator[sqlite3.Connection | None]:
+    """An agent's session base, opened read-only for the block and closed after it; `None` when it is missing or
+    cannot be opened."""
+    path = session_base(home, agent)
+    if path is None:
+        yield None
+        return
+    try:
+        db = open_session_base(path)
+    except sqlite3.Error:
+        yield None
+        return
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 def run_session(db: sqlite3.Connection, card: str, run: RunFact) -> str | None:
     """A run's session, never guessed: the one Hermès noted, else the one of `hermes --resume`, else the only
     session launched with the run whose first message is « work kanban task <card> »."""
@@ -137,34 +156,15 @@ class SessionReader:
     def __init__(self, home: Path) -> None:
         self.home = home
 
-    @contextmanager
-    def _db(self, agent: str) -> Iterator[sqlite3.Connection | None]:
-        path = session_base(self.home, agent)
-        if path is None:
-            yield None
-            return
-        try:
-            db = open_session_base(path)
-        except sqlite3.Error:
-            yield None
-            return
-        try:
-            yield db
-        finally:
-            db.close()
-
-    def _session_of(self, db: sqlite3.Connection, card: str, run: RunFact) -> str | None:
-        return run_session(db, card, run)
-
     def run_facts(self, agent: str, card: str, runs: list[RunFact]) -> list[SessionFacts] | None:
-        with self._db(agent) as db:
+        with session_db(self.home, agent) as db:
             if db is None:
                 return None
             try:
                 facts: list[SessionFacts] = []
                 seen: set[str] = set()
                 for run in runs:
-                    session = self._session_of(db, card, run)
+                    session = run_session(db, card, run)
                     if not session or session in seen:
                         continue
                     seen.add(session)
@@ -181,7 +181,7 @@ class SessionReader:
             return facts
 
     def open_sessions(self, agent: str, at: float) -> list[str] | None:
-        with self._db(agent) as db:
+        with session_db(self.home, agent) as db:
             if db is None:
                 return None
             try:
