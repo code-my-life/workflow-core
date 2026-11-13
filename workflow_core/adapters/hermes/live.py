@@ -21,13 +21,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from workflow_core.adapters.hermes.agent_log import (
-    DEFAULT_TIME_ZONE,
-    TIME_ZONE_VARIABLE,
     journal_paths,
     parse_log_line,
     zoned_epoch,
 )
-from workflow_core.adapters.hermes.board import HermesBoardReader, hermes_home
+from workflow_core.adapters.hermes.board import HermesBoardReader, hermes_home, make_board_reader
 from workflow_core.adapters.hermes.sessions import (
     SessionReader,
     open_session_base,
@@ -593,9 +591,7 @@ class HermesLiveWatcher:
 
 def make_live_reader(environ: dict[str, str] | None = None) -> HermesLiveReader:
     """The live reader of the Hermès home named by `HERMES_HOME`, its journals dated in the zone of `HERMES_TZ`."""
-    env = os.environ if environ is None else environ
-    home = hermes_home(env)
-    return HermesLiveReader(home, env.get(TIME_ZONE_VARIABLE) or DEFAULT_TIME_ZONE, HermesBoardReader(home))
+    return make_board_reader(environ).live_reader(environ)
 
 
 def make_live_watcher(environ: dict[str, str] | None = None) -> HermesLiveWatcher:
