@@ -181,9 +181,9 @@ class HermesDataReader:
             return None
         return root, parts
 
-    def _entry(self, workflow: Workflow, declaration: DataDeclaration, params: dict[str, str], kind) -> Path | None:
+    def _entry(self, workflow: Workflow, paths: list[str], params: dict[str, str], kind) -> Path | None:
         """The first declared place found: a file or a folder under its root, without a symbolic link."""
-        for pattern in declaration.paths:
+        for pattern in paths:
             found = self._parts(workflow, pattern, params)
             if found is None:
                 continue
@@ -232,7 +232,7 @@ class HermesDataReader:
         return self._claude(workflow, declaration, params, run)
 
     def _json(self, workflow: Workflow, declaration: DataDeclaration, params: dict[str, str]):
-        path = self._entry(workflow, declaration, params, "file")
+        path = self._entry(workflow, declaration.paths, params, "file")
         if path is None:
             return []
         label = declaration.label
@@ -264,10 +264,8 @@ class HermesDataReader:
         """A folder of numbered texts, in their order; a path ending in `*` reads its newest subfolder, or the one of
         the subject's commit (`sha`) when it names one."""
         newest_of = any(pattern.endswith("/*") for pattern in declaration.paths)
-        folder_declaration = declaration.model_copy(
-            update={"path": [pattern.removesuffix("/*") for pattern in declaration.paths]}
-        )
-        folder = self._entry(workflow, folder_declaration, params, "dir")
+        folder_paths = [pattern.removesuffix("/*") for pattern in declaration.paths]
+        folder = self._entry(workflow, folder_paths, params, "dir")
         if folder is None:
             return []
         if newest_of and params.get("sha"):
@@ -309,7 +307,7 @@ class HermesDataReader:
 
     def _log(self, workflow: Workflow, declaration: DataDeclaration, params: dict[str, str]):
         """A raw log by its end, ANSI sequences kept for a terminal's rendering."""
-        path = self._entry(workflow, declaration, params, "file")
+        path = self._entry(workflow, declaration.paths, params, "file")
         if path is None:
             return []
         with path.open("rb") as file:
@@ -322,7 +320,7 @@ class HermesDataReader:
 
     def _session(self, workflow: Workflow, declaration: DataDeclaration, params: dict[str, str], run: _Run):
         """The agent's session of the run, never guessed, as factory-live transcribes it (sessions.ts)."""
-        path = self._entry(workflow, declaration, params, "file")
+        path = self._entry(workflow, declaration.paths, params, "file")
         if path is None:
             return []
         db = open_session_base(path)
@@ -383,7 +381,7 @@ class HermesDataReader:
     def _claude(self, workflow: Workflow, declaration: DataDeclaration, params: dict[str, str], run: _Run):
         """Claude Code's sessions launched from the card's working folder during the run (files.ts): one table per
         session, named by its last custom title, the oldest first."""
-        projects = self._entry(workflow, declaration, params, "dir")
+        projects = self._entry(workflow, declaration.paths, params, "dir")
         workspace = run.card.workspace_path
         if projects is None or not workspace:
             return []
@@ -411,9 +409,8 @@ class HermesDataReader:
     def _drift(self, workflow: Workflow, declaration: DataDeclaration, params: dict[str, str]):
         """The differences, field by field, between an agent's configuration in service (`path`) and the one of its
         workflow's repository (`compare`), as factory-live's drift (drift.ts)."""
-        live_path = self._entry(workflow, declaration, params, "file")
-        compare = declaration.model_copy(update={"path": declaration.compare or ""})
-        repo_path = self._entry(workflow, compare, params, "file") if declaration.compare else None
+        live_path = self._entry(workflow, declaration.paths, params, "file")
+        repo_path = self._entry(workflow, [declaration.compare], params, "file") if declaration.compare else None
         if live_path is None or repo_path is None:
             return []
         live, repo = parse_capped(live_path, MAX_CONFIG_BYTES), parse_capped(repo_path, MAX_CONFIG_BYTES)
@@ -421,8 +418,7 @@ class HermesDataReader:
             return [StatusValue(label=declaration.label, status="error", text="illisible : configuration")]
         plugins = None
         if declaration.plugins_from and declaration.plugins_key:
-            source = declaration.model_copy(update={"path": declaration.plugins_from})
-            manifest_path = self._entry(workflow, source, params, "file")
+            manifest_path = self._entry(workflow, [declaration.plugins_from], params, "file")
             manifest = parse_capped(manifest_path, MAX_CONFIG_BYTES) if manifest_path is not None else None
             key = _PLACEHOLDER.sub(lambda match: params.get(match[1], ""), declaration.plugins_key)
             found = dotted(manifest, key) if manifest is not None else None
