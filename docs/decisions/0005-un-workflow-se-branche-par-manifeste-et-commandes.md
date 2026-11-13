@@ -1,6 +1,6 @@
 # ADR 0005 : un workflow se branche par manifeste et commandes
 
-Date : 2026-11-11. Statut : accepté. Reprise de la décision AD-5 de l'architecture du chantier archi-studio
+Date : 2026-11-11. Statut : accepté, amendé le 2026-11-12. Reprise de la décision AD-5 de l'architecture du chantier archi-studio
 (2026-11-11), qui la donne pour adoptée.
 
 ## Contexte
@@ -18,3 +18,7 @@ L'architecture du chantier ne détaille pas d'option écartée pour cette décis
 ## Conséquences
 
 Exigences et dépôts tenus par cette décision : R5, R15, tous les workflows.
+
+## Amendement du 2026-11-12
+
+Reprise de l'amendement AD-5 de l'architecture du chantier archi-studio (2026-11-12). Le manifeste est un JSON versionné (`schema_version`), à la racine du dépôt du workflow (`workflow-manifest.json`). `config/workflows.toml` ne garde, pour un workflow branché par manifeste, que sa clé et le chemin de son dépôt. Les entrées de `factory` et `studio` gardent leur forme actuelle jusqu'à leur étape de migration.

@@ -1,6 +1,6 @@
 # ADR 0016 : un élément naît d'une issue, et garde une identité unique
 
-Date : 2026-11-11. Statut : accepté. Reprise de la décision AD-16 de l'architecture du chantier archi-studio
+Date : 2026-11-11. Statut : accepté, amendé le 2026-11-12. Reprise de la décision AD-16 de l'architecture du chantier archi-studio
 (2026-11-11), qui la donne pour adoptée.
 
 ## Contexte
@@ -18,3 +18,7 @@ L'architecture du chantier ne détaille pas d'option écartée pour cette décis
 ## Conséquences
 
 Exigences et dépôts tenus par cette décision : R5, R13, chemin de bout en bout.
+
+## Amendement du 2026-11-12
+
+Reprise de l'amendement AD-16 de l'architecture du chantier archi-studio (2026-11-12). L'identifiant d'un élément, `<clé du workflow>:<id local>`, est la clé d'idempotence de sa carte racine, et l'adresse de son issue est écrite dans le corps de cette carte. Toute carte fille porte l'identifiant de l'élément dans son corps et la clé d'idempotence `<élément>/<station>/<passage>`, sans aucun lien d'Hermès vers la carte racine.

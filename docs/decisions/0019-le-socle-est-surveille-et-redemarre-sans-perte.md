@@ -1,6 +1,6 @@
 # ADR 0019 : le socle est surveillé, et redémarre sans perte
 
-Date : 2026-11-11. Statut : accepté. Reprise de la décision AD-19 de l'architecture du chantier archi-studio
+Date : 2026-11-11. Statut : accepté, amendé le 2026-11-12. Reprise de la décision AD-19 de l'architecture du chantier archi-studio
 (2026-11-11), qui la donne pour adoptée.
 
 ## Contexte
@@ -18,3 +18,7 @@ L'architecture du chantier ne détaille pas d'option écartée pour cette décis
 ## Conséquences
 
 Exigences et dépôts tenus par cette décision : R3, R4, R10, R19.
+
+## Amendement du 2026-11-12
+
+Reprise de l'amendement AD-19 de l'architecture du chantier archi-studio (2026-11-12). Le socle revérifie la version d'Hermès toutes les 5 minutes, et avant toute écriture après un redémarrage. Un changement de version le repasse en observateur jusqu'à un test de contrat réussi.

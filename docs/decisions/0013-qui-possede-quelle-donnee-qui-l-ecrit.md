@@ -1,6 +1,6 @@
 # ADR 0013 : qui possède quelle donnée, qui l'écrit
 
-Date : 2026-11-11. Statut : accepté. Reprise de la décision AD-13 de l'architecture du chantier archi-studio
+Date : 2026-11-11. Statut : accepté, amendé le 2026-11-12. Reprise de la décision AD-13 de l'architecture du chantier archi-studio
 (2026-11-11), qui la donne pour adoptée.
 
 ## Contexte
@@ -29,3 +29,7 @@ L'architecture du chantier ne détaille pas d'option écartée pour cette décis
 ## Conséquences
 
 Exigences et dépôts tenus par cette décision : tous.
+
+## Amendement du 2026-11-12
+
+Reprise de l'amendement AD-13 de l'architecture du chantier archi-studio (2026-11-12). L'adaptateur Hermès du socle est le seul écrivain de la carte racine d'un élément. L'agent d'une station `agent` écrit sur la carte fille qui lui est confiée et sur les cartes qu'il en crée ; il ne relie jamais une carte à la carte racine.
