@@ -359,7 +359,7 @@ class HermesLiveReader:
                     detail=described.detail,
                     started_at=iso_ms(as_number(last_call["timestamp"])),
                 )
-                return ("cli" if described.kind == "cli" else "tool"), action, described.lane_model
+                return described.kind, action, described.lane_model
         last = db.execute(LAST_MESSAGE_SQL, (session,)).fetchone()
         if last is not None and last["role"] in ("tool", "user"):
             action = LiveAction(
