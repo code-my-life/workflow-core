@@ -14,7 +14,7 @@ import contextlib
 import json
 import os
 import sqlite3
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -140,6 +140,20 @@ class EventJournal:
         )
         return event
 
+    @contextlib.contextmanager
+    def _transaction(self) -> Iterator[list[dict]]:
+        """One write transaction, committed at the end of the block; when it fails, the events appended to the list it
+        gives are taken back with it."""
+        events: list[dict] = []
+        self._db.execute("BEGIN")
+        try:
+            yield events
+            self._db.execute("COMMIT")
+        except BaseException:
+            self._db.execute("ROLLBACK")
+            self.last -= len(events)
+            raise
+
     def note(self, kind: str, workflow: str | None, item: str | None, state: dict | list) -> dict:
         """One `live`, `activity` or `machine` event: the live state of an agent, a new fact of the board, or the
         machine's checks."""
@@ -152,20 +166,13 @@ class EventJournal:
         changed = [item for item in items if known.get(item["id"]) != _canonical(item)]
         if not changed:
             return []
-        events = []
-        self._db.execute("BEGIN")
-        try:
+        with self._transaction() as events:
             for item in changed:
                 self._db.execute(
                     "INSERT OR REPLACE INTO items (workflow, item, state) VALUES (?, ?, ?)",
                     (workflow, item["id"], _canonical(item)),
                 )
                 events.append(self._append("changed", workflow, item["id"], item))
-            self._db.execute("COMMIT")
-        except BaseException:
-            self._db.execute("ROLLBACK")
-            self.last -= len(events)
-            raise
         return events
 
     def record_interventions(self, workflow: str, current: list[dict]) -> list[dict]:
@@ -179,9 +186,7 @@ class EventJournal:
         closed = [(found_id, item) for found_id, item in known.items() if found_id not in ids]
         if seeded is not None and not opened and not closed:
             return []
-        events = []
-        self._db.execute("BEGIN")
-        try:
+        with self._transaction() as events:
             for found_id, item in closed:
                 self._db.execute("DELETE FROM interventions WHERE workflow = ? AND id = ?", (workflow, found_id))
                 if seeded is not None:
@@ -194,11 +199,6 @@ class EventJournal:
                 if seeded is not None:
                     events.append(self._append("intervention_opened", workflow, found["item"], found))
             self._db.execute("INSERT OR IGNORE INTO interventions_known (workflow) VALUES (?)", (workflow,))
-            self._db.execute("COMMIT")
-        except BaseException:
-            self._db.execute("ROLLBACK")
-            self.last -= len(events)
-            raise
         return events
 
     def events_after(self, n: int) -> list[dict]:
@@ -281,7 +281,7 @@ class EventHub:
             self.journal = EventJournal.rebuild(self.journal_path, int(self.clock()), self._current_items())
             return True
 
-    def _read_live(self, key: str, workflow: Workflow) -> tuple[dict, dict] | None:
+    def _read_live(self, workflow: Workflow) -> tuple[dict, dict] | None:
         try:
             agents = self.live.live(workflow)
             facts = self.live.activity(workflow, ACTIVITY_KEPT, self.clock())
@@ -297,12 +297,12 @@ class EventHub:
         if self.live is None:
             return
         for key, workflow in self.workflows.items():
-            read = self._read_live(key, workflow)
+            read = self._read_live(workflow)
             if read is not None:
                 self._live_known[key], self._activity_known[key] = read
 
     def _live_events(self, key: str, workflow: Workflow) -> list[dict]:
-        read = self._read_live(key, workflow)
+        read = self._read_live(workflow)
         if read is None:
             return []
         agents, facts = read
@@ -390,16 +390,19 @@ class EventHub:
                 live_changed = False
             if board_changed or live_changed:
                 events += self._live_events(key, workflow)
+        self._send(events)
+        return events
+
+    def _send(self, events: list[dict]) -> None:
+        """Hand events to every open stream, in their order."""
         for event in events:
             for queue in self._subscribers:
                 queue.put_nowait(event)
-        return events
 
     def publish(self, kind: str, state: list) -> dict:
         """An event of the core itself, outside any workflow (the machine's checks), sent to every open stream."""
         event = self.journal.note(kind, None, None, state)
-        for queue in self._subscribers:
-            queue.put_nowait(event)
+        self._send([event])
         return event
 
     async def _probe(self) -> None:

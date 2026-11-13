@@ -15,28 +15,17 @@ from workflow_core.adapters.hermes.paths import safe_file
 from workflow_core.adapters.hermes.profiles import (
     MAX_CONFIG_BYTES,
     ProfileReader,
-    _parts,
     config_path,
+    folder_parts,
     parse_capped,
     profile_facts_of,
 )
 from workflow_core.adapters.hermes.texts import TERMS
+from workflow_core.adapters.hermes.values import as_record, as_strings, as_text
 from workflow_core.config import Workflow
 from workflow_core.diagnosis.guards import guard_risks, hook_timeouts_by_plugin
 from workflow_core.model.agents import Agent, AgentLimit, AgentModel, AgentPlugin, GuardRisk, KanbanSettings
 from workflow_core.model.facts import ProfileFacts
-
-
-def _record(value: Any) -> dict:
-    return value if isinstance(value, dict) else {}
-
-
-def _strings(value: Any) -> list[str]:
-    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
-
-
-def _text(value: Any) -> str | None:
-    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def _int(value: Any) -> int | None:
@@ -44,9 +33,9 @@ def _int(value: Any) -> int | None:
 
 
 def _model(entry: Any, name_key: str) -> AgentModel | None:
-    record = _record(entry)
-    name = _text(record.get(name_key))
-    return AgentModel(name=name, provider=_text(record.get("provider")) or "?") if name else None
+    record = as_record(entry)
+    name = as_text(record.get(name_key))
+    return AgentModel(name=name, provider=as_text(record.get("provider")) or "?") if name else None
 
 
 def _limits(facts: ProfileFacts | None) -> list[AgentLimit]:
@@ -91,14 +80,13 @@ class HermesAgentsReader:
 
     def _manifest(self, workflow: Workflow) -> dict | None:
         repo = workflow.repo_path
-        parts = _parts(workflow.manifest) if workflow.manifest else None
+        parts = folder_parts(workflow.manifest) if workflow.manifest else None
         if repo is None or parts is None:
             return None
         path = safe_file(repo, *parts)
         return parse_capped(path, MAX_CONFIG_BYTES) if path is not None else None
 
-    def _names(self, workflow: Workflow, manifest: dict | None) -> list[str]:
-        declared = _record(manifest.get("profiles")) if manifest is not None else {}
+    def _names(self, workflow: Workflow, declared: dict) -> list[str]:
         if declared:
             return sorted(name for name in declared if isinstance(name, str))
         found: set[str] = set()
@@ -111,7 +99,7 @@ class HermesAgentsReader:
         config = parse_capped(path, MAX_CONFIG_BYTES) if path is not None else None
         if config is None:
             return None
-        kanban = _record(config.get("kanban"))
+        kanban = as_record(config.get("kanban"))
         return KanbanSettings(
             max_in_progress=_int(kanban.get("max_in_progress")),
             max_in_progress_per_profile=_int(kanban.get("max_in_progress_per_profile")),
@@ -121,10 +109,10 @@ class HermesAgentsReader:
         self, workflow: Workflow, days: int, now: float
     ) -> tuple[KanbanSettings | None, list[Agent], list[GuardRisk]]:
         manifest = self._manifest(workflow)
-        declared = _record(manifest.get("profiles")) if manifest is not None else {}
+        declared = as_record(manifest.get("profiles")) if manifest is not None else {}
         read = [
-            self._agent(workflow, name, _strings(_record(declared.get(name)).get("skills")), days, now)
-            for name in self._names(workflow, manifest)
+            self._agent(workflow, name, as_strings(as_record(declared.get(name)).get("skills")), days, now)
+            for name in self._names(workflow, declared)
         ]
         # The guards at risk, from the facts of the agents served by this very answer (issue #137).
         facts = [agent_facts for _, agent_facts in read if agent_facts is not None]
@@ -160,8 +148,8 @@ class HermesAgentsReader:
                 for entry in (fallbacks if isinstance(fallbacks, list) else [])
                 if (model := _model(entry, "model"))
             ],
-            effort=_text(_record(config.get("agent")).get("reasoning_effort")),
-            toolsets=_strings(_record(config.get("platform_toolsets")).get("cli")),
+            effort=as_text(as_record(config.get("agent")).get("reasoning_effort")),
+            toolsets=as_strings(as_record(config.get("platform_toolsets")).get("cli")),
             plugins=[
                 AgentPlugin(
                     name=plugin,
@@ -170,6 +158,6 @@ class HermesAgentsReader:
                 )
                 for plugin in facts.plugins
             ],
-            mcp=sorted(key for key in _record(config.get("mcp_servers")) if isinstance(key, str)),
+            mcp=sorted(key for key in as_record(config.get("mcp_servers")) if isinstance(key, str)),
             limits=_limits(facts),
         ), facts

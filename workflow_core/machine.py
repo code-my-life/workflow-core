@@ -16,7 +16,6 @@ import urllib.request
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
-from datetime import UTC, datetime
 from pathlib import Path
 
 from workflow_core.model.checks import (
@@ -25,26 +24,15 @@ from workflow_core.model.checks import (
     DeclaredCheck,
     MachineCheck,
     RuntimeChecks,
+    machine_check,
 )
 
 # The command each kind of tool check runs, found on the PATH, else at the declared target.
 TOOLS = {"vram": "nvidia-smi", "funnel": "tailscale"}
 
 
-def iso(at: float) -> str:
-    return datetime.fromtimestamp(at, UTC).isoformat().replace("+00:00", "Z")
-
-
 def _result(check: DeclaredCheck, status: str, detail: str, now: float, **metrics: object) -> MachineCheck:
-    return MachineCheck(
-        id=check.id,
-        label=check.label,
-        group=check.group,
-        status=status,
-        detail=detail,
-        metrics={key: str(value) for key, value in metrics.items()},
-        checked_at=iso(now),
-    )
+    return machine_check(check.id, check.label, check.group, status, detail, now, **metrics)
 
 
 def _http(check: DeclaredCheck, now: float) -> MachineCheck:
@@ -152,16 +140,8 @@ class MachineChecks:
         try:
             return self.runtime.checks(now)
         except Exception as error:  # a broken check never stops the others
-            return [
-                MachineCheck(
-                    id="checks-error",
-                    label="Contrôles",
-                    group="tools",
-                    status="unknown",
-                    detail=f"Vérification en erreur ({error.__class__.__name__})",
-                    checked_at=iso(now),
-                )
-            ]
+            detail = f"Vérification en erreur ({error.__class__.__name__})"
+            return [machine_check("checks-error", "Contrôles", "tools", "unknown", detail, now)]
 
     def run_due(self) -> bool:
         """Run every check that is due, in parallel, each bounded; True when a status changed."""

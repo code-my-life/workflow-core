@@ -12,12 +12,11 @@ import json
 import shutil
 import sqlite3
 import urllib.request
-from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
 
 from workflow_core.adapters.hermes.board import hermes_home
-from workflow_core.model.checks import MachineCheck
+from workflow_core.model.checks import MachineCheck, machine_check
 
 GROUP = "hermes"
 # A gateway whose last heartbeat is older than this is down.
@@ -28,10 +27,6 @@ ESTOP = "ESTOP"
 CRON_JOBS = "cron/jobs.json"
 LLAMA_SERVER = "runtimes/llamacpp/server.json"
 HEARTBEAT_COLUMNS = ("pid", "last_heartbeat")
-
-
-def _iso(at: float) -> str:
-    return datetime.fromtimestamp(at, UTC).isoformat().replace("+00:00", "Z")
 
 
 def cron_jobs(data: object) -> list[dict] | None:
@@ -49,15 +44,7 @@ class HermesMachineChecks:
         self.home = home
 
     def _check(self, check_id: str, label: str, status: str, detail: str, now: float, group: str = GROUP, **metrics):
-        return MachineCheck(
-            id=check_id,
-            label=label,
-            group=group,
-            status=status,
-            detail=detail,
-            metrics={key: str(value) for key, value in metrics.items()},
-            checked_at=_iso(now),
-        )
+        return machine_check(check_id, label, group, status, detail, now, **metrics)
 
     def pause(self, now: float) -> MachineCheck:
         """`hermes pause` sets `ESTOP`; empty or corrupt, it still means a pause (agent/estop.py)."""

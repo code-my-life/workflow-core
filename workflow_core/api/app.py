@@ -70,6 +70,11 @@ def _bearer(request: Request) -> str | None:
     return token if scheme.lower() == "bearer" and token else None
 
 
+def _given_or_boards(given: Any, boards: BoardReader, method: str) -> Any:
+    """A reader given to the app, else the one the board reader makes with `method`, else `None`."""
+    return given if given is not None else getattr(boards, method, lambda: None)()
+
+
 def create_app(
     *,
     secret: str,
@@ -100,15 +105,11 @@ def create_app(
     card_facts: CardFactsReader = facts if facts is not None else boards
     diagnosis_sources: DiagnosisSources = sources if sources is not None else card_facts.diagnosis_sources()
     # The agents' live state, activity and usage: by default, the board reader's.
-    live_reader: LiveReader | None = live if live is not None else getattr(boards, "live_reader", lambda: None)()
+    live_reader: LiveReader | None = _given_or_boards(live, boards, "live_reader")
     # The data the workflows declare: by default, the board reader's.
-    data_reader: DeclaredDataReader | None = (
-        data if data is not None else getattr(boards, "data_reader", lambda: None)()
-    )
+    data_reader: DeclaredDataReader | None = _given_or_boards(data, boards, "data_reader")
     # The agents of the workflows and their configuration (#129): by default, the board reader's.
-    agents_reader: AgentsReader | None = (
-        agents if agents is not None else getattr(boards, "agents_reader", lambda: None)()
-    )
+    agents_reader: AgentsReader | None = _given_or_boards(agents, boards, "agents_reader")
     expected = secret.encode("utf-8")
     hub: EventHub | None = None
     # The machine's checks run apart from the routes: /api/machine serves their last results (ADR 0008).
@@ -257,16 +258,11 @@ def create_app(
         cursor = current_cursor()
         listed = []
         for workflow in workflows.values():
-            try:
-                read_sheet(workflow)
-                valid = True
-            except (InvalidSheetError, SheetUnavailableError):
-                valid = False
             listed.append(
                 {
                     "key": workflow.key,
                     "board": workflow.board,
-                    "sheet_valid": valid,
+                    "sheet_valid": sheet_of(workflow) is not None,
                     "gestures": [gesture.model_dump(exclude_none=True) for gesture in workflow.gestures],
                 }
             )

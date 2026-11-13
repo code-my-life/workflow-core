@@ -60,7 +60,8 @@ def build(trigger: Trigger, facts: CardFacts, workflow: Workflow, now: float, te
     """The intervention of one trigger of the workflow's board."""
     card = facts.card
     events = sorted(facts.events, key=lambda event: event.id)
-    reason = _text(_last(events, "blocked").payload.get("reason")) if _last(events, "blocked") else ""
+    blocked = _last(events, "blocked")
+    reason = _text(blocked.payload.get("reason")) if blocked is not None else ""
     declared = {gesture.name for gesture in workflow.gestures}
     unblock: list[Action] = [GestureAction(gesture=UNBLOCK)] if UNBLOCK in declared else []
     show = CopyAction(label=_code("intervention.action.showCard"), command=texts.show_command(workflow.board, card.id))

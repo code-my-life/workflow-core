@@ -41,6 +41,7 @@ from workflow_core.adapters.hermes.sessions import (
     open_session_base,
     session_base,
 )
+from workflow_core.adapters.hermes.values import dotted
 from workflow_core.adapters.hermes.version import read_runtime_version
 from workflow_core.clock import utc_now
 from workflow_core.model.board import BoardUnavailableError
@@ -179,23 +180,16 @@ def configs(home: Path) -> list[tuple[str, Path]]:
     return [(agent, path) for agent, path in found if path is not None]
 
 
-def _dotted(config: dict, key: str) -> object:
-    value: object = config
-    for part in key.split("."):
-        value = value.get(part) if isinstance(value, dict) else None
-    return value
-
-
 def _config_gaps(config: dict) -> list[str]:
     gaps = [
         f"{key} n'est plus une table"
         for key in CONFIG_TABLES
-        if (value := _dotted(config, key)) is not None and not isinstance(value, dict)
+        if (value := dotted(config, key)) is not None and not isinstance(value, dict)
     ]
     gaps += [
         f"{key} n'est plus une liste"
         for key in CONFIG_LISTS
-        if (value := _dotted(config, key)) is not None and not isinstance(value, list)
+        if (value := dotted(config, key)) is not None and not isinstance(value, list)
     ]
     return gaps
 

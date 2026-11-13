@@ -15,8 +15,9 @@ from pathlib import Path
 from urllib.parse import quote as url_quote
 
 from workflow_core.adapters.hermes.paths import CARD, NAME, safe_file
+from workflow_core.adapters.hermes.values import as_number
 from workflow_core.model.facts import RunFact, SessionFacts, ToolCallFact, ToolResultFact
-from workflow_core.text import js_regex, js_trim, redact_secrets, utf16_slice
+from workflow_core.text import js_regex, js_trim, redact_secrets, utf16_length, utf16_slice
 
 # The session `hermes --resume` names in a run's error or output.
 RESUME = js_regex(r"hermes --resume (\d{8}_\d{6}_[0-9a-f]{6}) -p (\S+)")
@@ -77,15 +78,11 @@ def resume_session_of(text: str | None) -> str | None:
     return match[1] if match else None
 
 
-def _number(value: object) -> float:
-    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else 0.0
-
-
 def _call_fact(row: sqlite3.Row) -> ToolCallFact:
     raw = _text(row["input"])
     trimmed = js_trim(raw) if raw is not None else ""
     return ToolCallFact(
-        at=_number(row["at"]),
+        at=as_number(row["at"]),
         tool=_text(row["tool"]) if _text(row["tool"]) is not None else "?",
         input=utf16_slice(redact_secrets(trimmed), INPUT_MAX) if trimmed else None,
         call_id=_text(row["id"]) if _text(row["id"]) is not None else _text(row["call_id"]),
@@ -94,10 +91,10 @@ def _call_fact(row: sqlite3.Row) -> ToolCallFact:
 
 def _result_fact(row: sqlite3.Row) -> ToolResultFact:
     head = _text(row["head"]) or ""
-    size = row["size"] if isinstance(row["size"], int) else len(head.encode("utf-16-le", "surrogatepass")) // 2
+    size = row["size"] if isinstance(row["size"], int) else utf16_length(head)
     content = f"{head}\n…\n{_text(row['tail']) or ''}" if size > RESULT_HEAD + RESULT_TAIL else head
     return ToolResultFact(
-        at=_number(row["at"]),
+        at=as_number(row["at"]),
         tool=_text(row["tool_name"]) if _text(row["tool_name"]) is not None else "?",
         call_id=_text(row["tool_call_id"]),
         content=redact_secrets(content),
@@ -114,6 +111,25 @@ def open_session_base(path: Path) -> sqlite3.Connection:
     db = sqlite3.connect(f"file:{url_quote(str(path))}?mode=ro", uri=True, isolation_level=None)
     db.row_factory = sqlite3.Row
     return db
+
+
+@contextmanager
+def session_db(home: Path, agent: str) -> Iterator[sqlite3.Connection | None]:
+    """An agent's session base, opened read-only for the block and closed after it; `None` when it is missing or
+    cannot be opened."""
+    path = session_base(home, agent)
+    if path is None:
+        yield None
+        return
+    try:
+        db = open_session_base(path)
+    except sqlite3.Error:
+        yield None
+        return
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 def run_session(db: sqlite3.Connection, card: str, run: RunFact) -> str | None:
@@ -140,34 +156,15 @@ class SessionReader:
     def __init__(self, home: Path) -> None:
         self.home = home
 
-    @contextmanager
-    def _db(self, agent: str) -> Iterator[sqlite3.Connection | None]:
-        path = session_base(self.home, agent)
-        if path is None:
-            yield None
-            return
-        try:
-            db = open_session_base(path)
-        except sqlite3.Error:
-            yield None
-            return
-        try:
-            yield db
-        finally:
-            db.close()
-
-    def _session_of(self, db: sqlite3.Connection, card: str, run: RunFact) -> str | None:
-        return run_session(db, card, run)
-
     def run_facts(self, agent: str, card: str, runs: list[RunFact]) -> list[SessionFacts] | None:
-        with self._db(agent) as db:
+        with session_db(self.home, agent) as db:
             if db is None:
                 return None
             try:
                 facts: list[SessionFacts] = []
                 seen: set[str] = set()
                 for run in runs:
-                    session = self._session_of(db, card, run)
+                    session = run_session(db, card, run)
                     if not session or session in seen:
                         continue
                     seen.add(session)
@@ -184,7 +181,7 @@ class SessionReader:
             return facts
 
     def open_sessions(self, agent: str, at: float) -> list[str] | None:
-        with self._db(agent) as db:
+        with session_db(self.home, agent) as db:
             if db is None:
                 return None
             try:
