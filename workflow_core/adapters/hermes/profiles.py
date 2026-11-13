@@ -16,6 +16,7 @@ from typing import Any
 import yaml
 
 from workflow_core.adapters.hermes.paths import NAME, safe_file
+from workflow_core.adapters.hermes.values import as_record, as_strings
 from workflow_core.config import Workflow
 from workflow_core.model.facts import PluginHook, ProfileFacts
 from workflow_core.text import js_regex, js_trim, whole
@@ -89,14 +90,6 @@ def amount(value: Any) -> float | None:
     return whole(number) if value != "" and math.isfinite(number) else None
 
 
-def _record(value: Any) -> dict:
-    return value if isinstance(value, dict) else {}
-
-
-def _strings(value: Any) -> list[str]:
-    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
-
-
 def plugin_hooks_of(plugin: str, source: str) -> list[PluginHook]:
     """The hooks a plugin plugs, read in its code, each with its registration line, trimmed."""
     hooks = []
@@ -123,28 +116,28 @@ def profile_facts_of(
     longest_commands: dict[str, float] | None = None,
 ) -> ProfileFacts:
     """What the diagnosis keeps of an agent's configuration: its delays and its active plugins."""
-    plugins = _record(config.get("plugins"))
-    tools = _record(_record(config.get("timeouts")).get("tools"))
+    plugins = as_record(config.get("plugins"))
+    tools = as_record(as_record(config.get("timeouts")).get("tools"))
     deadline = amount(tools.get("sequential_call"))
     return ProfileFacts(
         profile=profile,
         hook_timeout=amount(plugins.get("hook_callback_timeout")),
         # Hermès falls back on a batch of tools' delay when the delay of one call is not set.
         tool_deadline=deadline if deadline is not None else amount(tools.get("concurrent_batch")),
-        terminal_timeout=amount(_record(config.get("terminal")).get("timeout")),
-        max_turns=amount(_record(config.get("agent")).get("max_turns")),
+        terminal_timeout=amount(as_record(config.get("terminal")).get("timeout")),
+        max_turns=amount(as_record(config.get("agent")).get("max_turns")),
         changed_at=changed_at,
         repo_read=repo is not None,
-        repo_hook_timeout=amount(_record(repo.get("plugins")).get("hook_callback_timeout"))
+        repo_hook_timeout=amount(as_record(repo.get("plugins")).get("hook_callback_timeout"))
         if repo is not None
         else None,
-        plugins=_strings(plugins.get("enabled")),
+        plugins=as_strings(plugins.get("enabled")),
         hooks=hooks,
         longest_commands=longest_commands or {},
     )
 
 
-def _parts(folder: str) -> list[str] | None:
+def folder_parts(folder: str) -> list[str] | None:
     """A folder of the workflow's entry, relative to its repository, as path parts; `None` if it would leave it."""
     parts = [part for part in folder.split("/") if part not in ("", ".")]
     return parts if parts and ".." not in parts else None
@@ -158,7 +151,7 @@ def config_path(home: Path, agent: str) -> Path | None:
 def repo_config_path(workflow: Workflow, agent: str) -> Path | None:
     """`<repo>/<profiles>/<agent>/config.yaml`: the configuration the workflow's repository installs."""
     repo = workflow.repo_path
-    parts = _parts(workflow.profiles or DEFAULT_REPO_PROFILES)
+    parts = folder_parts(workflow.profiles or DEFAULT_REPO_PROFILES)
     if repo is None or parts is None or not NAME.fullmatch(agent):
         return None
     return safe_file(repo, *parts, agent, "config.yaml")
@@ -172,7 +165,7 @@ def plugin_source(home: Path, workflow: Workflow, agent: str, plugin: str) -> Pa
     if installed is not None:
         return installed
     repo = workflow.repo_path
-    parts = _parts(workflow.plugins) if workflow.plugins else None
+    parts = folder_parts(workflow.plugins) if workflow.plugins else None
     return safe_file(repo, *parts, plugin, "__init__.py") if repo is not None and parts is not None else None
 
 
@@ -190,7 +183,7 @@ def parse_capped(path: Path, maximum: int) -> dict | None:
     if content is None:
         return None
     try:
-        return _record(yaml.safe_load(content))
+        return as_record(yaml.safe_load(content))
     except yaml.YAMLError:
         return None
 
@@ -218,7 +211,7 @@ class ProfileReader:
         repo_path = repo_config_path(workflow, agent)
         longest: dict[str, float] = {}
         hooks: list[PluginHook] = []
-        for plugin in _strings(_record(config.get("plugins")).get("enabled")):
+        for plugin in as_strings(as_record(config.get("plugins")).get("enabled")):
             source = plugin_source(self.home, workflow, agent, plugin)
             code = read_capped(source, MAX_PLUGIN_BYTES) if source is not None else None
             if code is None:

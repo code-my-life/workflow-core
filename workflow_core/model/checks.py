@@ -7,6 +7,7 @@ code: an address that answers, a port that listens, the video memory, the public
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field
@@ -32,6 +33,26 @@ class MachineCheck(BaseModel):
     metrics: dict[str, str] = Field(default_factory=dict)
     # ISO 8601, UTC.
     checked_at: str
+
+
+def check_time(at: float) -> str:
+    """Unix seconds as the time of a check: ISO 8601, UTC, `Z` suffix."""
+    return datetime.fromtimestamp(at, UTC).isoformat().replace("+00:00", "Z")
+
+
+def machine_check(
+    check_id: str, label: str, group: str, status: str, detail: str, now: float, **metrics: object
+) -> MachineCheck:
+    """A tile of the machine's state, checked at `now`, its readings written as text."""
+    return MachineCheck(
+        id=check_id,
+        label=label,
+        group=group,
+        status=status,
+        detail=detail,
+        metrics={key: str(value) for key, value in metrics.items()},
+        checked_at=check_time(now),
+    )
 
 
 class DeclaredCheck(BaseModel):

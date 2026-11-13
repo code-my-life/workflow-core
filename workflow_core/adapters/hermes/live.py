@@ -15,22 +15,26 @@ import os
 import re
 import sqlite3
 from collections import deque
-from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 from workflow_core.adapters.hermes.agent_log import (
-    DEFAULT_TIME_ZONE,
-    TIME_ZONE_VARIABLE,
     journal_paths,
     parse_log_line,
     zoned_epoch,
 )
-from workflow_core.adapters.hermes.board import HermesBoardReader, hermes_home
-from workflow_core.adapters.hermes.sessions import SessionReader, open_session_base, session_base
+from workflow_core.adapters.hermes.board import HermesBoardReader, hermes_home, make_board_reader
+from workflow_core.adapters.hermes.sessions import (
+    SessionReader,
+    open_session_base,
+    run_session,
+    session_base,
+    session_db,
+)
 from workflow_core.adapters.hermes.texts import TEXTS
+from workflow_core.adapters.hermes.values import as_number
 from workflow_core.clock import iso_ms
 from workflow_core.config import Workflow
 from workflow_core.model.facts import CardFacts, RunFact
@@ -244,8 +248,26 @@ def _day(seconds: float) -> str:
     return datetime.fromtimestamp(seconds, UTC).strftime("%Y-%m-%d")
 
 
-def _number(value: object) -> float:
-    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else 0.0
+def _zero_usage(model: str, provider: str, cost: float | None) -> ModelUsage:
+    """A model's usage before any call is counted."""
+    return ModelUsage(
+        model=model,
+        provider=provider,
+        calls=0,
+        input_tokens=0,
+        output_tokens=0,
+        cost_usd=cost,
+        rate_limited=0,
+        errors=0,
+    )
+
+
+def _add_calls(total: ModelUsage | UsageRow, row: sqlite3.Row, tokens_in: int, tokens_out: int) -> None:
+    """Add a row of `USAGE_SQL` to a model's usage or to a line of the detail."""
+    total.calls += int(as_number(row["calls"]))
+    total.input_tokens += tokens_in
+    total.output_tokens += tokens_out
+    total.cost_usd = round((total.cost_usd or 0.0) + as_number(row["cost"]), 6)
 
 
 class HermesLiveReader:
@@ -257,19 +279,6 @@ class HermesLiveReader:
         self.boards = boards
         self.sessions = SessionReader(home)
         self.journal = LiveJournal(home, time_zone)
-
-    @contextmanager
-    def _session_db(self, agent: str) -> Iterator[sqlite3.Connection | None]:
-        path = session_base(self.home, agent)
-        db = None
-        if path is not None:
-            with suppress(sqlite3.Error):
-                db = open_session_base(path)
-        try:
-            yield db
-        finally:
-            if db is not None:
-                db.close()
 
     # --- live -----------------------------------------------------------------------------------------------------
 
@@ -289,11 +298,11 @@ class HermesLiveReader:
     def _agent_live(self, agent: str, facts: CardFacts, run: RunFact | None) -> AgentLive:
         card = facts.card
         state, action, model, lane_model = "thinking", None, None, None
-        with self._session_db(agent) as db:
+        with session_db(self.home, agent) as db:
             session = None
             if db is not None and run is not None:
                 with suppress(sqlite3.Error):
-                    session = self.sessions._session_of(db, card.id, run)
+                    session = run_session(db, card.id, run)
             if session is not None:
                 with suppress(sqlite3.Error):
                     model = self._model(agent, db, session)
@@ -348,16 +357,16 @@ class HermesLiveReader:
                     kind=described.kind,
                     label=described.label,
                     detail=described.detail,
-                    started_at=iso_ms(_number(last_call["timestamp"])),
+                    started_at=iso_ms(as_number(last_call["timestamp"])),
                 )
-                return ("cli" if described.kind == "cli" else "tool"), action, described.lane_model
+                return described.kind, action, described.lane_model
         last = db.execute(LAST_MESSAGE_SQL, (session,)).fetchone()
         if last is not None and last["role"] in ("tool", "user"):
             action = LiveAction(
                 kind="llm",
                 label="llm",
                 detail=model.name if model is not None else None,
-                started_at=iso_ms(_number(last["timestamp"])),
+                started_at=iso_ms(as_number(last["timestamp"])),
             )
             return "thinking", action, None
         return "thinking", None, None
@@ -484,38 +493,20 @@ class HermesLiveReader:
             )
 
         for agent in sorted(agents):
-            with self._session_db(agent) as db:
+            with session_db(self.home, agent) as db:
                 rows = []
                 if db is not None:
                     with suppress(sqlite3.Error):
                         rows = db.execute(USAGE_SQL, (since,)).fetchall()
             for row in rows:
                 key = (str(row["model"]), str(row["provider"] or "?"))
-                tokens_in, tokens_out = int(_number(row["input"])), int(_number(row["output"]))
-                usage = models.setdefault(
-                    key,
-                    ModelUsage(
-                        model=key[0],
-                        provider=key[1],
-                        calls=0,
-                        input_tokens=0,
-                        output_tokens=0,
-                        cost_usd=0.0,
-                        rate_limited=0,
-                        errors=0,
-                    ),
-                )
-                usage.calls += int(_number(row["calls"]))
-                usage.input_tokens += tokens_in
-                usage.output_tokens += tokens_out
-                usage.cost_usd = round((usage.cost_usd or 0.0) + _number(row["cost"]), 6)
+                tokens_in, tokens_out = int(as_number(row["input"])), int(as_number(row["output"]))
+                usage = models.setdefault(key, _zero_usage(key[0], key[1], 0.0))
+                _add_calls(usage, row, tokens_in, tokens_out)
                 by_agent[agent] = by_agent.get(agent, 0) + tokens_in + tokens_out
                 by_day.setdefault(str(row["day"]), [0, 0])[0] += tokens_in + tokens_out
                 line = row_of(str(row["day"]), agent, key[0], key[1], 0.0)
-                line.calls += int(_number(row["calls"]))
-                line.input_tokens += tokens_in
-                line.output_tokens += tokens_out
-                line.cost_usd = round((line.cost_usd or 0.0) + _number(row["cost"]), 6)
+                _add_calls(line, row, tokens_in, tokens_out)
             for entry in self.journal.entries(agent):
                 if entry.kind != "api_failed" or entry.at < since:
                     continue
@@ -523,17 +514,7 @@ class HermesLiveReader:
                 usage = next((usage for (model, _), usage in models.items() if model == name), None)
                 if usage is None:
                     usage = models.setdefault(
-                        (name, entry.provider or "?"),
-                        ModelUsage(
-                            model=name,
-                            provider=entry.provider or "?",
-                            calls=0,
-                            input_tokens=0,
-                            output_tokens=0,
-                            cost_usd=None,
-                            rate_limited=0,
-                            errors=0,
-                        ),
+                        (name, entry.provider or "?"), _zero_usage(name, entry.provider or "?", None)
                     )
                 # The line of the model as `models` counts it: its provider is that of the model's usage.
                 line = row_of(_day(entry.at), agent, usage.model, usage.provider, None)
@@ -610,9 +591,7 @@ class HermesLiveWatcher:
 
 def make_live_reader(environ: dict[str, str] | None = None) -> HermesLiveReader:
     """The live reader of the Hermès home named by `HERMES_HOME`, its journals dated in the zone of `HERMES_TZ`."""
-    env = os.environ if environ is None else environ
-    home = hermes_home(env)
-    return HermesLiveReader(home, env.get(TIME_ZONE_VARIABLE) or DEFAULT_TIME_ZONE, HermesBoardReader(home))
+    return make_board_reader(environ).live_reader(environ)
 
 
 def make_live_watcher(environ: dict[str, str] | None = None) -> HermesLiveWatcher:
