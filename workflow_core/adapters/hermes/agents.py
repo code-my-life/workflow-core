@@ -15,8 +15,8 @@ from workflow_core.adapters.hermes.paths import safe_file
 from workflow_core.adapters.hermes.profiles import (
     MAX_CONFIG_BYTES,
     ProfileReader,
-    _parts,
     config_path,
+    folder_parts,
     parse_capped,
     profile_facts_of,
 )
@@ -80,14 +80,13 @@ class HermesAgentsReader:
 
     def _manifest(self, workflow: Workflow) -> dict | None:
         repo = workflow.repo_path
-        parts = _parts(workflow.manifest) if workflow.manifest else None
+        parts = folder_parts(workflow.manifest) if workflow.manifest else None
         if repo is None or parts is None:
             return None
         path = safe_file(repo, *parts)
         return parse_capped(path, MAX_CONFIG_BYTES) if path is not None else None
 
-    def _names(self, workflow: Workflow, manifest: dict | None) -> list[str]:
-        declared = as_record(manifest.get("profiles")) if manifest is not None else {}
+    def _names(self, workflow: Workflow, declared: dict) -> list[str]:
         if declared:
             return sorted(name for name in declared if isinstance(name, str))
         found: set[str] = set()
@@ -113,7 +112,7 @@ class HermesAgentsReader:
         declared = as_record(manifest.get("profiles")) if manifest is not None else {}
         read = [
             self._agent(workflow, name, as_strings(as_record(declared.get(name)).get("skills")), days, now)
-            for name in self._names(workflow, manifest)
+            for name in self._names(workflow, declared)
         ]
         # The guards at risk, from the facts of the agents served by this very answer (issue #137).
         facts = [agent_facts for _, agent_facts in read if agent_facts is not None]

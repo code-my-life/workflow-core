@@ -137,7 +137,7 @@ def profile_facts_of(
     )
 
 
-def _parts(folder: str) -> list[str] | None:
+def folder_parts(folder: str) -> list[str] | None:
     """A folder of the workflow's entry, relative to its repository, as path parts; `None` if it would leave it."""
     parts = [part for part in folder.split("/") if part not in ("", ".")]
     return parts if parts and ".." not in parts else None
@@ -151,7 +151,7 @@ def config_path(home: Path, agent: str) -> Path | None:
 def repo_config_path(workflow: Workflow, agent: str) -> Path | None:
     """`<repo>/<profiles>/<agent>/config.yaml`: the configuration the workflow's repository installs."""
     repo = workflow.repo_path
-    parts = _parts(workflow.profiles or DEFAULT_REPO_PROFILES)
+    parts = folder_parts(workflow.profiles or DEFAULT_REPO_PROFILES)
     if repo is None or parts is None or not NAME.fullmatch(agent):
         return None
     return safe_file(repo, *parts, agent, "config.yaml")
@@ -165,7 +165,7 @@ def plugin_source(home: Path, workflow: Workflow, agent: str, plugin: str) -> Pa
     if installed is not None:
         return installed
     repo = workflow.repo_path
-    parts = _parts(workflow.plugins) if workflow.plugins else None
+    parts = folder_parts(workflow.plugins) if workflow.plugins else None
     return safe_file(repo, *parts, plugin, "__init__.py") if repo is not None and parts is not None else None
 
 
