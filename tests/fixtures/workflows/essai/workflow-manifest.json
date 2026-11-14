@@ -1,6 +1,12 @@
 {
   "schema_version": 1,
   "key": "essai",
+  "sheet": "workflow-sheet.json",
+  "issues_repo": "code-my-life/workflow-essai",
+  "intake": {
+    "command": ["python", "commands/intake.py"],
+    "timeout_seconds": 60
+  },
   "stations": [
     {
       "key": "preparer",
@@ -10,7 +16,9 @@
     },
     {
       "key": "revue",
-      "nature": "owner"
+      "nature": "owner",
+      "command": ["python", "commands/revue.py"],
+      "timeout_seconds": 60
     },
     {
       "key": "clore",
@@ -18,5 +26,9 @@
       "command": ["python", "commands/clore.py"],
       "timeout_seconds": 60
     }
+  ],
+  "gestures": [
+    { "name": "ouvrir", "kind": "issue", "repo": "code-my-life/workflow-essai" },
+    { "name": "valider", "kind": "comment" }
   ]
 }

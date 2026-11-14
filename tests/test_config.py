@@ -95,7 +95,7 @@ def test_a_missing_manifest_leaves_the_workflow_unplugged(runtime_home, tmp_path
     unplugged = [line for line in err if "non branché" in line]
     assert len(unplugged) == 3
     assert any("absent non branché : manifeste absent" in line for line in unplugged)
-    assert any("essai non branché : clé du manifeste « autre » différente de « essai »" in line for line in unplugged)
+    assert any("essai non branché : manifeste de essai refusé : key-mismatch : " in line for line in unplugged)
     assert any("casse non branché : manifeste illisible" in line for line in unplugged)
     assert any("workflow bon branché par son manifeste" in line for line in err)
     assert [workflow.key for workflow in app.state.engine.workflows] == ["bon"]

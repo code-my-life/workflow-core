@@ -1,7 +1,8 @@
-"""Read a workflow's manifest: `<repo>/workflow-manifest.json`, `schema_version` 1 (ADR 0005, amended).
+"""Plug a workflow by its manifest: `<repo>/workflow-manifest.json`, judged at the start (ADR 0005, amended; ADR 0006).
 
-Only the key and the stations (their key, nature, command and delay) are read at this stage; the manifest's judge comes
-later. A manifest that is absent, unreadable, or of another key leaves its workflow unplugged, with the reason.
+The manifest is judged by `judge_manifest`, with its sheet read from the repository and the lanes still in use on the
+workflow's board, read through the card reader without writing. A manifest that is absent, unreadable or refused
+leaves its workflow unplugged, with the reason; the other workflows run.
 """
 
 from __future__ import annotations
@@ -9,35 +10,16 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import ValidationError
 
 from workflow_core.config import Workflow
+from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
+from workflow_core.model.manifest import ManifestStation, judge_manifest
 
 MANIFEST_FILE = "workflow-manifest.json"
-
-
-class Station(BaseModel):
-    """A station of the manifest. A `code` station names its command, a list of arguments run in the workflow's
-    repository, and its delay in seconds."""
-
-    key: str = Field(min_length=1, pattern=r"^[a-z][a-z0-9-]*$")
-    nature: Literal["code", "owner", "agent"]
-    command: list[str] | None = None
-    timeout_seconds: float | None = Field(default=None, gt=0)
-
-    @model_validator(mode="after")
-    def _a_code_station_has_its_command(self) -> Station:
-        if self.nature == "code" and (not self.command or self.timeout_seconds is None):
-            raise ValueError(f'station "{self.key}": a code station needs its command and its timeout_seconds')
-        return self
-
-
-class Manifest(BaseModel):
-    schema_version: Literal[1]
-    key: str = Field(min_length=1)
-    stations: list[Station] = Field(min_length=1)
+# The statuses of a card that holds nothing any more.
+FINISHED = ("done", "archived")
 
 
 class ManifestRefusedError(Exception):
@@ -56,23 +38,41 @@ class PluggedWorkflow:
     key: str
     board: str
     repo: Path
-    stations: tuple[Station, ...]
+    stations: tuple[ManifestStation, ...]
 
     def lane(self, station: str) -> str:
         """The lane of a station, `<key>-<station>`: the assignee of a card that stands there, never a profile."""
         return f"{self.key}-{station}"
 
-    def station_of_lane(self, assignee: str | None) -> Station | None:
+    def station_of_lane(self, assignee: str | None) -> ManifestStation | None:
         return next((station for station in self.stations if self.lane(station.key) == assignee), None)
 
-    def station(self, key: str) -> Station | None:
+    def station(self, key: str) -> ManifestStation | None:
         return next((station for station in self.stations if station.key == key), None)
 
-    def next_station(self, key: str) -> Station | None:
+    def next_station(self, key: str) -> ManifestStation | None:
         """The station after this one in the manifest; None after the last."""
         keys = [station.key for station in self.stations]
         index = keys.index(key)
         return self.stations[index + 1] if index + 1 < len(self.stations) else None
+
+
+def is_root_card(item: Item, key: str) -> bool:
+    """Whether the card is the root card of an item of this workflow: its idempotency key is `<key>:<local id>`."""
+    idempotency = item.idempotency_key or ""
+    return idempotency.startswith(f"{key}:") and len(idempotency) > len(key) + 1 and "/" not in idempotency
+
+
+def lanes_in_use(reader: BoardReader, key: str, board: str) -> set[str]:
+    """The lanes the workflow's unfinished root cards are assigned to. A board whose base does not exist yet holds
+    nothing: the workflow is new. Only reads."""
+    try:
+        items = reader.read_items(board)
+    except BoardUnavailableError:
+        return set()
+    return {
+        item.assignee for item in items if item.assignee and item.status not in FINISHED and is_root_card(item, key)
+    }
 
 
 def _why(error: Exception) -> str:
@@ -82,22 +82,31 @@ def _why(error: Exception) -> str:
     return str(error) or type(error).__name__
 
 
-def plug(workflow: Workflow) -> PluggedWorkflow:
-    """The workflow plugged by the manifest of its repository; `ManifestRefusedError` with the reason otherwise."""
+def plug(workflow: Workflow, *, reader: BoardReader | None = None) -> PluggedWorkflow:
+    """The workflow plugged by the manifest of its repository, once judged; `ManifestRefusedError` with the reason
+    otherwise. Without a reader, no lane is in use."""
+    key = workflow.key
     repo = workflow.repo_path
     if repo is None:
-        raise ManifestRefusedError(workflow.key, "aucun dépôt déclaré")
+        raise ManifestRefusedError(key, "aucun dépôt déclaré")
     path = repo / MANIFEST_FILE
     if not path.is_file():
-        raise ManifestRefusedError(workflow.key, f"manifeste absent : {path}")
+        raise ManifestRefusedError(key, f"manifeste absent : {path}")
     try:
-        manifest = Manifest.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
-        raise ManifestRefusedError(workflow.key, f"manifeste illisible : {path} ({_why(error)})") from error
-    if manifest.key != workflow.key:
-        reason = f"clé du manifeste « {manifest.key} » différente de « {workflow.key} »"
-        raise ManifestRefusedError(workflow.key, reason)
-    keys = [station.key for station in manifest.stations]
-    if len(set(keys)) != len(keys):
-        raise ManifestRefusedError(workflow.key, f"manifeste illisible : {path} (station déclarée deux fois)")
-    return PluggedWorkflow(key=workflow.key, board=workflow.board, repo=repo, stations=tuple(manifest.stations))
+        raise ManifestRefusedError(key, f"manifeste illisible : {path} ({_why(error)})") from error
+    lanes: set[str] = set()
+    if reader is not None:
+        try:
+            lanes = lanes_in_use(reader, key, workflow.board)
+        except Exception as error:
+            raise ManifestRefusedError(key, f"voies en usage illisibles : {_why(error)}") from error
+
+    def read_sheet(relative: str) -> object:
+        return json.loads((repo / relative).read_text(encoding="utf-8"))
+
+    verdict = judge_manifest(data, key=key, read_sheet=read_sheet, lanes_in_use=lanes)
+    if not verdict.ok:
+        raise ManifestRefusedError(key, f"manifeste de {key} refusé : {verdict.rule} : {verdict.detail}")
+    return PluggedWorkflow(key=key, board=workflow.board, repo=repo, stations=tuple(verdict.manifest.stations))

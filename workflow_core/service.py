@@ -17,6 +17,7 @@ from workflow_core.config import Workflow
 from workflow_core.engine import Engine, EngineRunner
 from workflow_core.engine.engine import PASS_SECONDS
 from workflow_core.events import JOURNAL_FILE, state_dir
+from workflow_core.model.board import BoardReader
 from workflow_core.model.checks import CHECK_EVERY_SECONDS, DeclaredCheck
 from workflow_core.model.contract import ContractVerdict
 from workflow_core.model.state import CoreState
@@ -65,7 +66,10 @@ def build_service(
     reads in the tests): a change puts the core in observer mode until a restart. The engine's writer refuses every
     write until a first read confirms that version, which the engine's first pass makes."""
     served = {key: workflow for key, workflow in workflows.items() if not workflow.plugged_by_manifest}
-    plugged = plug_manifests([workflow for workflow in workflows.values() if workflow.plugged_by_manifest])
+    reader = adapter.make_board_reader()
+    plugged = plug_manifests(
+        [workflow for workflow in workflows.values() if workflow.plugged_by_manifest], reader=reader
+    )
     writer = adapter.make_board_writer()
     boards = sorted(
         {workflow.board for workflow in served.values()}
@@ -82,7 +86,6 @@ def build_service(
     else:
         journal(ERROR, f"contrat cassé, mode {state.mode} : " + " ; ".join(verdict.problems))
 
-    reader = adapter.make_board_reader()
     settings = NotifySettings.from_environ(environ)
     for line in settings.describe():
         journal(INFO if settings.on or settings.problem is None else ERROR, line)
@@ -153,13 +156,13 @@ def build_service(
     return app
 
 
-def plug_manifests(workflows: list[Workflow]) -> list[PluggedWorkflow]:
-    """The workflows plugged by their manifest; each one left unplugged is written to the journal with its reason, and
-    the others run."""
+def plug_manifests(workflows: list[Workflow], *, reader: BoardReader | None = None) -> list[PluggedWorkflow]:
+    """The workflows plugged by their judged manifest, the lanes in use read by `reader`; each one left unplugged is
+    written to the journal with its reason, and the others run."""
     plugged = []
     for workflow in workflows:
         try:
-            plugged.append(plug(workflow))
+            plugged.append(plug(workflow, reader=reader))
         except ManifestRefusedError as error:
             journal(ERROR, str(error))
             continue

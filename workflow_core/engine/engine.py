@@ -22,11 +22,12 @@ from typing import Protocol
 
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
 from workflow_core.model.decision import Decision
+from workflow_core.model.manifest import ManifestStation as Station
 from workflow_core.model.state import CoreState
 from workflow_core.model.writer import BoardWriteError, BoardWriter
 from workflow_core.notify.notifier import journal_line
 from workflow_core.plugin.commands import command_input, run_command
-from workflow_core.plugin.manifest import PluggedWorkflow, Station
+from workflow_core.plugin.manifest import PluggedWorkflow, is_root_card
 
 PASS_SECONDS = 30.0
 # The first GitHub issue address of a card's body is its item's issue.
@@ -41,12 +42,6 @@ class CommandRunner(Protocol):
 def issue_of(body: str | None) -> str | None:
     found = ISSUE_URL.search(body or "")
     return found[0] if found else None
-
-
-def is_root_card(item: Item, key: str) -> bool:
-    """Whether the card is the root card of an item of this workflow: its idempotency key is `<key>:<local id>`."""
-    idempotency = item.idempotency_key or ""
-    return idempotency.startswith(f"{key}:") and len(idempotency) > len(key) + 1 and "/" not in idempotency
 
 
 class Engine:

@@ -1,0 +1,188 @@
+{
+  "$defs": {
+    "ManifestGesture": {
+      "description": "A gesture the workflow recognises: `comment` on the issue of an item, or `issue` opened in `repo`.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "comment",
+            "issue"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "repo": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repo"
+        }
+      },
+      "required": [
+        "name",
+        "kind"
+      ],
+      "title": "ManifestGesture",
+      "type": "object"
+    },
+    "ManifestIntake": {
+      "description": "The command that says whether an issue becomes an item, run in the workflow's repository, and its delay.",
+      "properties": {
+        "command": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Command",
+          "type": "array"
+        },
+        "timeout_seconds": {
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "command",
+        "timeout_seconds"
+      ],
+      "title": "ManifestIntake",
+      "type": "object"
+    },
+    "ManifestStation": {
+      "description": "A station of the manifest. A `code` or `owner` station names its command, a list of arguments run in the\nworkflow's repository, and its delay in seconds; an `agent` station names its profile.",
+      "properties": {
+        "key": {
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "title": "Key",
+          "type": "string"
+        },
+        "nature": {
+          "enum": [
+            "code",
+            "owner",
+            "agent"
+          ],
+          "title": "Nature",
+          "type": "string"
+        },
+        "command": {
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        },
+        "timeout_seconds": {
+          "anyOf": [
+            {
+              "maximum": 3600,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout Seconds"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile"
+        }
+      },
+      "required": [
+        "key",
+        "nature"
+      ],
+      "title": "ManifestStation",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "key": {
+      "minLength": 1,
+      "pattern": "^[a-z0-9-]+$",
+      "title": "Key",
+      "type": "string"
+    },
+    "sheet": {
+      "minLength": 1,
+      "title": "Sheet",
+      "type": "string"
+    },
+    "issues_repo": {
+      "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$",
+      "title": "Issues Repo",
+      "type": "string"
+    },
+    "intake": {
+      "$ref": "#/$defs/ManifestIntake"
+    },
+    "stations": {
+      "items": {
+        "$ref": "#/$defs/ManifestStation"
+      },
+      "minItems": 1,
+      "title": "Stations",
+      "type": "array"
+    },
+    "gestures": {
+      "items": {
+        "$ref": "#/$defs/ManifestGesture"
+      },
+      "title": "Gestures",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "key",
+    "sheet",
+    "issues_repo",
+    "intake",
+    "stations"
+  ],
+  "title": "WorkflowManifest",
+  "type": "object"
+}
