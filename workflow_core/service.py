@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -11,6 +12,7 @@ from typing import Any
 import uvicorn
 from fastapi import FastAPI
 
+from workflow_core.adapters.github import OWNER_LOGIN_VARIABLE
 from workflow_core.api.app import create_app
 from workflow_core.clock import utc_now
 from workflow_core.config import Gesture, Workflow
@@ -33,6 +35,7 @@ from workflow_core.version_watch import VersionWatch, VersionWatchRunner
 
 # journald reads a leading "<n>" on a service's output as the syslog priority of the line.
 ERROR = "<3>"
+WARNING = "<4>"
 INFO = "<6>"
 
 
@@ -140,6 +143,13 @@ def build_service(
         confirm_version=watch.ensure_confirmed,
         answers=AnswerBox(state_dir(environ) / ENGINE_DB),
     )
+    owner = (os.environ if environ is None else environ).get(OWNER_LOGIN_VARIABLE) or None
+    if plugged and owner is None:
+        journal(
+            WARNING,
+            f"{OWNER_LOGIN_VARIABLE} absente : la relecture de GitHub ne prend aucune issue et aucun geste "
+            "(à mettre dans le .env du socle)",
+        )
     intake = Intake(
         workflows=plugged,
         github=github,
@@ -149,6 +159,7 @@ def build_service(
         confirm_version=watch.ensure_confirmed,
         ensure_board=engine.ensure_board,
         live_url=settings.live_url,
+        owner=owner,
     )
 
     gestures = Gestures(
@@ -157,6 +168,7 @@ def build_service(
         reader=reader,
         answers=AnswerBox(state_dir(environ) / ENGINE_DB),
         state=state,
+        owner=owner,
     )
 
     app = create_app(
@@ -203,14 +215,17 @@ def api_entry(workflow: Workflow, plugged: PluggedWorkflow) -> Workflow:
 
 def plug_manifests(workflows: list[Workflow], *, reader: BoardReader | None = None) -> list[PluggedWorkflow]:
     """The workflows plugged by their judged manifest, the lanes in use read by `reader`; each one left unplugged is
-    written to the journal with its reason, and the others run."""
+    written to the journal with its reason, and the others run. An issues repository belongs to the first workflow
+    plugged that reads it: a later one that names it is refused."""
     plugged = []
+    issues_repos_taken: dict[str, str] = {}
     for workflow in workflows:
         try:
-            plugged.append(plug(workflow, reader=reader))
+            plugged.append(plug(workflow, reader=reader, issues_repos_taken=issues_repos_taken))
         except ManifestRefusedError as error:
             journal(ERROR, str(error))
             continue
+        issues_repos_taken.update(dict.fromkeys(plugged[-1].issues_repos, workflow.key))
         journal(INFO, f"workflow {workflow.key} branché par son manifeste, board {workflow.board}")
     return plugged
 

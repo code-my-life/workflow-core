@@ -64,10 +64,10 @@ def pass_blocks_the_card(fake_runtime, repo: Path, reason: str) -> list[str]:
         log=lines.append,
     ).run_pass()
     motive = f"Échec de la station preparer : {reason}"
-    assert fake_runtime.writes() == [["kanban", "--board", "essai", "block", CARD, motive]]
+    assert fake_runtime.writes() == [["kanban", "--board", "essai", "block", CARD, motive, "--kind", "needs_input"]]
     with sqlite3.connect(fake_runtime.home / "kanban" / "boards" / "essai" / "kanban.db") as db:
         row = db.execute("SELECT assignee, status, block_kind FROM tasks WHERE id = ?", (CARD,)).fetchone()
-        assert row == ("essai-preparer", "blocked", None)
+        assert row == ("essai-preparer", "blocked", "needs_input")
     db.close()
     return lines
 
@@ -114,6 +114,7 @@ def test_the_error_output_goes_to_the_journal_within_its_limit(fake_runtime):
 
 def test_a_command_does_not_inherit_the_core_secrets(fake_runtime, monkeypatch):
     monkeypatch.setenv("WORKFLOW_CORE_SECRET", "not-a-real-secret")
+    monkeypatch.setenv("WORKFLOW_CORE_OWNER_LOGIN", "proprietaire")
     monkeypatch.setenv("GITHUB_APP_ID", "12345")
     monkeypatch.setenv("ESSAI_VISIBLE", "oui")
     lines: list[str] = []

@@ -46,3 +46,35 @@ def test_a_refused_manifest_leaves_its_workflow_unplugged(runtime_home, tmp_path
     assert any("workflow bon branché par son manifeste" in line for line in err)
     assert [workflow.key for workflow in app.state.engine.workflows] == ["bon"]
     assert app.state.core.mode == "normal"
+
+
+def test_two_workflows_never_read_the_same_issues_repo(runtime_home, tmp_path, capsys):
+    workflows = {
+        **load_workflows(DEFAULT_CONFIG),
+        "premier": Workflow(key="premier", repo=repo_of(tmp_path, "premier")),
+        "second": Workflow(
+            key="second",
+            repo=repo_of(
+                tmp_path,
+                "second",
+                lambda manifest: manifest.update(issues_repos=["code-my-life/second", "code-my-life/workflow-essai"]),
+            ),
+        ),
+        "troisieme": Workflow(
+            key="troisieme",
+            repo=repo_of(tmp_path, "troisieme", lambda manifest: manifest.update(issues_repos=["code-my-life/second"])),
+        ),
+    }
+
+    app = build_service(secret=SECRET, workflows=workflows, adapter=runtime_adapter())
+
+    err = capsys.readouterr().err.splitlines()
+    lines = [line for line in err if "manifeste de second refusé : shared-issues-repo : " in line]
+    assert len(lines) == 1
+    assert '"code-my-life/workflow-essai"' in lines[0] and '"premier"' in lines[0]
+    # A refused workflow claims none of its repositories: the third one reads `code-my-life/second` alone.
+    assert [workflow.key for workflow in app.state.engine.workflows] == ["premier", "troisieme"]
+    assert [workflow.issues_repos for workflow in app.state.intake.workflows] == [
+        ("code-my-life/workflow-essai",),
+        ("code-my-life/second",),
+    ]

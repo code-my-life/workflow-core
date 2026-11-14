@@ -1,12 +1,12 @@
 """The reading of GitHub: where an item is born from an open issue (ADR 0016, ADR 0017).
 
 1. At the start, then every 10 minutes (`GITHUB_POLL_SECONDS`), the core reads, for each workflow plugged by its
-   manifest, the open issues of the manifest's `issues_repo`, page by page, without the pull requests GitHub lists
-   among them. No other repository is read, and no webhook is received.
-2. Only the issues opened by the owner's account (`OWNER_LOGIN`, also the one factory-live opens an issue for) are
-   taken; the others are left without a word, the repository being public. With `issue_label` in the workflow's entry
-   of the configuration, only the issues carrying that label are taken; without it, those labelled `test` are left
-   out, so that a production core never takes an issue of the test machine.
+   manifest, the open issues of each repository of the manifest's `issues_repos`, page by page, without the pull
+   requests GitHub lists among them. No other repository is read, and no webhook is received.
+2. Only the issues opened by the owner's account (`WORKFLOW_CORE_OWNER_LOGIN`, also the one factory-live opens an
+   issue for) are taken, none without it; the others are left without a word, the repository being public. With
+   `issue_label` in the workflow's entry of the configuration, only the issues carrying that label are taken; without
+   it, those labelled `test` are left out, so that a production core never takes an issue of the test machine.
 3. An issue already handled is never handed to the intake command again: it is noted in the table `intake` of
    `engine.db`, and, should that register be lost, a comment of the App carries its hidden marker
    `<!-- workflow-core:intake <repo>#<n> accept -->` (or `refuse`). A marker written by another account does not
@@ -39,7 +39,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
-from workflow_core.adapters.github import APP_BOT, OWNER_LOGIN, OpenIssue
+from workflow_core.adapters.github import APP_BOT, OpenIssue
 from workflow_core.clock import utc_now
 from workflow_core.engine.answers import LOCK_TIMEOUT_SECONDS
 from workflow_core.gestures import Gestures
@@ -95,10 +95,10 @@ def refuse_comment(*, key: str, reason: str, marker: str) -> str:
     return f"🚫 Cette issue n'est pas prise par le workflow `{key}` : {reason.strip().rstrip('.')}.\n\n{marker}"
 
 
-def taken(workflow: PluggedWorkflow, issue: OpenIssue) -> bool:
-    """Whether the workflow takes this issue in: opened by the owner, with the workflow's label, or without the test
-    label when it has none. GitHub's label names ignore case, and so does the comparison."""
-    if issue.author != OWNER_LOGIN:
+def taken(workflow: PluggedWorkflow, issue: OpenIssue, owner: str | None) -> bool:
+    """Whether the workflow takes this issue in: opened by the owner's account (none without it), with the workflow's
+    label, or without the test label when it has none. GitHub's label names ignore case, and so does the comparison."""
+    if owner is None or issue.author != owner:
         return False
     labels = {label.casefold() for label in issue.labels}
     if workflow.issue_label is not None:
@@ -152,6 +152,7 @@ class Intake:
         ensure_board: Callable[[PluggedWorkflow], None],
         confirm_version: Callable[[], bool] | None = None,
         live_url: str | None = None,
+        owner: str | None = None,
         run: IntakeCommand = run_intake,
         log: Callable[[str], None] = journal_line,
     ) -> None:
@@ -166,6 +167,8 @@ class Intake:
         # Whether the runtime's version is confirmed since the start: the service's version watch.
         self.confirm_version = confirm_version
         self.live_url = live_url
+        # The owner's account: the only author whose issues are taken; None takes none.
+        self.owner = owner
         self.run = run
         self.log = log
         self._told: set[tuple] = set()
@@ -188,15 +191,18 @@ class Intake:
                 self.log(f"<3>{PREFIX}, {workflow.key} : {type(error).__name__}: {error}")
 
     def _read(self, workflow: PluggedWorkflow) -> None:
-        if workflow.intake is None or not workflow.issues_repo:
+        if workflow.intake is None or self.owner is None:
             return
-        repo = workflow.issues_repo
+        for repo in workflow.issues_repos:
+            self._read_repo(workflow, repo)
+
+    def _read_repo(self, workflow: PluggedWorkflow, repo: str) -> None:
         try:
             issues = self.github.list_open_issues(repo)
         except Exception as error:
             self.log(f"<3>{PREFIX}, {workflow.key} : issues de {repo} illisibles : {error}")
             return
-        kept = [issue for issue in issues if taken(workflow, issue)]
+        kept = [issue for issue in issues if taken(workflow, issue, self.owner)]
         if self.state.mode != "normal":
             for issue in kept:
                 self._tell_once(
@@ -208,7 +214,7 @@ class Intake:
             return
         for issue in kept:
             try:
-                self._take(workflow, issue)
+                self._take(workflow, repo, issue)
             except Exception as error:  # an issue that fails leaves the others to go on
                 self.log(f"<3>{PREFIX}, {repo}#{issue.number} : {type(error).__name__}: {error}")
 
@@ -222,8 +228,8 @@ class Intake:
                 return decision
         return None
 
-    def _take(self, workflow: PluggedWorkflow, issue: OpenIssue) -> None:
-        repo, number = workflow.issues_repo, issue.number
+    def _take(self, workflow: PluggedWorkflow, repo: str, issue: OpenIssue) -> None:
+        number = issue.number
         if self.register.has(repo, number):
             return
         try:

@@ -32,3 +32,26 @@ def test_the_published_schema_is_what_the_script_writes(tmp_path):
     for timeout in (0, 3601):
         manifest["stations"][0]["timeout_seconds"] = timeout
         assert not validator.is_valid(manifest), timeout
+
+
+def test_the_published_schema_says_what_the_judge_refuses_in_form():
+    validator = jsonschema.Draft202012Validator(json.loads(SCHEMA.read_text(encoding="utf-8")))
+
+    def valid(change) -> bool:
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        change(manifest)
+        return validator.is_valid(manifest)
+
+    assert valid(lambda manifest: None)
+    # A repo goes with an issue gesture, and with it only.
+    assert not valid(lambda manifest: manifest["gestures"].append({"name": "noter", "kind": "comment", "repo": "a/b"}))
+    assert not valid(lambda manifest: manifest["gestures"].append({"name": "creer", "kind": "issue"}))
+    assert not valid(lambda manifest: manifest["gestures"].append({"name": "creer", "kind": "issue", "repo": None}))
+    # The sheet's path is relative to the workflow's repository.
+    for sheet in ("/etc/workflow-sheet.json", "~/workflow-sheet.json", "../workflow-sheet.json", "a/../../b.json"):
+        assert not valid(lambda manifest, sheet=sheet: manifest.update(sheet=sheet)), sheet
+    for sheet in ("fiches/workflow-sheet.json", "a..b.json", "..fiche.json"):
+        assert valid(lambda manifest, sheet=sheet: manifest.update(sheet=sheet)), sheet
+    # At least one repository of issues, each `<owner>/<repo>`.
+    assert not valid(lambda manifest: manifest.update(issues_repos=[]))
+    assert not valid(lambda manifest: manifest.update(issues_repos=["workflow-essai"]))

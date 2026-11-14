@@ -2,6 +2,20 @@
   "$defs": {
     "ManifestGesture": {
       "description": "A gesture the workflow recognises: `comment` on the issue of an item, or `issue` opened in `repo`.",
+      "else": {
+        "properties": {
+          "repo": {
+            "type": "null"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "issue"
+          }
+        }
+      },
       "properties": {
         "name": {
           "minLength": 1,
@@ -35,6 +49,16 @@
         "name",
         "kind"
       ],
+      "then": {
+        "properties": {
+          "repo": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo"
+        ]
+      },
       "title": "ManifestGesture",
       "type": "object"
     },
@@ -148,13 +172,27 @@
     },
     "sheet": {
       "minLength": 1,
+      "not": {
+        "anyOf": [
+          {
+            "pattern": "^[/~]"
+          },
+          {
+            "pattern": "(^|/)\\.\\.(/|$)"
+          }
+        ]
+      },
       "title": "Sheet",
       "type": "string"
     },
-    "issues_repo": {
-      "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$",
-      "title": "Issues Repo",
-      "type": "string"
+    "issues_repos": {
+      "items": {
+        "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$",
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Issues Repos",
+      "type": "array"
     },
     "intake": {
       "$ref": "#/$defs/ManifestIntake"
@@ -179,7 +217,7 @@
     "schema_version",
     "key",
     "sheet",
-    "issues_repo",
+    "issues_repos",
     "intake",
     "stations"
   ],

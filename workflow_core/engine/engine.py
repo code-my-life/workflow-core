@@ -24,18 +24,20 @@ Under the item's own lock, with the card read again:
   written once to the journal, without any write.
 A decision is applied this way: `advance` assigns the card to the lane of the station `to`, or of the next station
 without it, and completes the root card after the last station; `fail` (a command past its delay or with an unreadable
-output included) and an unknown `to` block the card with the station and the reason; `wait` changes nothing, and the
-command runs again at the next pass with the next attempt. An answer for an item without an open wait, as read at the
-start of the pass, is marked refused. The engine never takes a card (`claim`): its lock is its own, held in memory.
+output included) and an unknown `to` block the card with the station and the reason, its kind never the one of its
+previous block; `wait` changes nothing, and the command runs again at the next pass with the next attempt. An answer
+for an item without an open wait, as read at the start of the pass, is marked refused. The engine never takes a card
+(`claim`): its lock is its own, held in memory.
 
 An answer from GitHub (a gesture of the owner on the item's issue, AD-10) follows three more rules; an answer of the
 test machine's tool (`local`) does not:
 - a gesture the workflow's manifest does not declare (by a comment), and that is not `unblock`, is refused;
 - a gesture commented before the open wait's `scheduled` event is refused (a stale screen), and the next answer of the
   item is tried;
-- `unblock`, for an item whose root card is blocked, is marked applied to `<key>:blocked:<card>:<event>` (the card's
-  last `blocked` event), unblocks the card, and runs the station's command again at once with the answer
-  `{"gesture": "unblock", "note": ...}`, its decision applied; for an item whose card is not blocked, it is refused.
+- `unblock`, for an item whose root card is blocked, unblocks the card, is marked applied to
+  `<key>:blocked:<card>:<event>` (the card's last `blocked` event), and runs the station's command again at once with
+  the answer `{"gesture": "unblock", "note": ...}`, its decision applied; an unblock the board refuses to write is
+  marked refused, so that the owner can give it again; for an item whose card is not blocked, it is refused.
 """
 
 from __future__ import annotations
@@ -62,6 +64,10 @@ PASS_SECONDS = 30.0
 # The first GitHub issue address of a card's body is its item's issue.
 ISSUE_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/issues/\d+", re.ASCII)
 PREFIX = "workflow-core: moteur"
+# The kinds of the engine's blocks, taken in turn on a card: the board sends a card blocked again for the kind of its
+# previous block to `triage`, where nothing launches it any more; a kind that never repeats keeps it `blocked`, for the
+# owner to unblock.
+BLOCK_KINDS = ("needs_input", "capability")
 
 
 class CommandRunner(Protocol):
@@ -409,25 +415,27 @@ class Engine:
             raise
 
     def _unblock(self, workflow: PluggedWorkflow, item: Item, station: Station, answer: Answer) -> None:
-        """A blocked root card, and the owner's `unblock`: marked applied, the card unblocked, and the station's
-        command run again at once with the answer, its decision applied."""
+        """A blocked root card, and the owner's `unblock`: the card unblocked, the answer marked applied, and the
+        station's command run again at once with the answer, its decision applied. An unblock the board refuses is
+        marked refused: the owner can give it again."""
         element = item.idempotency_key
         if item.status != "blocked" or not self.answers.is_pending(answer.id):
             return
         event = last_event(item, "blocked")
         wait = f"{workflow.key}:blocked:{item.id}:{event.id if event is not None else 0}"
-        # Marked before any write: whatever happens next, the answer is never applied again.
-        if not self.answers.mark(answer.id, "applied", wait):
-            return
-        self.log(f"{PREFIX}, {element} : réponse {answer.id} ({UNBLOCK}) appliquée au blocage {wait}")
+        # Written before it is marked, under the item's lock: an answer is applied only once its unblock is written.
         try:
             self.writer.unblock(workflow.board, item.id)
         except BoardWriteError:
-            self.log(
-                f"<3>{PREFIX}, {element} : réponse {answer.id} ({UNBLOCK}) appliquée au blocage {wait}, "
-                f"mais la carte {item.id} n'a pas pu être débloquée"
-            )
+            if self.answers.mark(answer.id, "refused"):
+                self.log(
+                    f"<3>{PREFIX}, {element} : réponse {answer.id} ({UNBLOCK}) refusée, la carte {item.id} n'a pas pu "
+                    f"être débloquée ({wait}) : le geste peut être reposé"
+                )
             raise
+        if not self.answers.mark(answer.id, "applied", wait):
+            return
+        self.log(f"{PREFIX}, {element} : réponse {answer.id} ({UNBLOCK}) appliquée au blocage {wait}")
         if station.command is None or self._stopped.is_set():
             return
         decision = self._launch(workflow, item, station, {"gesture": UNBLOCK, "note": answer.note})
@@ -471,8 +479,10 @@ class Engine:
 
     def _fail(self, workflow: PluggedWorkflow, item: Item, station: Station, reason: str) -> None:
         motive = f"Échec de la station {station.key} : {reason}"
-        self.writer.block(workflow.board, item.id, motive)
-        self.log(f"<4>{PREFIX}, {item.idempotency_key} : carte {item.id} bloquée : {motive}")
+        # The card's kind outlives an unblock: the next block takes the other one (see BLOCK_KINDS).
+        kind = BLOCK_KINDS[1] if item.block_kind == BLOCK_KINDS[0] else BLOCK_KINDS[0]
+        self.writer.block(workflow.board, item.id, motive, kind=kind)
+        self.log(f"<4>{PREFIX}, {item.idempotency_key} : carte {item.id} bloquée : {motive} (sorte {kind})")
 
 
 class EngineRunner:

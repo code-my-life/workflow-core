@@ -1,18 +1,20 @@
 """The owner's gestures on GitHub: a comment `/<key> <gesture>[ <note>]` on the issue of an item (AD-10, ADR 0017).
 
 1. At each reading of GitHub, for each workflow plugged by its manifest, the core reads the comments of the issue of
-   each item (the address the root card's body carries, in the manifest's `issues_repo`): the items whose root card is
+   each item (the address the root card's body carries, in one of the manifest's `issues_repos`): the items whose root
+   card is
    not finished, and the finished ones whose issue is still open, so that a gesture given after the end gets its
    answer. Only the comments from the previous reading of that issue on are read (two minutes earlier, for the clocks),
    page by page; every comment at the first reading of an issue since the start.
-2. A comment is a gesture when its author is the owner's account (`OWNER_LOGIN`, also the one factory-live comments
-   for) and its first line is exactly `/<key> <gesture>`, then an optional note (the rest of the line); the case
-   counts. Any other comment is left without a word.
+2. A comment is a gesture when its author is the owner's account (`WORKFLOW_CORE_OWNER_LOGIN`, also the one
+   factory-live comments for; without it, no comment is) and its first line is exactly `/<key> <gesture>`, then an
+   optional note (the rest of the line); the case counts. Any other comment is left without a word.
 3. A gesture enters the answer box of `engine.db` once, its id `github:<comment id>`, its time the comment's creation
    time. A comment that already carries a reaction of the App is never taken again, even when `engine.db` is lost.
 4. The engine applies or refuses it at its pass (`workflow_core.engine.engine`).
 5. Once it is handled, the App reacts to the comment: 👍 (`+1`) when applied, 😕 (`confused`) when refused. A
-   reaction GitHub refuses is tried again after the next reading, not at every check.
+   reaction GitHub refuses is tried again after the next reading, not at every check; one refused because the comment
+   is gone (404) is given up, with one line in the journal.
 6. In observer mode, the gestures read still enter the box, but nothing is reacted: the engine applies nothing, and
    the reactions wait for the normal mode.
 """
@@ -26,7 +28,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from workflow_core.adapters.github import OWNER_LOGIN, IssueComment
+from workflow_core.adapters.github import GitHubError, IssueComment
 from workflow_core.engine.answers import AnswerBox
 from workflow_core.engine.engine import issue_of
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
@@ -39,6 +41,8 @@ PREFIX = "workflow-core: gestes"
 OVERLAP_SECONDS = 120
 # The App's reaction to a handled answer, by its outcome.
 REACTIONS = {"applied": "+1", "refused": "confused"}
+# GitHub's answer to a reaction on a comment that no longer exists.
+NOT_FOUND = 404
 ISSUE_PATH = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)", re.ASCII)
 
 
@@ -71,8 +75,11 @@ class Gestures:
         state: CoreState,
         log: Callable[[str], None] = journal_line,
         clock: Callable[[], float] = time.time,
+        owner: str | None = None,
     ) -> None:
         self.workflows = workflows
+        # The owner's account: the only author whose comments are gestures; None takes none.
+        self.owner = owner
         # The core's GitHub client: `list_comments_since`, `list_open_issues`, `add_reaction`.
         self.github = github
         self.reader = reader
@@ -96,45 +103,44 @@ class Gestures:
             except Exception as error:  # never an exception out of the reading
                 self.log(f"<3>{PREFIX}, {workflow.key} : {type(error).__name__}: {error}")
 
-    def _issues(self, workflow: PluggedWorkflow) -> list[tuple[int, Item]]:
-        """The issues to read, by number, each with the root card of its item."""
+    def _issues(self, workflow: PluggedWorkflow) -> list[tuple[str, int, Item]]:
+        """The issues to read, by repository and number, each with the root card of its item."""
         try:
             items = self.reader.read_items(workflow.board)
         except BoardUnavailableError:
             # The board's base does not exist yet: no item.
             return []
-        found: dict[int, Item] = {}
-        finished: dict[int, Item] = {}
+        found: dict[tuple[str, int], Item] = {}
+        finished: dict[tuple[str, int], Item] = {}
         for item in items:
             if not is_root_card(item, workflow.key):
                 continue
             address = ISSUE_PATH.fullmatch(issue_of(item.body) or "")
-            if address is None or address[1] != workflow.issues_repo:
+            if address is None or address[1] not in workflow.issues_repos:
                 continue
-            number = int(address[2])
+            issue = (address[1], int(address[2]))
             if item.status in FINISHED:
-                finished.setdefault(number, item)
+                finished.setdefault(issue, item)
             else:
-                found.setdefault(number, item)
-        if any(number not in found for number in finished):
+                found.setdefault(issue, item)
+        for repo in sorted({repo for repo, number in finished if (repo, number) not in found}):
             try:
-                still_open = {issue.number for issue in self.github.list_open_issues(workflow.issues_repo)}
+                still_open = {issue.number for issue in self.github.list_open_issues(repo)}
             except Exception as error:
-                self.log(f"<3>{PREFIX}, {workflow.key} : issues de {workflow.issues_repo} illisibles : {error}")
-                still_open = set()
-            for number, item in finished.items():
-                if number in still_open:
-                    found.setdefault(number, item)
-        return sorted(found.items())
+                self.log(f"<3>{PREFIX}, {workflow.key} : issues de {repo} illisibles : {error}")
+                continue
+            for (finished_repo, number), item in finished.items():
+                if finished_repo == repo and number in still_open:
+                    found.setdefault((repo, number), item)
+        return [(repo, number, item) for (repo, number), item in sorted(found.items())]
 
     def _read(self, workflow: PluggedWorkflow) -> None:
-        if not workflow.issues_repo:
+        if self.owner is None:
             return
-        for number, item in self._issues(workflow):
-            self._read_issue(workflow, number, item)
+        for repo, number, item in self._issues(workflow):
+            self._read_issue(workflow, repo, number, item)
 
-    def _read_issue(self, workflow: PluggedWorkflow, number: int, item: Item) -> None:
-        repo = workflow.issues_repo
+    def _read_issue(self, workflow: PluggedWorkflow, repo: str, number: int, item: Item) -> None:
         started = self.clock()
         previous = self._read_at.get((repo, number))
         since = None
@@ -149,16 +155,16 @@ class Gestures:
             return
         try:
             for comment in comments:
-                self._take(workflow, number, item, comment)
+                self._take(workflow, repo, number, item, comment)
         except Exception as error:
             # The issue is read again in full from its previous reading; the next issues are still read.
             self.log(f"<3>{PREFIX}, {repo}#{number} : gestes non reçus, relus à la prochaine relecture : {error}")
             return
         self._read_at[(repo, number)] = started
 
-    def _take(self, workflow: PluggedWorkflow, number: int, item: Item, comment: IssueComment) -> None:
+    def _take(self, workflow: PluggedWorkflow, repo: str, number: int, item: Item, comment: IssueComment) -> None:
         gesture = gesture_of(workflow.key, comment.body)
-        if gesture is None or comment.author != OWNER_LOGIN or comment.app_reactions or not comment.id:
+        if gesture is None or comment.author != self.owner or comment.app_reactions or not comment.id:
             return
         answer_id = f"github:{comment.id}"
         if self.answers.has(answer_id):
@@ -172,10 +178,7 @@ class Gestures:
             source="github",
             received_at=iso_seconds(comment.created_at),
         )
-        self.log(
-            f"{PREFIX}, {workflow.issues_repo}#{number} : geste {name} reçu pour {item.idempotency_key} "
-            f"(réponse {answer_id})"
-        )
+        self.log(f"{PREFIX}, {repo}#{number} : geste {name} reçu pour {item.idempotency_key} (réponse {answer_id})")
 
     def react(self) -> None:
         """React to the comment of each handled GitHub answer not reacted to yet, in normal mode only. Never raises."""
@@ -191,20 +194,43 @@ class Gestures:
                 if answer_id in self._failed:
                     continue
             try:
-                self._react(answer_id, item, outcome)
+                try:
+                    self._react(answer_id, item, outcome)
+                except GitHubError as error:
+                    if error.status != NOT_FOUND:
+                        raise
+                    # The comment was deleted: no reaction can ever be posted, and none is tried again.
+                    self.answers.mark_reacted(answer_id)
+                    self.log(
+                        f"<4>{PREFIX}, {item} : réaction à {answer_id} abandonnée, commentaire introuvable ({error})"
+                    )
             except Exception as error:
-                with self._guard:
-                    self._failed.add(answer_id)
-                self.log(
-                    f"<3>{PREFIX}, {item} : réaction à {answer_id} non posée, réessai après la relecture : {error}"
-                )
+                self._retry_later(answer_id, item, error)
+
+    def _retry_later(self, answer_id: str, item: str, error: Exception) -> None:
+        with self._guard:
+            self._failed.add(answer_id)
+        self.log(f"<3>{PREFIX}, {item} : réaction à {answer_id} non posée, réessai après la relecture : {error}")
 
     def _react(self, answer_id: str, item: str, outcome: str) -> None:
         workflow = next((workflow for workflow in self.workflows if item.startswith(f"{workflow.key}:")), None)
         content = REACTIONS.get(outcome)
-        if workflow is None or content is None or not workflow.issues_repo:
+        if workflow is None or content is None:
+            return
+        repo = self._issues_repo_of(workflow, item)
+        if repo is None:
             return
         comment_id = int(answer_id.removeprefix("github:"))
-        self.github.add_reaction(workflow.issues_repo, comment_id, content)
+        self.github.add_reaction(repo, comment_id, content)
         self.answers.mark_reacted(answer_id)
         self.log(f"{PREFIX}, {item} : réponse {answer_id} {outcome}, réaction {content} posée")
+
+    def _issues_repo_of(self, workflow: PluggedWorkflow, item: str) -> str | None:
+        """The repository of the item's issue, where its gestures were commented: the address its root card carries,
+        if it is one of the manifest's `issues_repos`."""
+        for card in self.reader.read_items(workflow.board):
+            if card.idempotency_key == item and is_root_card(card, workflow.key):
+                address = ISSUE_PATH.fullmatch(issue_of(card.body) or "")
+                if address is not None and address[1] in workflow.issues_repos:
+                    return address[1]
+        return None

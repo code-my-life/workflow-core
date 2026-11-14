@@ -67,6 +67,8 @@ def version() -> int:
 # The runtime's unblock-loop guard: a card blocked again for the same kind (None equal to None) this many times in a
 # row goes to `triage` instead of `blocked` (`BLOCK_RECURRENCE_LIMIT`, `_route_block`).
 BLOCK_RECURRENCE_LIMIT = 2
+# The kinds `block --kind` accepts (`VALID_BLOCK_KINDS`); any other is refused by the runtime's parser.
+BLOCK_KINDS = {"dependency", "needs_input", "capability", "transient"}
 # The statuses each command starts from in the runtime 0.22.2 (hermes_cli/kanban_db.py), and the event it writes.
 STARTS = {
     "schedule": ({"todo", "ready", "running", "blocked"}, "scheduled"),
@@ -95,6 +97,9 @@ def lifecycle(db: sqlite3.Connection, command: list[str], card: str, now: int) -
         if split is None:
             return None
         rest, kind = split
+        if kind is not None and kind not in BLOCK_KINDS:
+            print(f"argument --kind: invalid choice: {kind!r}", file=sys.stderr)
+            return 2
     result = None
     if name == "complete":
         if rest[:1] != ["--result"] or len(rest) != 2:

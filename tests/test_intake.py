@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from workflow_core.adapters import runtime_adapter
-from workflow_core.adapters.github import APP_BOT, OWNER_LOGIN, GitHubClient
+from workflow_core.adapters.github import APP_BOT, GitHubClient, OpenIssue
 from workflow_core.config import Workflow
 from workflow_core.engine import Engine
 from workflow_core.engine.answers import ENGINE_DB
@@ -34,6 +34,8 @@ from workflow_core.plugin.manifest import PluggedWorkflow, plug
 from conftest import ESSAI_REPO, FACTORY_CARDS, make_board
 
 REPO = "code-my-life/workflow-essai"
+# The owner's account, as the core reads it in WORKFLOW_CORE_OWNER: a made-up login.
+OWNER = "proprietaire"
 LIVE = "https://live.example.ts.net:8446"
 
 
@@ -41,7 +43,7 @@ def issue_url(number: int) -> str:
     return f"https://github.com/{REPO}/issues/{number}"
 
 
-def issue(number: int, title: str = "Premier essai", *, author: str = OWNER_LOGIN, state: str = "open", **more) -> dict:
+def issue(number: int, title: str = "Premier essai", *, author: str = OWNER, state: str = "open", **more) -> dict:
     """An issue as GitHub's API lists it."""
     return {
         "number": number,
@@ -212,7 +214,7 @@ class Intakes:
         return [payload["issue"]["number"] for payload in self.inputs]
 
 
-def reading(github: GitHubClient, tmp_path: Path, *, workflow=None, core=None, live_url=LIVE):
+def reading(github: GitHubClient, tmp_path: Path, *, workflow=None, core=None, live_url=LIVE, owner=OWNER):
     adapter = runtime_adapter()
     core = core or state()
     writer = adapter.make_board_writer()
@@ -227,6 +229,7 @@ def reading(github: GitHubClient, tmp_path: Path, *, workflow=None, core=None, l
         register=IntakeRegister(tmp_path / "state" / ENGINE_DB),
         ensure_board=engine.ensure_board,
         live_url=live_url,
+        owner=owner,
         run=intakes,
         log=lines.append,
     )
@@ -306,10 +309,61 @@ def test_an_accepted_issue_creates_one_root_card_and_says_so(fake_runtime, serve
     assert not any(line.startswith(("<3>", "<4>")) for line in lines), lines
 
 
+class ReposGitHub:
+    """The issues of several repositories, as the core's client hands them, and the comments it posts."""
+
+    def __init__(self, issues: dict[str, list[int]]) -> None:
+        self.issues = issues
+        self.read: list[str] = []
+        self.posted: list[tuple[str, int]] = []
+
+    def list_open_issues(self, repo: str) -> list[OpenIssue]:
+        self.read.append(repo)
+        return [
+            OpenIssue(
+                number=number,
+                url=f"https://github.com/{repo}/issues/{number}",
+                title=f"Essai {number}",
+                body="",
+                author=OWNER,
+                labels=(),
+            )
+            for number in self.issues.get(repo, [])
+        ]
+
+    def list_comments(self, repo: str, number: int) -> list:
+        return []
+
+    def post_comment(self, repo: str, number: int, body: str) -> str:
+        self.posted.append((repo, number))
+        return f"https://github.com/{repo}/issues/{number}#issuecomment-1"
+
+
+def test_every_issues_repo_of_the_manifest_is_read(fake_runtime, tmp_path):
+    other = "code-my-life/workflow-essai-bis"
+    github = ReposGitHub({REPO: [7], other: [12]})
+    intake, intakes, lines = reading(github, tmp_path, workflow=essai(issues_repos=(REPO, other)))
+
+    intake.read_once()
+
+    assert github.read == [REPO, other]
+    assert [(payload["issue"]["repo"], payload["issue"]["number"]) for payload in intakes.inputs] == [
+        (REPO, 7),
+        (other, 12),
+    ]
+    assert cards(fake_runtime) == [
+        ("essai:7", "essai-preparer", f"https://github.com/{REPO}/issues/7"),
+        ("essai:12", "essai-preparer", f"https://github.com/{other}/issues/12"),
+    ]
+    assert github.posted == [(REPO, 7), (other, 12)]
+    assert registered(tmp_path) == [(REPO, 7, "essai:7", "accept"), (other, 12, "essai:12", "accept")]
+    assert not any(line.startswith(("<3>", "<4>")) for line in lines), lines
+
+
 def test_an_issue_read_twice_or_after_a_lost_registry_is_not_taken_again(fake_runtime, serve, tmp_path):
     fake = FakeGitHub([issue(7)])
     # A marker written by another account than the App's does not count.
-    fake.add_comment(7, OWNER_LOGIN, intake_marker(REPO, 7, "accept"))
+    fake.add_comment(7, OWNER, intake_marker(REPO, 7, "accept"))
     intake, intakes, _ = reading(serve(fake), tmp_path)
 
     intake.read_once()
@@ -371,6 +425,39 @@ def test_only_the_owner_s_open_issues_with_the_right_label_are_taken(fake_runtim
     labelled.read_once()
     assert labelled_intakes.numbers() == [4, 6]
     assert sorted(number for number, _ in fake.posted) == [4, 5, 6]
+
+
+def test_without_the_owner_s_login_no_issue_is_taken(fake_runtime, serve, tmp_path):
+    fake = FakeGitHub([issue(5)])
+    intake, intakes, _ = reading(serve(fake), tmp_path, owner=None)
+
+    intake.read_once()
+
+    assert intakes.inputs == []
+    assert fake.posted == []
+    assert fake_runtime.writes() == []
+    assert registered(tmp_path) == []
+
+
+def test_the_owner_s_login_is_read_from_the_environment(fake_runtime, monkeypatch, capsys):
+    import workflow_core.service as service
+
+    plugged = {"essai": Workflow(key="essai", board="essai", repo=ESSAI_REPO)}
+    monkeypatch.setenv("WORKFLOW_CORE_OWNER_LOGIN", OWNER)
+    app = service.build_service(secret="s", workflows=plugged, adapter=runtime_adapter(), github=NoIssues())
+    assert (app.state.intake.owner, app.state.gestures.owner) == (OWNER, OWNER)
+    assert "WORKFLOW_CORE_OWNER_LOGIN" not in capsys.readouterr().err
+
+    # Without it, the rest of the core runs; the journal says it once, at the start.
+    monkeypatch.delenv("WORKFLOW_CORE_OWNER_LOGIN")
+    app = service.build_service(secret="s", workflows=plugged, adapter=runtime_adapter(), github=NoIssues())
+    assert (app.state.intake.owner, app.state.gestures.owner) == (None, None)
+    assert [workflow.key for workflow in app.state.engine.workflows] == ["essai"]
+    app.state.intake.read_once()
+    app.state.gestures.read_once()
+    told = [line for line in capsys.readouterr().err.splitlines() if "WORKFLOW_CORE_OWNER_LOGIN" in line]
+    assert len(told) == 1
+    assert "aucune issue" in told[0] and "aucun geste" in told[0]
 
 
 def test_an_unreadable_or_late_intake_is_retried(fake_runtime, serve, tmp_path):
@@ -496,7 +583,7 @@ def test_the_service_reads_github_only_with_a_workflow_plugged_by_its_manifest(f
 
     app = service.build_service(secret="s", workflows=plugged, adapter=runtime_adapter(), github=NoIssues())
     assert [workflow.key for workflow in app.state.intake.workflows] == ["essai"]
-    assert app.state.intake.workflows[0].issues_repo == REPO
+    assert app.state.intake.workflows[0].issues_repos == (REPO,)
     # The owner's gestures are read with the issues, by the same runner.
     assert [workflow.key for workflow in app.state.gestures.workflows] == ["essai"]
     with TestClient(app):

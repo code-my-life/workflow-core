@@ -1,15 +1,15 @@
 """The manifest of a workflow and its judge (ADR 0005, ADR 0006).
 
 A workflow plugs into the core by `workflow-manifest.json` at the root of its repository: its key, its sheet, the
-repository of its issues, its intake command, its stations and the gestures it recognises. The form is a Pydantic
-model, published as a JSON Schema in `schema/`; the cross rules are checked after it, in a fixed order, and the first
-broken one is named. The judge never raises: every input gets a verdict.
+repositories of its issues (each one read by this workflow alone), its intake command, its stations and the gestures
+it recognises. The form is a Pydantic model, published as a JSON Schema in `schema/`; the cross rules are checked
+after it, in a fixed order, and the first broken one is named. The judge never raises: every input gets a verdict.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 
@@ -55,6 +55,15 @@ class ManifestStation(_Form):
 class ManifestGesture(_Form):
     """A gesture the workflow recognises: `comment` on the issue of an item, or `issue` opened in `repo`."""
 
+    # The validator below, said in the published schema too: a repo for an issue gesture, none for a comment.
+    model_config = ConfigDict(
+        json_schema_extra={
+            "if": {"properties": {"kind": {"const": "issue"}}},
+            "then": {"required": ["repo"], "properties": {"repo": {"type": "string"}}},
+            "else": {"properties": {"repo": {"type": "null"}}},
+        }
+    )
+
     name: str = Field(min_length=1, pattern=r"^[a-z][a-z0-9-]*$")
     kind: Literal["comment", "issue"]
     repo: Repo | None = None
@@ -72,10 +81,17 @@ class WorkflowManifest(_Form):
     # Not bounded here: a version outside MANIFEST_VERSIONS is the rule `version-out-of-range`.
     schema_version: Version
     key: str = Field(min_length=1, pattern=r"^[a-z0-9-]+$")
-    # The path of the workflow's sheet, relative to its repository.
-    sheet: Text
-    # The repository where the workflow's issues are born, `<organisation>/<repository>`.
-    issues_repo: Repo
+    # The path of the workflow's sheet, relative to its repository; the schema says what `_sheet_is_relative` checks.
+    sheet: Annotated[
+        str,
+        Field(
+            min_length=1,
+            json_schema_extra={"not": {"anyOf": [{"pattern": "^[/~]"}, {"pattern": "(^|/)\\.\\.(/|$)"}]}},
+        ),
+    ]
+    # The repositories where the workflow's issues are born, `<organisation>/<repository>`: no other workflow reads
+    # them.
+    issues_repos: list[Repo] = Field(min_length=1)
     intake: ManifestIntake
     stations: list[ManifestStation] = Field(min_length=1)
     gestures: list[ManifestGesture] = Field(default_factory=list)
@@ -110,7 +126,9 @@ def _form_error(error: ValidationError) -> str:
     return f"{path}: {first['msg']}"
 
 
-def _manifest_rule(manifest: WorkflowManifest, key: str) -> tuple[str, str] | None:
+def _manifest_rule(
+    manifest: WorkflowManifest, key: str, issues_repos_taken: Mapping[str, str]
+) -> tuple[str, str] | None:
     """The first rule a well-formed manifest breaks on its own, before its sheet is read, or None."""
     low, high = MANIFEST_VERSIONS
     if not low <= manifest.schema_version <= high:
@@ -138,6 +156,26 @@ def _manifest_rule(manifest: WorkflowManifest, key: str) -> tuple[str, str] | No
     for station in manifest.stations:
         if station.nature == "agent" and station.profile is None:
             return "missing-profile", f'agent station "{station.key}" has no profile'
+    # The published sheet names each agent station's profile: two stations of one profile would break its rule
+    # `shared-agent`.
+    profiles: dict[str, str] = {}
+    for station in manifest.stations:
+        if station.nature != "agent" or station.profile is None:
+            continue
+        taken = profiles.get(station.profile)
+        if taken is not None:
+            return (
+                "shared-agent-profile",
+                f'agent stations "{taken}" and "{station.key}" both declare the profile "{station.profile}"',
+            )
+        profiles[station.profile] = station.key
+    for repo in manifest.issues_repos:
+        owner = issues_repos_taken.get(repo)
+        if owner is not None and owner != key:
+            return (
+                "shared-issues-repo",
+                f'issues repository "{repo}" is already read by the plugged workflow "{owner}"',
+            )
     return None
 
 
@@ -173,17 +211,23 @@ def _removed_station(manifest: WorkflowManifest, lanes_in_use: Iterable[str]) ->
 
 
 def judge_manifest(
-    data: Any, *, key: str, read_sheet: Callable[[str], Any], lanes_in_use: Iterable[str]
+    data: Any,
+    *,
+    key: str,
+    read_sheet: Callable[[str], Any],
+    lanes_in_use: Iterable[str],
+    issues_repos_taken: Mapping[str, str] | None = None,
 ) -> ManifestVerdict:
     """Judge a manifest already read from JSON, for the configured `key`: the valid manifest and its sheet, or the
     first broken rule, named. `read_sheet` reads the sheet at a path relative to the repository; `lanes_in_use` are
-    the lanes of the board's unfinished root cards. Never raises."""
+    the lanes of the board's unfinished root cards; `issues_repos_taken` maps each issues repository of the workflows
+    already plugged to its workflow's key. Never raises."""
     try:
         try:
             manifest = WorkflowManifest.model_validate(data)
         except ValidationError as error:
             return ManifestRefused(rule="form", detail=_form_error(error))
-        broken = _manifest_rule(manifest, key)
+        broken = _manifest_rule(manifest, key, issues_repos_taken or {})
         if broken is None:
             try:
                 sheet_data = read_sheet(manifest.sheet)

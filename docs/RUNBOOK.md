@@ -19,10 +19,13 @@ ses jetons d'installation sur l'organisation `code-my-life` : il ne lit jamais l
 | `WORKFLOW_CORE_NOTIFY_SINCE` | L'heure d'allumage, ISO 8601 avec son décalage (`2026-11-20T14:05:00+01:00`), obligatoire avec `on` : seules les attentes ouvertes après elle sont alertées. Absente ou illisible, le notificateur reste éteint. |
 | `WORKFLOW_CORE_NOTIFY_REPOS` | Facultative : les dépôts (`code-my-life/workflow-core,…`) dont les issues peuvent recevoir une alerte ; vide, tous. Sert à l'essai sur une issue de test. |
 | `WORKFLOW_CORE_LIVE_URL` | L'adresse de factory-live, pour le lien vers l'élément ; sans elle, l'alerte n'a pas de lien. |
+| `WORKFLOW_CORE_OWNER_LOGIN` | Le compte GitHub du propriétaire, celui au nom duquel factory-live ouvre une issue et commente : seuls ses issues et ses gestes sont pris par la relecture de GitHub. Absente, la relecture ne prend aucune issue et aucun geste ; le reste du socle tourne. |
 
-Les deux premières sont lues dans l'environnement, sinon dans le `.env` ; les quatre autres, dans l'environnement du
+Les deux premières sont lues dans l'environnement, sinon dans le `.env` ; les cinq autres, dans l'environnement du
 service (le `.env`, chargé par l'unité systemd). Au démarrage, le journal du service dit l'état de l'interrupteur, ses
-dépôts, son heure, et l'absence du lien : `journalctl --user -u workflow-core.service --since "-2 min"`.
+dépôts, son heure, l'absence du lien et celle du compte du propriétaire :
+`journalctl --user -u workflow-core.service --since "-2 min"`. Aucune de ces variables n'est passée aux commandes
+qu'il lance.
 
 ### Le cache du jeton
 
@@ -161,10 +164,14 @@ moteur applique sa **décision** :
   carte racine ;
 - `wait` laisse la carte telle quelle : la commande est relancée à la passe suivante, avec un essai de plus ;
 - `fail`, un délai dépassé ou une sortie illisible bloquent la carte avec son motif, « Échec de la station
-  preparer : délai de 30 s dépassé » (sans sorte de blocage). Une carte bloquée n'est plus lancée ; débloquée
+  preparer : délai de 60 s dépassé ». Une carte bloquée n'est plus lancée ; débloquée
   (`hermes kanban --board <slug> unblock <carte>`), elle redevient prête à sa station et la commande est relancée.
-  Si elle échoue de nouveau après ce déblocage, Hermès l'envoie en `triage` au lieu de `blocked` (sa garde contre les
-  boucles de déblocage, événement `block_loop_detected`) ; le moteur ne lance plus une carte en `triage`.
+  Chaque blocage porte une **sorte** (`block --kind`), jamais celle du blocage précédent de la carte : `needs_input`,
+  puis `capability`, puis `needs_input`… Hermès garde la sorte d'un blocage après le déblocage (seul `complete`
+  l'efface) et envoie en `triage` une carte bloquée de nouveau pour la même sorte (sa garde contre les boucles de
+  déblocage, événement `block_loop_detected`, `BLOCK_RECURRENCE_LIMIT = 2`) ; le moteur ne lance plus une carte en
+  `triage`. En changeant de sorte à chaque blocage, la carte reste `blocked`, et le propriétaire peut toujours la
+  débloquer.
   Une station `to` inconnue du manifeste bloque aussi la carte, avec « station « <to> » inconnue ».
 
 Une carte racine prête au nom de voie d'une station `owner` (où l'on attend le propriétaire) est mise en **attente** :
@@ -189,14 +196,17 @@ suivante réessaie.
 
 ## La relecture de GitHub
 
-Un élément d'un workflow branché par manifeste naît d'une **issue** ouverte dans le dépôt que déclare son manifeste
-(`issues_repo`). Le socle ne reçoit aucun webhook : il **relit** GitHub au démarrage, puis toutes les 10 minutes
-(`GITHUB_POLL_SECONDS = 600` dans `workflow_core/intake.py`), au nom de l'App `code-my-life-factory`. Il ne lit aucun
-autre dépôt. La relecture ne tourne que si un workflow est branché par son manifeste.
+Un élément d'un workflow branché par manifeste naît d'une **issue** ouverte dans l'un des dépôts que déclare son
+manifeste (`issues_repos`, une liste d'au moins un dépôt ; un dépôt n'est lu que par un seul workflow : le second
+workflow qui le déclare reste non branché, règle `shared-issues-repo`). Le socle ne reçoit aucun webhook : il **relit**
+chacun de ces dépôts au démarrage, puis toutes les 10 minutes (`GITHUB_POLL_SECONDS = 600` dans
+`workflow_core/intake.py`), au nom de l'App `code-my-life-factory`. Il ne lit aucun autre dépôt. La relecture ne
+tourne que si un workflow est branché par son manifeste.
 
 Issues prises : les issues ouvertes (pas les pull requests, que l'API de GitHub range parmi les issues) ouvertes par le
-compte du propriétaire, `cddev` (celui au nom duquel factory-live ouvre une issue). Les autres sont ignorées sans
-commentaire. Une entrée de la configuration peut porter `issue_label` : seules les issues à ce label sont prises
+compte du propriétaire (celui au nom duquel factory-live ouvre une issue), que le socle lit dans la variable
+`WORKFLOW_CORE_OWNER_LOGIN` de son `.env` : l'y ajouter avant de brancher un workflow. Sans elle, aucune issue n'est
+prise, et le journal le dit une fois au démarrage. Les autres issues sont ignorées sans commentaire. Une entrée de la configuration peut porter `issue_label` : seules les issues à ce label sont prises
 (`config/essai-test.toml` a `issue_label = "test"`). Une entrée sans `issue_label` ignore les issues au label `test` :
 le socle de production ne prend jamais une issue de la machine de test.
 
@@ -240,8 +250,8 @@ le corps de sa carte racine), posté sur GitHub ou depuis factory-live, qui le p
 exactement `/<clé> <geste>`, suivie d'une note facultative (le reste de la ligne) : `/essai valider c'est bon`. La casse
 compte (`/Essai valider` n'est pas un geste), et le geste doit ouvrir le commentaire.
 
-Seuls comptent les commentaires du compte du propriétaire (la constante `OWNER_LOGIN` de
-`workflow_core/adapters/github/__init__.py`, le même que pour la relecture des issues) ; tout autre commentaire est
+Seuls comptent les commentaires du compte du propriétaire (la variable `WORKFLOW_CORE_OWNER_LOGIN` du `.env`, le même
+que pour la relecture des issues ; sans elle, aucun geste n'est pris) ; tout autre commentaire est
 ignoré sans réaction, de même qu'un geste d'un autre workflow (`/factory unblock` sur l'issue d'un élément `essai` :
 la factory lit ses gestes elle-même). Gestes reconnus : ceux de sorte `comment` du manifeste (`valider` et `refaire`
 pour le workflow d'essai), plus `unblock`, valable pour tout workflow. Un geste de sorte `issue` (`ouvrir`) ne se donne
@@ -265,12 +275,13 @@ Application, par le moteur à sa passe suivante (30 secondes au plus) :
   marqué appliqué, comme une réponse de l'outil de la machine de test ;
 - un geste du manifeste sans attente ouverte (élément terminé, bloqué, à une station `code`), ou posté avant
   l'ouverture de l'attente en cours (un écran périmé), est refusé ;
-- `unblock` sur un élément dont la carte racine est bloquée : la réponse est marquée appliquée au blocage
-  (`<clé>:blocked:<carte>:<événement blocked>`), la carte est débloquée (`unblock`), et la commande de sa station est
+- `unblock` sur un élément dont la carte racine est bloquée : la carte est débloquée (`unblock`), la réponse est
+  marquée appliquée au blocage (`<clé>:blocked:<carte>:<événement blocked>`), et la commande de sa station est
   relancée aussitôt avec `answer` `{"gesture": "unblock", "note": …}`, sa décision appliquée. Si elle échoue de
-  nouveau, Hermès envoie la carte en `triage` (sa garde contre les boucles de déblocage) : un second `unblock` y est
-  refusé, la carte n'étant pas `blocked`. Sur un élément non bloqué, `unblock` est refusé. Un déblocage qu'Hermès
-  refuse est écrit au journal (`<3>`) ; la réponse reste appliquée : il faut poster un nouveau geste ;
+  nouveau, la carte est bloquée de nouveau, avec une autre sorte de blocage (voir « Le moteur ») : elle reste
+  `blocked`, et un nouvel `unblock` s'y applique. Sur un élément non bloqué, `unblock` est refusé. Un déblocage
+  qu'Hermès refuse d'écrire est écrit au journal (`<3>`) et la réponse est refusée (😕) : la carte reste bloquée, et le
+  propriétaire peut reposer le geste ;
 - un geste inconnu du workflow est refusé.
 
 Ces règles ne valent que pour les gestes de GitHub : une réponse de `scripts/inject_answer.py` (source `local`) garde
@@ -278,7 +289,8 @@ le traitement décrit dans « Le moteur ».
 
 **Réaction** : une fois le geste traité, l'App réagit au commentaire, 👍 (`+1`) s'il est appliqué, 😕 (`confused`)
 s'il est refusé, en quelques secondes après la passe du moteur ; la colonne `reacted_at` de la boîte le note. Une
-réaction que GitHub refuse est écrite au journal (`<3>`) et réessayée après la relecture suivante, pas avant. Le
+réaction que GitHub refuse est écrite au journal (`<3>`) et réessayée après la relecture suivante, pas avant ; une
+réaction refusée en 404 (commentaire supprimé) est abandonnée, avec une seule ligne au journal (`<4>`). Le
 propriétaire a donc sa réponse en moins de 11 minutes : 10 minutes au plus jusqu'à la relecture, 30 secondes jusqu'à
 la passe, puis la réaction.
 

@@ -50,6 +50,7 @@ def test_the_essai_manifest_is_accepted():
     assert verdict.ok, verdict
     assert [station.key for station in verdict.manifest.stations] == ["preparer", "revue", "clore"]
     assert [station.key for station in verdict.sheet.stations] == ["preparer", "revue", "clore"]
+    assert verdict.manifest.issues_repos == ["code-my-life/workflow-essai"]
     # The trial repository the engine's tests use carries the same two files, byte for byte.
     for name in ("workflow-manifest.json", "workflow-sheet.json"):
         assert (ESSAI_REPO / name).read_bytes() == (REFERENCE / name).read_bytes()
@@ -88,6 +89,13 @@ def _missing_profile(manifest: dict, sheet: dict) -> list[str]:
     return []
 
 
+def _shared_agent_profile(manifest: dict, sheet: dict) -> list[str]:
+    for col, key in ((3, "relire"), (4, "corriger")):
+        manifest["stations"].append({"key": key, "nature": "agent", "profile": "relecteur"})
+        sheet["stations"].append(sheet_station(key, col, kind="ai"))
+    return []
+
+
 def _sheet_unreadable(manifest: dict, sheet: dict) -> list[str]:
     manifest["sheet"] = "absente.json"
     return []
@@ -120,6 +128,7 @@ BROKEN: dict[str, tuple[Callable[[dict, dict], list[str]], tuple[str, ...]]] = {
     "duplicate-gesture": (_duplicate_gesture, ('"valider"',)),
     "missing-command": (_missing_command, ('"revue"', "command")),
     "missing-profile": (_missing_profile, ('"relire"', "profile")),
+    "shared-agent-profile": (_shared_agent_profile, ('"relire"', '"corriger"', '"relecteur"')),
     "sheet-unreadable": (_sheet_unreadable, ('"absente.json"',)),
     "sheet:duplicate-station": (_sheet_rule, ('"preparer"',)),
     "agents-on-sheet": (_agents_on_sheet, ('"revue"',)),
@@ -139,6 +148,25 @@ def test_each_broken_rule_is_named(rule):
     assert not verdict.ok
     assert verdict.rule == rule
     assert [culprit for culprit in culprits if culprit not in verdict.detail] == []
+
+
+def test_an_issues_repo_of_another_plugged_workflow_is_refused():
+    manifest = load("workflow-manifest.json")
+    manifest["issues_repos"] = ["code-my-life/essai-a", "code-my-life/workflow-essai"]
+    taken = {"code-my-life/workflow-essai": "studio", "code-my-life/autre": "factory"}
+
+    verdict = judge_manifest(
+        manifest, key="essai", read_sheet=read_reference, lanes_in_use=[], issues_repos_taken=taken
+    )
+
+    assert (verdict.ok, verdict.rule) == (False, "shared-issues-repo")
+    assert '"code-my-life/workflow-essai"' in verdict.detail and '"studio"' in verdict.detail
+    # A repository no other workflow reads is its own.
+    del taken["code-my-life/workflow-essai"]
+    accepted = judge_manifest(
+        manifest, key="essai", read_sheet=read_reference, lanes_in_use=[], issues_repos_taken=taken
+    )
+    assert accepted.ok, accepted
 
 
 def test_a_refused_sheet_names_the_sheet_rule():
@@ -207,6 +235,13 @@ class HostileLanes:
         {**load("workflow-manifest.json"), "sheet": "/etc/workflow-sheet.json"},
         {**load("workflow-manifest.json"), "sheet": "../workflow-sheet.json"},
         {**load("workflow-manifest.json"), "intake": {"command": [], "timeout_seconds": 60}},
+        {**load("workflow-manifest.json"), "issues_repos": []},
+        {**load("workflow-manifest.json"), "issues_repos": "code-my-life/workflow-essai"},
+        {**load("workflow-manifest.json"), "issues_repos": ["workflow-essai"]},
+        {
+            **{name: value for name, value in load("workflow-manifest.json").items() if name != "issues_repos"},
+            "issues_repo": "code-my-life/workflow-essai",
+        },
         {**load("workflow-manifest.json"), "gestures": [{"name": "valider", "kind": "comment", "repo": "a/b"}]},
         {**load("workflow-manifest.json"), "gestures": [{"name": "ouvrir", "kind": "issue"}]},
         *(
@@ -230,6 +265,10 @@ class HostileLanes:
         "absolute-sheet",
         "parent-sheet",
         "empty-intake-command",
+        "no-issues-repo",
+        "issues-repos-not-a-list",
+        "issues-repo-without-owner",
+        "single-issues-repo",
         "comment-with-repo",
         "issue-without-repo",
         "zero-timeout",

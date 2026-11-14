@@ -140,12 +140,12 @@ class OpenIssueGitHub(IssueListGitHub):
             "html_url": f"https://github.com/code-my-life/workflow-essai/issues/{n}",
             "title": f"Issue {n}",
             "body": f"Corps {n}" if n != 2 else None,
-            "user": {"login": "cddev" if n != 3 else "inconnu"},
+            "user": {"login": "proprietaire" if n != 3 else "inconnu"},
             "labels": [{"name": "test"}, {"name": "type:essai"}] if n == 1 else [],
             "state": "open",
         }
         for n in range(1, 5)
-    ] + [{"number": 9, "pull_request": {"url": "x"}, "user": {"login": "cddev"}, "state": "open"}]
+    ] + [{"number": 9, "pull_request": {"url": "x"}, "user": {"login": "proprietaire"}, "state": "open"}]
 
 
 def test_open_issues_are_read_page_by_page_without_pull_requests(tmp_path):
@@ -175,7 +175,7 @@ def test_open_issues_are_read_page_by_page_without_pull_requests(tmp_path):
         url="https://github.com/code-my-life/workflow-essai/issues/1",
         title="Issue 1",
         body="Corps 1",
-        author="cddev",
+        author="proprietaire",
         labels=("test", "type:essai"),
     )
     assert (issues[1].body, issues[2].author, issues[3].labels) == ("", "inconnu", ())

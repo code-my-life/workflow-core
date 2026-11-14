@@ -8,6 +8,7 @@ leaves its workflow unplugged, with the reason; the other workflows run.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -40,7 +41,7 @@ class ManifestRefusedError(Exception):
 
 @dataclass(frozen=True)
 class PluggedWorkflow:
-    """A workflow plugged by its manifest: its key, its board, its repository, its stations in order, the repository
+    """A workflow plugged by its manifest: its key, its board, its repository, its stations in order, the repositories
     of its issues and its intake command, the label its issues must carry (None: any but `test`), the names of the
     gestures the owner gives by a comment on an item's issue, the sheet the API serves (judged at the plugging, its
     stations' agents taken from the manifest), and every gesture of the manifest, in its order."""
@@ -49,7 +50,7 @@ class PluggedWorkflow:
     board: str
     repo: Path
     stations: tuple[ManifestStation, ...]
-    issues_repo: str = ""
+    issues_repos: tuple[str, ...] = ()
     intake: ManifestIntake | None = None
     issue_label: str | None = None
     gestures: tuple[str, ...] = ()
@@ -98,9 +99,12 @@ def _why(error: Exception) -> str:
     return str(error) or type(error).__name__
 
 
-def plug(workflow: Workflow, *, reader: BoardReader | None = None) -> PluggedWorkflow:
+def plug(
+    workflow: Workflow, *, reader: BoardReader | None = None, issues_repos_taken: Mapping[str, str] | None = None
+) -> PluggedWorkflow:
     """The workflow plugged by the manifest of its repository, once judged; `ManifestRefusedError` with the reason
-    otherwise. Without a reader, no lane is in use."""
+    otherwise. Without a reader, no lane is in use; `issues_repos_taken` maps the issues repositories of the workflows
+    already plugged to their keys."""
     key = workflow.key
     repo = workflow.repo_path
     if repo is None:
@@ -122,7 +126,9 @@ def plug(workflow: Workflow, *, reader: BoardReader | None = None) -> PluggedWor
     def read_sheet(relative: str) -> object:
         return json.loads((repo / relative).read_text(encoding="utf-8"))
 
-    verdict = judge_manifest(data, key=key, read_sheet=read_sheet, lanes_in_use=lanes)
+    verdict = judge_manifest(
+        data, key=key, read_sheet=read_sheet, lanes_in_use=lanes, issues_repos_taken=issues_repos_taken
+    )
     if not verdict.ok:
         raise ManifestRefusedError(key, f"manifeste de {key} refusé : {verdict.rule} : {verdict.detail}")
     manifest = verdict.manifest
@@ -131,7 +137,7 @@ def plug(workflow: Workflow, *, reader: BoardReader | None = None) -> PluggedWor
         board=workflow.board,
         repo=repo,
         stations=tuple(manifest.stations),
-        issues_repo=manifest.issues_repo,
+        issues_repos=tuple(manifest.issues_repos),
         intake=manifest.intake,
         issue_label=workflow.issue_label,
         gestures=tuple(gesture.name for gesture in manifest.gestures if gesture.kind == "comment"),

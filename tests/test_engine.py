@@ -295,29 +295,43 @@ def test_a_fail_a_timeout_or_an_unreadable_output_blocks_the_card_with_its_reaso
         core, _ = engine(launches=launches, workflow=essai(board, preparer=preparer))
         motive = f"Échec de la station preparer : {reason}"
 
+        def block(kind: str, board=board, motive=motive) -> list[str]:
+            return ["kanban", "--board", board, "block", CARD, motive, "--kind", kind]
+
+        unblock = ["kanban", "--board", board, "unblock", CARD]
         core.run_pass()
-        blocked = [["kanban", "--board", board, "block", CARD, motive]]
-        assert [call for call in fake_runtime.writes() if call[2] == board] == blocked, board
-        # Blocked without a kind, and launched no more.
-        assert status_of(fake_runtime.home, board=board) == ("blocked", None), board
+        assert [call for call in fake_runtime.writes() if call[2] == board] == [block("needs_input")], board
+        assert status_of(fake_runtime.home, board=board) == ("blocked", "needs_input"), board
+        # Blocked, it is launched no more.
         core.run_pass()
         assert len(launches.calls) == 1, board
 
-        # Unblocked, the card is ready at its station again, and its command runs again.
-        writer.unblock(board, CARD)
-        core.run_pass()
-        assert [payload["attempt"] for _, payload in launches.calls] == [1, 2], board
+        # Unblocked, the card is ready at its station again, and its command runs again. Failing again, it is blocked
+        # with another kind than its previous block's: the runtime's unblock-loop guard, which sends a card blocked
+        # twice in a row for the same kind to `triage`, never trips, and the owner can always unblock it.
+        for attempt, kind in ((2, "capability"), (3, "needs_input")):
+            writer.unblock(board, CARD)
+            core.run_pass()
+            assert len(launches.calls) == attempt, board
+            assert status_of(fake_runtime.home, board=board) == ("blocked", kind), board
         assert [call for call in fake_runtime.writes() if call[2] == board] == [
-            *blocked,
-            ["kanban", "--board", board, "unblock", CARD],
-            *blocked,
+            block("needs_input"),
+            unblock,
+            block("capability"),
+            unblock,
+            block("needs_input"),
         ], board
-        # Failing again after an unblock, the card goes to `triage` (the runtime's unblock-loop guard), and the engine
-        # launches it no more.
-        assert status_of(fake_runtime.home, board=board) == ("triage", None), board
-        core.run_pass()
-        assert len(launches.calls) == 2, board
+        assert [payload["attempt"] for _, payload in launches.calls] == [1, 2, 3], board
+        assert triaged(fake_runtime.home, board) == [], board
     assert not any(call[3] == "complete" for call in fake_runtime.writes())
+
+
+def triaged(home, board: str) -> list[int]:
+    """The ids of the runtime's `block_loop_detected` events on the board: a card sent to `triage`."""
+    with sqlite3.connect(home / "kanban" / "boards" / board / "kanban.db") as db:
+        rows = db.execute("SELECT id FROM task_events WHERE kind = 'block_loop_detected'").fetchall()
+    db.close()
+    return [row[0] for row in rows]
 
 
 def test_the_last_station_completes_the_root_card(fake_runtime):
@@ -358,4 +372,4 @@ def test_an_unknown_target_station_blocks_the_card(fake_runtime, tmp_path):
     core.run_pass()
 
     motive = "Échec de la station preparer : station « nulle-part » inconnue"
-    assert fake_runtime.writes() == [["kanban", "--board", "essai", "block", CARD, motive]]
+    assert fake_runtime.writes() == [["kanban", "--board", "essai", "block", CARD, motive, "--kind", "needs_input"]]

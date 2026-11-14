@@ -4,24 +4,24 @@ the engine's epic, code-my-life/workflow-core#57)."""
 
 from __future__ import annotations
 
+import dataclasses
 import sqlite3
 import time
 from datetime import UTC, datetime
 
 from workflow_core.adapters import runtime_adapter
-from workflow_core.adapters.github import OWNER_LOGIN
 from workflow_core.engine.answers import AnswerBox
 from workflow_core.gestures import Gestures
 
 from conftest import make_runtime_board
 from test_engine import CARD, Launches, engine, essai, root_card, state
 from test_engine_owner import WAITING, answer_box, card_row, scheduled_events
-from test_intake import FakeGitHub, issue, issue_url
+from test_intake import OWNER, REPO, FakeGitHub, issue, issue_url
 
 OTHER_CARD = "t_0e0e0e0e"
 
 
-def reading(github, box: AnswerBox, *, core=None, workflow=None, clock=time.time):
+def reading(github, box: AnswerBox, *, core=None, workflow=None, clock=time.time, owner=OWNER):
     """The reading of the owner's gestures for the trial workflow, and its journal lines."""
     lines: list[str] = []
     built = Gestures(
@@ -32,6 +32,7 @@ def reading(github, box: AnswerBox, *, core=None, workflow=None, clock=time.time
         state=core or state(),
         log=lines.append,
         clock=clock,
+        owner=owner,
     )
     return built, lines
 
@@ -75,7 +76,7 @@ def test_an_owner_gesture_resumes_the_wait_and_gets_a_thumbs_up(fake_runtime, se
     box, launches = answer_box(), Launches()
     core, _, wait = parked(fake_runtime, box, launches)
     fake = FakeGitHub([issue(1)])
-    comment = fake.add_comment(1, OWNER_LOGIN, "/essai valider c'est bon\n\nVu sur l'écran.")
+    comment = fake.add_comment(1, OWNER, "/essai valider c'est bon\n\nVu sur l'écran.")
     gestures, lines = reading(serve(fake), box)
 
     gestures.read_once()
@@ -97,12 +98,31 @@ def test_an_owner_gesture_resumes_the_wait_and_gets_a_thumbs_up(fake_runtime, se
     assert not any(line.startswith(("<3>", "<4>")) for line in lines), lines
 
 
+def test_a_gesture_on_an_issue_of_any_issues_repo_is_read_and_reacted_to_there(fake_runtime, serve):
+    box, launches = answer_box(), Launches()
+    core, _, _ = parked(fake_runtime, box, launches)
+    fake = FakeGitHub([issue(1)])
+    comment = fake.add_comment(1, OWNER, "/essai valider")
+    # The item's issue is in the second repository of the manifest's list; the fake knows that one alone.
+    workflow = dataclasses.replace(essai(), issues_repos=("code-my-life/autre-essai", REPO))
+    gestures, lines = reading(serve(fake), box, workflow=workflow)
+
+    gestures.read_once()
+    core.run_pass()
+    gestures.react()
+
+    assert answer_ids(box) == [f"github:{comment}"]
+    assert handled(box, f"github:{comment}")[3] == "applied"
+    assert fake.reacted == [(comment, "+1")]
+    assert not any(line.startswith(("<3>", "<4>")) for line in lines), lines
+
+
 def test_a_gesture_read_again_or_after_a_lost_registry_is_not_applied_twice(fake_runtime, serve):
     box, launches = answer_box(), Launches()
     core, _, _ = parked(fake_runtime, box, launches)
     fake = FakeGitHub([issue(1)])
     github = serve(fake)
-    comment = fake.add_comment(1, OWNER_LOGIN, "/essai valider")
+    comment = fake.add_comment(1, OWNER, "/essai valider")
     now = time.time()
     gestures, _ = reading(github, box, clock=lambda: now)
 
@@ -158,9 +178,9 @@ def test_a_gesture_without_an_open_wait_or_older_than_it_gets_a_confused_face(fa
     writes = fake_runtime.writes()
     assert card_row(fake_runtime.home, OTHER_CARD) == ("scheduled", "essai-revue")
     fake = FakeGitHub([issue(1), issue(2)])
-    after_the_end = fake.add_comment(1, OWNER_LOGIN, "/essai valider")
+    after_the_end = fake.add_comment(1, OWNER, "/essai valider")
     # Commented before the wait opened: a stale screen.
-    stale = fake.add_comment(2, OWNER_LOGIN, "/essai valider", created_at="2020-01-01T00:00:00Z")
+    stale = fake.add_comment(2, OWNER, "/essai valider", created_at="2020-01-01T00:00:00Z")
     gestures, _ = reading(serve(fake), box)
 
     gestures.read_once()
@@ -182,10 +202,10 @@ def test_other_accounts_and_other_workflows_are_ignored(fake_runtime, serve):
     writes = fake_runtime.writes()
     fake = FakeGitHub([issue(1)])
     fake.add_comment(1, "inconnu", "/essai valider")
-    fake.add_comment(1, OWNER_LOGIN, "/factory unblock")
+    fake.add_comment(1, OWNER, "/factory unblock")
     # The case counts, and the gesture must open the comment.
-    fake.add_comment(1, OWNER_LOGIN, "/Essai valider")
-    fake.add_comment(1, OWNER_LOGIN, "Je pense que /essai valider suffira")
+    fake.add_comment(1, OWNER, "/Essai valider")
+    fake.add_comment(1, OWNER, "Je pense que /essai valider suffira")
     gestures, _ = reading(serve(fake), box)
 
     gestures.read_once()
@@ -199,14 +219,28 @@ def test_other_accounts_and_other_workflows_are_ignored(fake_runtime, serve):
     assert card_row(fake_runtime.home) == ("scheduled", "essai-revue")
 
 
+def test_without_the_owner_s_login_no_gesture_is_taken(fake_runtime, serve):
+    box, launches = answer_box(), Launches()
+    parked(fake_runtime, box, launches)
+    fake = FakeGitHub([issue(1)])
+    fake.add_comment(1, OWNER, "/essai valider")
+    gestures, _ = reading(serve(fake), box, owner=None)
+
+    gestures.read_once()
+    gestures.react()
+
+    assert answer_ids(box) == []
+    assert fake.reacted == []
+
+
 def test_an_unknown_gesture_gets_a_confused_face(fake_runtime, serve):
     box, launches = answer_box(), Launches()
     core, lines, _ = parked(fake_runtime, box, launches)
     writes = fake_runtime.writes()
     fake = FakeGitHub([issue(1)])
-    unknown = fake.add_comment(1, OWNER_LOGIN, "/essai inconnu")
+    unknown = fake.add_comment(1, OWNER, "/essai inconnu")
     # `ouvrir` is a gesture of the manifest, but given by opening an issue, never by a comment.
-    opening = fake.add_comment(1, OWNER_LOGIN, "/essai ouvrir")
+    opening = fake.add_comment(1, OWNER, "/essai ouvrir")
     gestures, _ = reading(serve(fake), box)
 
     gestures.read_once()
@@ -236,7 +270,7 @@ def test_unblock_resumes_a_blocked_card_with_its_note(fake_runtime, serve):
     (blocked,) = events(fake_runtime.home, "blocked")
     fake = FakeGitHub([issue(1)])
     github = serve(fake)
-    comment = fake.add_comment(1, OWNER_LOGIN, "/essai unblock relance")
+    comment = fake.add_comment(1, OWNER, "/essai unblock relance")
     gestures, _ = reading(github, box, workflow=relance())
 
     gestures.read_once()
@@ -256,7 +290,7 @@ def test_unblock_resumes_a_blocked_card_with_its_note(fake_runtime, serve):
     core.run_pass()
     assert card_row(fake_runtime.home) == ("scheduled", "essai-revue")
     writes = fake_runtime.writes()
-    again = fake.add_comment(1, OWNER_LOGIN, "/essai unblock")
+    again = fake.add_comment(1, OWNER, "/essai unblock")
     gestures.read_once()
     core.run_pass()
     gestures.react()
@@ -266,33 +300,48 @@ def test_unblock_resumes_a_blocked_card_with_its_note(fake_runtime, serve):
     assert fake_runtime.writes() == writes
 
 
-def test_an_unblock_not_written_is_told_and_never_applied_again(fake_runtime, serve):
+def test_an_unblock_not_written_gets_a_confused_face_and_can_be_given_again(fake_runtime, serve, monkeypatch):
     make_runtime_board(fake_runtime.home, "essai", tasks=[root_card()])
     box, launches = answer_box(), Launches()
     core, lines = engine(launches=launches, answers=box, workflow=relance())
     core.run_pass()
     fake = FakeGitHub([issue(1)])
-    comment = fake.add_comment(1, OWNER_LOGIN, "/essai unblock relance")
+    comment = fake.add_comment(1, OWNER, "/essai unblock relance")
     gestures, _ = reading(serve(fake), box, workflow=relance())
     gestures.read_once()
     fake_runtime.fail("unblock")
 
     core.run_pass()
     core.run_pass()
+    gestures.react()
 
-    assert handled(box, f"github:{comment}")[3] == "applied"
-    told = f"réponse github:{comment} (unblock) appliquée au blocage"
+    # Not written, the unblock is not counted as applied: refused, with a confused face, and the card stays blocked.
+    assert handled(box, f"github:{comment}")[3:] == ("refused", None)
+    assert fake.reacted == [(comment, "confused")]
+    told = f"réponse github:{comment} (unblock) refusée"
     assert any(line.startswith("<3>") and told in line and "n'a pas pu être débloquée" in line for line in lines)
     assert [call[3] for call in fake_runtime.writes()] == ["block", "unblock"]
     assert [station for station, _ in launches.calls] == ["preparer"]
     assert card_row(fake_runtime.home) == ("blocked", "essai-preparer")
+
+    # The owner gives it again, and this time it is written.
+    monkeypatch.delenv("FAKE_RUNTIME_FAIL")
+    again = fake.add_comment(1, OWNER, "/essai unblock relance")
+    gestures.read_once()
+    core.run_pass()
+    gestures.react()
+
+    assert handled(box, f"github:{again}")[3] == "applied"
+    assert fake.reacted == [(comment, "confused"), (again, "+1")]
+    assert [station for station, _ in launches.calls] == ["preparer", "preparer"]
+    assert [call[3] for call in fake_runtime.writes()] == ["block", "unblock", "unblock", "assign"]
 
 
 def test_redo_is_not_applied_to_the_next_wait(fake_runtime, serve):
     box, launches = answer_box(), Launches()
     core, _, wait = parked(fake_runtime, box, launches)
     fake = FakeGitHub([issue(1)])
-    comment = fake.add_comment(1, OWNER_LOGIN, "/essai refaire à reprendre")
+    comment = fake.add_comment(1, OWNER, "/essai refaire à reprendre")
     gestures, _ = reading(serve(fake), box)
 
     gestures.read_once()
@@ -320,7 +369,7 @@ def test_gestures_wait_in_observer_mode(fake_runtime, serve):
     core, _, wait = parked(fake_runtime, box, launches, core=core_state)
     writes = fake_runtime.writes()
     fake = FakeGitHub([issue(1)])
-    comment = fake.add_comment(1, OWNER_LOGIN, "/essai valider")
+    comment = fake.add_comment(1, OWNER, "/essai valider")
     gestures, _ = reading(serve(fake), box, core=core_state)
 
     core_state.contract = state(ok=False).contract
@@ -351,7 +400,7 @@ def test_a_refused_reaction_is_tried_again_after_the_next_reading(fake_runtime, 
     box, launches = answer_box(), Launches()
     core, _, _ = parked(fake_runtime, box, launches)
     fake = FakeGitHub([issue(1)])
-    comment = fake.add_comment(1, OWNER_LOGIN, "/essai valider")
+    comment = fake.add_comment(1, OWNER, "/essai valider")
     gestures, lines = reading(serve(fake), box)
     gestures.read_once()
     core.run_pass()
@@ -374,6 +423,31 @@ def test_a_refused_reaction_is_tried_again_after_the_next_reading(fake_runtime, 
     assert fake.reacted == [(comment, "+1")]
     # The comment read again carries the App's reaction: it is not taken again.
     assert answer_ids(box) == [f"github:{comment}"]
+
+
+def test_a_reaction_to_a_deleted_comment_is_given_up(fake_runtime, serve):
+    box, launches = answer_box(), Launches()
+    core, _, _ = parked(fake_runtime, box, launches)
+    fake = FakeGitHub([issue(1)])
+    comment = fake.add_comment(1, OWNER, "/essai valider")
+    gestures, lines = reading(serve(fake), box)
+    gestures.read_once()
+    core.run_pass()
+    # The comment was deleted meanwhile: GitHub answers 404 to its reaction.
+    fake.refuse_reactions = 404
+
+    gestures.react()
+    for _ in range(2):
+        gestures.read_once()
+        gestures.react()
+        gestures.react()
+
+    assert fake.reaction_tries == 1
+    assert fake.reacted == []
+    told = [line for line in lines if f"github:{comment}" in line and "réaction" in line]
+    assert len(told) == 1, told
+    assert "abandonnée" in told[0] and "404" in told[0]
+    assert box.unreacted() == []
 
 
 def test_a_box_created_before_the_gestures_gets_their_columns(tmp_path):

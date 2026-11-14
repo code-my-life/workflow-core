@@ -40,9 +40,9 @@ TIMEOUT_SECONDS = 30
 
 # The login of the App's comments.
 APP_BOT = "code-my-life-factory[bot]"
-# The owner's account, the one on whose behalf factory-live opens an issue (ADR 0010): the only author whose issues
-# a workflow takes in.
-OWNER_LOGIN = "cddev"
+# The variable of the owner's account, the one on whose behalf factory-live opens an issue (ADR 0010): the only author
+# whose issues and gestures a workflow takes in. Set in the core's `.env`, never written in the repository.
+OWNER_LOGIN_VARIABLE = "WORKFLOW_CORE_OWNER_LOGIN"
 
 
 @dataclass(frozen=True)
