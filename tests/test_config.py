@@ -99,12 +99,13 @@ def test_a_missing_manifest_leaves_the_workflow_unplugged(runtime_home, tmp_path
     assert any("casse non branché : manifeste illisible" in line for line in unplugged)
     assert any("workflow bon branché par son manifeste" in line for line in err)
     assert [workflow.key for workflow in app.state.engine.workflows] == ["bon"]
-    # The other workflows run: the factory is still served, and the contract holds.
+    # The other workflows run: the factory is still served, and the contract holds; the plugged one is served too
+    # (#60), the unplugged ones are not listed.
     assert app.state.core.mode == "normal"
     response = TestClient(app).get("/api/workflows/factory/items", headers={"Authorization": f"Bearer {SECRET}"})
     assert response.status_code == 200
     listed = TestClient(app).get("/api/workflows", headers={"Authorization": f"Bearer {SECRET}"}).json()
-    assert sorted(workflow["key"] for workflow in listed["workflows"]) == ["factory", "studio"]
+    assert sorted(workflow["key"] for workflow in listed["workflows"]) == ["bon", "factory", "studio"]
 
 
 def _repo_of_key(tmp_path: Path, key: str) -> Path:

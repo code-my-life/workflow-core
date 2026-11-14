@@ -55,7 +55,7 @@ class Workflow(BaseModel):
     # The workflow's board; by default, its key (ADR 0003).
     board: str = Field(min_length=1)
     # The path of the workflow's sheet; `~` is accepted. Without it, the workflow is plugged by the manifest of its
-    # repository, and only the engine serves it.
+    # repository: the engine runs it, and the API serves the sheet and the gestures of its manifest.
     sheet: Path | None = None
     # The diagnosis' triggers (optional). Minutes a ready card held by the active pull request guard waits before it
     # is a trigger.
@@ -114,7 +114,8 @@ class Workflow(BaseModel):
 
     @property
     def plugged_by_manifest(self) -> bool:
-        """Whether the workflow is plugged by its manifest (no sheet): the engine serves it, the API does not yet."""
+        """Whether the workflow is plugged by its manifest (no sheet): the engine runs it, and the API serves the
+        sheet and the gestures read in its manifest at the start."""
         return self.sheet is None
 
     @property

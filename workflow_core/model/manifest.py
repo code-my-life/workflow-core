@@ -203,6 +203,22 @@ def judge_manifest(
         return ManifestRefused(rule="form", detail=f"manifest: {error}" if str(error) else "manifest: unreadable input")
 
 
+def published_sheet(manifest: WorkflowManifest, sheet: WorkflowSheet) -> WorkflowSheet:
+    """The sheet as the core serves it: each station's agents come from the manifest's station of the same key, the
+    profile of an `agent` station, none for a `code` or `owner` station or a station the manifest does not declare."""
+    stations = {station.key: station for station in manifest.stations}
+
+    def agents_of(key: str) -> list[str] | None:
+        station = stations.get(key)
+        return [station.profile] if station is not None and station.nature == "agent" else None
+
+    return sheet.model_copy(
+        update={
+            "stations": [station.model_copy(update={"agents": agents_of(station.key)}) for station in sheet.stations]
+        }
+    )
+
+
 def manifest_schema_text() -> str:
     """The JSON Schema of the manifest's form alone, as published in schema/workflow-manifest.schema.json."""
     schema = WorkflowManifest.model_json_schema()

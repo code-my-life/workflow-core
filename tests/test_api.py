@@ -1,10 +1,12 @@
 """The core's HTTP API: the cards of the declared workflows, behind the shared secret (ADR 0011)."""
 
 import json
+import shutil
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import jsonschema
 import pytest
 from fastapi.testclient import TestClient
 from workflow_core.adapters import runtime_adapter
@@ -379,3 +381,153 @@ def test_the_workflows_list_their_declared_gestures(runtime_home):
 
     assert listed["factory"]["gestures"] == [{"name": "unblock", "kind": "comment"}]
     assert listed["studio"]["gestures"] == []
+
+
+MANIFESTS = Path(__file__).resolve().parent / "fixtures" / "manifests"
+ESSAI_REPO = MANIFESTS / "essai"
+SCHEMAS = ROOT / "schema"
+
+
+def schema_validator(name: str) -> jsonschema.Draft202012Validator:
+    schema = json.loads((SCHEMAS / name).read_text(encoding="utf-8"))
+    jsonschema.Draft202012Validator.check_schema(schema)
+    return jsonschema.Draft202012Validator(schema)
+
+
+def plugged_service(sheets: dict[str, Path], tmp_path: Path, repo: Path | None = ESSAI_REPO) -> TestClient:
+    """The service with the factory and the studio at their sheets, and `essai` plugged by the manifest of `repo`
+    (left out without one)."""
+    config = tmp_path / f"workflows-{'essai' if repo is not None else 'alone'}.toml"
+    text = "".join(
+        f'[[workflow]]\nkey = "{name}"\nboard = "{name}"\nsheet = "{path}"\n\n' for name, path in sheets.items()
+    )
+    if repo is not None:
+        text += f'[[workflow]]\nkey = "essai"\nrepo = "{repo}"\n'
+    config.write_text(text, encoding="utf-8")
+    return TestClient(build_service(secret=SECRET, workflows=load_workflows(config), adapter=runtime_adapter()))
+
+
+def test_a_plugged_workflow_serves_the_sheet_of_its_manifest(runtime_home, sheets, tmp_path):
+    client = plugged_service(sheets, tmp_path)
+
+    response = client.get("/api/workflows/essai/sheet", headers=GOOD)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "schema_version": 1,
+        "workflow": "essai",
+        "sheet": json.loads((ESSAI_REPO / "workflow-sheet.json").read_text(encoding="utf-8")),
+    }
+    assert list(schema_validator("sheet-response.schema.json").iter_errors(body)) == []
+
+
+def listed_workflows(client: TestClient) -> dict[str, dict]:
+    response = client.get("/api/workflows", headers=GOOD)
+    assert response.status_code == 200
+    return {workflow["key"]: workflow for workflow in response.json()["workflows"]}
+
+
+def test_a_plugged_workflow_lists_the_gestures_of_its_manifest(runtime_home, sheets, tmp_path):
+    client = plugged_service(sheets, tmp_path)
+
+    response = client.get("/api/workflows", headers=GOOD)
+
+    assert response.status_code == 200
+    essai = {workflow["key"]: workflow for workflow in response.json()["workflows"]}["essai"]
+    assert essai == {
+        "key": "essai",
+        "board": "essai",
+        "sheet_valid": True,
+        "gestures": [
+            {"name": "valider", "kind": "comment"},
+            {"name": "refaire", "kind": "comment"},
+            {"name": "ouvrir", "kind": "issue", "repo": "code-my-life/workflow-essai"},
+            {"name": "unblock", "kind": "comment"},
+        ],
+    }
+    assert list(schema_validator("workflows.schema.json").iter_errors(response.json())) == []
+
+
+def essai_copy(tmp_path: Path, change) -> Path:
+    """A copy of the trial repository whose manifest and sheet `change(manifest, sheet)` edits in place."""
+    repo = tmp_path / "essai-repo"
+    shutil.copytree(ESSAI_REPO, repo)
+    manifest = json.loads((repo / "workflow-manifest.json").read_text(encoding="utf-8"))
+    sheet = json.loads((repo / "workflow-sheet.json").read_text(encoding="utf-8"))
+    change(manifest, sheet)
+    (repo / "workflow-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (repo / "workflow-sheet.json").write_text(json.dumps(sheet), encoding="utf-8")
+    return repo
+
+
+def test_a_refused_manifest_is_not_listed(runtime_home, sheets, tmp_path):
+    def duplicate_a_station(manifest: dict, sheet: dict) -> None:
+        manifest["stations"].append(manifest["stations"][0])
+
+    client = plugged_service(sheets, tmp_path, essai_copy(tmp_path, duplicate_a_station))
+
+    assert sorted(listed_workflows(client)) == ["factory", "studio"]
+    response = client.get("/api/workflows/essai/sheet", headers=GOOD)
+    assert response.status_code == 404
+    assert response.json()["error"] == "unknown_workflow"
+
+
+def test_the_factory_and_studio_answers_do_not_change(runtime_home, sheets, tmp_path):
+    alone = plugged_service(sheets, tmp_path, None)
+    with_essai = plugged_service(sheets, tmp_path)
+
+    before, after = listed_workflows(alone), listed_workflows(with_essai)
+    assert sorted(after) == ["essai", "factory", "studio"]
+    for name in ("factory", "studio"):
+        assert after[name] == before[name]
+        for route in (f"/api/workflows/{name}/sheet", f"/api/workflows/{name}/items"):
+            old, new = alone.get(route, headers=GOOD), with_essai.get(route, headers=GOOD)
+            assert (new.status_code, new.json()) == (old.status_code, old.json())
+            assert old.status_code == 200
+
+
+def test_the_agents_of_each_station_come_from_its_manifest(runtime_home, sheets, tmp_path):
+    def add_a_writing_station(manifest: dict, sheet: dict) -> None:
+        manifest["stations"].insert(1, {"key": "ecrire", "nature": "agent", "profile": "redacteur"})
+        sheet["stations"].append({"key": "ecrire", "label": "Écrire", "icon": "dot", "kind": "ai", "col": 1, "row": 1})
+        sheet["edges"].append({"from": "preparer", "to": "ecrire", "kind": "line"})
+
+    make_runtime_board(
+        runtime_home,
+        "essai",
+        tasks=[
+            {
+                "id": "t_0a0b0c01",
+                "title": "essai:1 · Premier essai",
+                "body": "https://github.com/code-my-life/workflow-essai/issues/1",
+                "assignee": "redacteur",
+                "status": "ready",
+                "created_at": 1762900000,
+                "idempotency_key": "essai:1",
+            }
+        ],
+    )
+    client = plugged_service(sheets, tmp_path, essai_copy(tmp_path, add_a_writing_station))
+
+    sheet = client.get("/api/workflows/essai/sheet", headers=GOOD).json()["sheet"]
+    stations = {station["key"]: station for station in sheet["stations"]}
+    assert stations["ecrire"]["agents"] == ["redacteur"]
+    for key in ("preparer", "revue", "clore"):
+        assert "agents" not in stations[key]
+    items = client.get("/api/workflows/essai/items", headers=GOOD)
+    assert items.status_code == 200
+    (item,) = [item for item in items.json()["items"] if item["id"] == "t_0a0b0c01"]
+    assert item["station"] == "ecrire"
+
+
+def test_a_manifest_that_declares_unblock_lists_it_once_in_its_place(runtime_home, sheets, tmp_path):
+    def declare_unblock(manifest: dict, sheet: dict) -> None:
+        manifest["gestures"] = [{"name": "valider", "kind": "comment"}, {"name": "unblock", "kind": "comment"}]
+
+    client = plugged_service(sheets, tmp_path, essai_copy(tmp_path, declare_unblock))
+
+    assert listed_workflows(client)["essai"]["gestures"] == [
+        {"name": "valider", "kind": "comment"},
+        {"name": "unblock", "kind": "comment"},
+    ]

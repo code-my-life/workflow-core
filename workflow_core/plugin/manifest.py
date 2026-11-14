@@ -15,7 +15,14 @@ from pydantic import ValidationError
 
 from workflow_core.config import Workflow
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
-from workflow_core.model.manifest import ManifestIntake, ManifestStation, judge_manifest
+from workflow_core.model.manifest import (
+    ManifestGesture,
+    ManifestIntake,
+    ManifestStation,
+    judge_manifest,
+    published_sheet,
+)
+from workflow_core.model.sheet import WorkflowSheet
 
 MANIFEST_FILE = "workflow-manifest.json"
 # The statuses of a card that holds nothing any more.
@@ -34,8 +41,9 @@ class ManifestRefusedError(Exception):
 @dataclass(frozen=True)
 class PluggedWorkflow:
     """A workflow plugged by its manifest: its key, its board, its repository, its stations in order, the repository
-    of its issues and its intake command, the label its issues must carry (None: any but `test`), and the names of
-    the gestures the owner gives by a comment on an item's issue."""
+    of its issues and its intake command, the label its issues must carry (None: any but `test`), the names of the
+    gestures the owner gives by a comment on an item's issue, the sheet the API serves (judged at the plugging, its
+    stations' agents taken from the manifest), and every gesture of the manifest, in its order."""
 
     key: str
     board: str
@@ -45,6 +53,8 @@ class PluggedWorkflow:
     intake: ManifestIntake | None = None
     issue_label: str | None = None
     gestures: tuple[str, ...] = ()
+    sheet: WorkflowSheet | None = None
+    declared_gestures: tuple[ManifestGesture, ...] = ()
 
     def lane(self, station: str) -> str:
         """The lane of a station, `<key>-<station>`: the assignee of a card that stands there, never a profile."""
@@ -125,4 +135,6 @@ def plug(workflow: Workflow, *, reader: BoardReader | None = None) -> PluggedWor
         intake=manifest.intake,
         issue_label=workflow.issue_label,
         gestures=tuple(gesture.name for gesture in manifest.gestures if gesture.kind == "comment"),
+        sheet=published_sheet(manifest, verdict.sheet),
+        declared_gestures=tuple(manifest.gestures),
     )

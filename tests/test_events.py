@@ -21,7 +21,7 @@ import pytest
 import uvicorn
 from workflow_core.adapters import runtime_adapter
 from workflow_core.config import Workflow
-from workflow_core.events import EventJournal
+from workflow_core.events import EventHub, EventJournal
 from workflow_core.service import build_service, server_config
 
 from conftest import FACTORY_ITEMS
@@ -535,3 +535,28 @@ def test_a_sheet_change_moves_the_items_on_the_stream(runtime_home, state_dir, t
 
     assert kind == "changed"
     assert (event["item"], event["state"]["station"]) == ("t_0002", "fin")
+
+
+class NoChange:
+    """A board watcher that never sees a change."""
+
+    def changed(self, board: str) -> bool:
+        return False
+
+    def close(self) -> None:
+        pass
+
+
+def test_the_probe_does_not_raise_for_a_workflow_without_a_sheet_file(tmp_path):
+    workflows = {"essai": Workflow(key="essai", board="essai", repo=tmp_path)}
+    hub = EventHub(
+        workflows=workflows,
+        watcher=NoChange(),
+        read_items=lambda board: [],
+        journal_path=tmp_path / "journal.db",
+        clock=time.time,
+    )
+
+    # Its sheet is fixed at the start: never changed, at the first probe or the next.
+    assert hub.probe_once() == []
+    assert hub.probe_once() == []

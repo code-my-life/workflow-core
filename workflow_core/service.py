@@ -13,9 +13,9 @@ from fastapi import FastAPI
 
 from workflow_core.api.app import create_app
 from workflow_core.clock import utc_now
-from workflow_core.config import Workflow
+from workflow_core.config import Gesture, Workflow
 from workflow_core.engine import Engine, EngineRunner
-from workflow_core.engine.answers import ENGINE_DB, AnswerBox
+from workflow_core.engine.answers import ENGINE_DB, UNBLOCK, AnswerBox
 from workflow_core.engine.engine import PASS_SECONDS
 from workflow_core.events import JOURNAL_FILE, state_dir
 from workflow_core.gestures import Gestures
@@ -62,7 +62,8 @@ def build_service(
     still answers. `github` replaces the core's GitHub client (tests).
 
     The workflows with a sheet are served by the API and the notifier, as before; those plugged by their manifest are
-    served by the engine only. The contract covers the served boards and the manifests' boards that already exist: a
+    run by the engine and served by the API, with the sheet and the gestures of their manifest read at the start. The
+    contract covers the served boards and the manifests' boards that already exist: a
     board the engine has not created yet would otherwise break it, and the engine would never create it.
 
     The runtime's version read at the start is read again every 5 minutes (`version_clock` replaces the clock of those
@@ -160,7 +161,8 @@ def build_service(
 
     app = create_app(
         secret=secret,
-        workflows=served,
+        workflows={**served, **{workflow.key: api_entry(workflows[workflow.key], workflow) for workflow in plugged}},
+        sheets={workflow.key: workflow.sheet for workflow in plugged if workflow.sheet is not None},
         boards=reader,
         state=state,
         watcher=adapter.make_board_watcher(),
@@ -186,6 +188,17 @@ def build_service(
     app.state.gestures = gestures
     app.state.version_watch = watch
     return app
+
+
+def api_entry(workflow: Workflow, plugged: PluggedWorkflow) -> Workflow:
+    """The configuration entry of a workflow plugged by its manifest, as the API serves it: the gestures of its
+    manifest in their order, then `unblock`, which the core recognises for every plugged workflow."""
+    gestures = [
+        Gesture(name=gesture.name, kind=gesture.kind, repo=gesture.repo) for gesture in plugged.declared_gestures
+    ]
+    if all(gesture.name != UNBLOCK for gesture in gestures):
+        gestures.append(Gesture(name=UNBLOCK, kind="comment"))
+    return workflow.model_copy(update={"gestures": gestures})
 
 
 def plug_manifests(workflows: list[Workflow], *, reader: BoardReader | None = None) -> list[PluggedWorkflow]:
