@@ -15,7 +15,7 @@ repositories, register and marker, each alerted in the issue its card's body cit
 - a root card waiting (`scheduled`) at the lane of an `owner` station: its key is the wait's id,
   `essai:owner:<card>:<event>`, opened at the card's last `scheduled` event;
 - a root card, or a child card of an `agent` station (`<item>/<station>/<passage>`), blocked: the key of a factory's
-  blocked card, `essai:needs_input:<card>:<event>`, under the title of a failure at its station;
+  blocked card, `essai:<block kind>:<card>:<event>`, under the title of a failure at its station;
 - an anomaly the engine noted in `engine.db` (`workflow_core.signals`): a root card finished by another than the
   engine, or taken by an agent, its key the anomaly's.
 """

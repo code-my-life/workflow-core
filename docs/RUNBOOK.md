@@ -47,7 +47,8 @@ en cause.
 
 Dans l'epic du notificateur : lire et écrire des commentaires d'issue (`POST /repos/{dépôt}/issues/{n}/comments`).
 Pour fabriquer le jeton : `GET /orgs/code-my-life/installation` et `POST /app/installations/{id}/access_tokens`.
-Pour les gestes du propriétaire (voir « Les gestes ») : lire les commentaires d'une issue depuis une heure
+Pour les gestes du propriétaire (voir « Les gestes ») : lire les commentaires d'une issue créés ou modifiés depuis sa
+relecture précédente, moins deux minutes (tous à la première relecture après un démarrage)
 (`GET /repos/{dépôt}/issues/{n}/comments?since=…`, page par page), lire les réactions d'un commentaire qui en porte
 (`GET /repos/{dépôt}/issues/comments/{id}/reactions`, page par page), et réagir à un commentaire au nom de l'App
 (`POST /repos/{dépôt}/issues/comments/{id}/reactions`, `+1` ou `confused`). Toutes relèvent de la permission Issues.
@@ -106,11 +107,13 @@ dans l'issue dont l'adresse est écrite dans le corps de la carte :
 
 - une carte racine en attente (`scheduled`) à la voie d'une station `owner` reçoit « ⏸ Ta réponse est attendue :
   <station> », avec l'identifiant de l'attente (`essai:owner:<carte>:<événement>`, aussi sa clé) et un geste
-  `/essai <geste> [note]` par geste du manifeste ;
+  `/essai <geste> [note]` par geste de sorte `comment` du manifeste (`<station>` est l'étiquette de la station dans
+  la fiche, à défaut sa clé) ;
 - une carte racine bloquée reçoit « ⛔ Échec à la station <station> », avec le motif écrit par le moteur et
   `/essai unblock [note]` ; une carte fille d'une station `agent` (`essai:7/brouillon/1`) bloquée reçoit la même
   alerte, avec la question de l'agent, dans l'issue de son élément : elle se débloque sur le board (opérateur). Leur
-  clé est celle d'une carte bloquée de la factory (`essai:needs_input:<carte>:<événement>`).
+  clé est celle d'une carte bloquée de la factory (`essai:<sorte>:<carte>:<événement>`, avec la sorte du blocage :
+  `needs_input` ou `capability` pour une carte racine, voir « Le moteur »).
 
 **Les signalements du moteur.** Le moteur note dans `~/.local/state/workflow-core/engine.db` deux anomalies d'une
 carte racine, chacune dite une fois au journal (ligne `<4>`) et alertée une fois dans l'issue de l'élément
@@ -185,7 +188,9 @@ version d'avant et celle lue (voir « Le notificateur », C).
   « commande `create` : option `--idempotency-key` absente » ou « commande `schedule` absente ».
 - `uv run pytest tests/contract -rs` (lancé par `scripts/install.sh`) fait en plus un cycle d'écriture complet sur un
   board jetable `contrat-<heure Unix>`, relu après chaque pas, puis supprimé, même après un pas en échec. Un board
-  `contrat-*` laissé par un cycle interrompu est supprimé au cycle suivant. Aucun autre board n'est écrit.
+  `contrat-*` laissé par un cycle interrompu est supprimé au cycle suivant. Aucun autre board n'est écrit. Deux
+  lancements du test de contrat en même temps sur la machine (deux `uv run pytest`) se gênent : chaque cycle supprime
+  au départ le board de l'autre, qui échoue ; ne lancer qu'un test de contrat à la fois.
 - Le socle relit `hermes --version` toutes les 5 minutes, et à la première passe du moteur après un démarrage : son
   écrivain refuse toute écriture tant que cette relecture n'a pas confirmé la version du test de contrat. Une version
   changée ou illisible le met en observateur, avec « version d'Hermès changée : 0.22.2 → 0.22.3 » dans le verdict de
@@ -258,12 +263,16 @@ le socle de production ne prend jamais une issue de la machine de test.
 Pour chaque issue nouvelle, le socle lance la commande `intake` du manifeste (`uv run --directory <dépôt> …`, avec son
 délai, sans les secrets du socle), avec l'issue en JSON sur son entrée :
 `{"schema_version": 1, "issue": {"repo", "number", "url", "title", "body", "labels"}}`. Elle rend
-`{"decision": "accept", "id": "<id>", "reason": "…"}` ou `{"decision": "refuse", "reason": "…"}`.
+`{"decision": "accept", "id": "<id>", "reason": "…"}` (`reason` facultatif ; `id` sans espace, `/` ni `:`) ou
+`{"decision": "refuse", "reason": "…"}` (`reason` obligatoire).
 - Acceptée : le socle crée la carte racine de l'élément `<clé>:<id>` (titre `<clé>:<id> · <titre de l'issue>`, nom de
   voie de la première station, clé d'idempotence `<clé>:<id>`, adresse de l'issue dans le corps), puis commente
   l'issue : « ✅ Cette issue devient l'élément `essai:7` du workflow `essai` ; il commence à la station `preparer`. »,
   le lien `<WORKFLOW_CORE_LIVE_URL>/workflows/<clé>` (omis sans la variable), le motif, et la marque. Le moteur prend
   l'élément à sa passe suivante.
+- Acceptée, mais la clé `<clé>:<id>` est déjà celle d'une carte d'une autre issue (ou d'une carte faite à la main
+  sans adresse d'issue) : l'issue est refusée, avec un commentaire de refus qui nomme l'autre issue, une ligne `<4>`
+  au journal, et rien d'autre d'écrit.
 - Refusée : un commentaire « 🚫 Cette issue n'est pas prise par le workflow `essai` : <motif>. », avec la marque ;
   aucune carte.
 - Sortie illisible, délai dépassé ou lancement impossible : ce n'est pas une décision. Le journal le dit, rien n'est
@@ -282,7 +291,8 @@ marque : à la relecture suivante, `intake` est relancée, la création rend la 
 d'idempotence), et le commentaire est posté. Jamais deux cartes pour un élément.
 
 En mode observateur, ou tant que la version d'Hermès n'est pas confirmée, la relecture lit les issues mais ne lance
-pas `intake`, ne crée rien et ne poste rien ; le journal le dit une fois par issue (« en attente du mode normal »).
+pas `intake`, ne crée rien et ne poste rien. En mode observateur, le journal le dit une fois par issue (« en attente
+du mode normal, intake non lancée ») ; tant que la version n'est pas confirmée, il ne dit rien.
 
 Le journal du service préfixe ses lignes par `workflow-core: relecture` : issue acceptée (élément et carte), refusée
 (motif), décision dite dans l'issue (adresse du commentaire), déjà traitée, issues ou commentaires illisibles, commentaire
@@ -364,8 +374,9 @@ mkdir -p "$WORKFLOW_CORE_STATE_DIR"
 uv run python -m workflow_core --port 8449 2>&1 | tee -a "$WORKFLOW_CORE_STATE_DIR/socle.log"
 ```
 
-Si le journal du socle de test dit que le contrat est cassé, l'arrêter aussitôt (Ctrl+C) : sinon, il écrirait
-l'issue du contrat cassé dans `code-my-life/workflow-core`.
+Si le journal du socle de test dit que le contrat est cassé, le socle a déjà ouvert (ou commenté) l'issue du contrat
+cassé dans `code-my-life/workflow-core` dès son démarrage : l'arrêter (Ctrl+C), puis noter dans cette issue qu'elle
+vient de la machine de test, ou la fermer.
 
 Le premier démarrage ne connaît pas encore le board `essai-test` : le contrat porte sur les autres lectures, et la
 première passe du moteur crée le board (« board essai-test créé » au journal).

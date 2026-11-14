@@ -33,6 +33,9 @@ STDERR_LIMIT = 2000
 UNREADABLE = "sortie illisible"
 # The core's variables a command does not inherit: its shared secret, its settings and its GitHub App.
 PRIVATE_PREFIXES = ("WORKFLOW_CORE_", "GITHUB_APP_")
+# The core's own virtual environment: `uv run --directory` ignores it for the workflow's project, with a warning on
+# every launch.
+DROPPED_NAMES = ("VIRTUAL_ENV",)
 
 
 def command_input(
@@ -71,8 +74,12 @@ def _launch(
     """Run `uv run --directory <repo> <command...>` with the payload on its input, in its own process group, without
     the core's secrets; its error output goes to the journal. Never raises."""
     arguments = ["uv", "run", "--directory", str(repo), *command]
-    # The core's own secrets never reach a workflow's command (ADR 0002).
-    environ = {name: value for name, value in os.environ.items() if not name.startswith(PRIVATE_PREFIXES)}
+    # The core's own secrets never reach a workflow's command (ADR 0002), nor its virtual environment.
+    environ = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith(PRIVATE_PREFIXES) and name not in DROPPED_NAMES
+    }
     try:
         process = subprocess.Popen(
             arguments,
