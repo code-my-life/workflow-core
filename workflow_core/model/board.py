@@ -76,6 +76,27 @@ class Item(Card):
     station: str | None = None
 
 
+def child_key(item: Item, station: str, passage: int) -> str:
+    """The idempotency key of an item's child card at a station: `<item>/<station>/<passage>` (ADR 0016)."""
+    return f"{item.idempotency_key}/{station}/{passage}"
+
+
+def _passage(card: Item, prefix: str) -> int | None:
+    rest = (card.idempotency_key or "").removeprefix(prefix)
+    if rest == card.idempotency_key or not rest.isdecimal():
+        return None
+    return int(rest)
+
+
+def child_cards(items: list[Item], item: Item, station: str) -> list[Item]:
+    """The item's child cards at a station, read by the prefix `<item>/<station>/` of their idempotency key, by
+    passage: the last one is the latest passage. A child card is tied to its item by this key only, never by a link
+    of the runtime."""
+    prefix = f"{item.idempotency_key}/{station}/"
+    found = [(passage, card) for card in items if (passage := _passage(card, prefix)) is not None]
+    return [card for _, card in sorted(found, key=lambda pair: pair[0])]
+
+
 class BoardUnavailableError(Exception):
     """A board whose base cannot be read: a named error, never an empty list."""
 

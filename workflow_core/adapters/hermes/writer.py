@@ -91,6 +91,11 @@ class HermesBoardWriter:
         shape = "create <title> --assignee <lane> --idempotency-key <item> --body <issue> --json"
         return self._create(board, arguments, shape)
 
+    def create_child_card(self, board: str, *, title: str, profile: str, key: str, body: str) -> str:
+        # Never `--parent`: in Hermès a parent is a dependency, and a child of an unfinished root card would wait in
+        # `todo` until the item's end.
+        return self.create_card(board, title=title, assignee=profile, idempotency_key=key, body=body)
+
     def create_card(
         self,
         board: str,
@@ -101,7 +106,8 @@ class HermesBoardWriter:
         body: str | None = None,
         parent: str | None = None,
     ) -> str:
-        """Create a card and return its id. `--parent` is used by the write cycle only (write_cycle.py)."""
+        """Create a card and return its id. `--parent` is used by the write cycle only (write_cycle.py), never for a
+        child card."""
         arguments, shape = ["create", title, "--assignee", assignee], ["create <title> --assignee <assignee>"]
         for name, value in (("--idempotency-key", idempotency_key), ("--body", body), ("--parent", parent)):
             if value is not None:

@@ -61,7 +61,11 @@ class Table:
 
 
 # What the adapter reads of Hermès 0.22.2. Every story that reads something new adds it here. The items' columns
-# (ITEM_CARD_COLUMNS) carry `idempotency_key`, by which the engine knows a root card.
+# (ITEM_CARD_COLUMNS) carry `idempotency_key`, by which the engine knows a root card, and reads the child cards of an
+# item by the prefix `<item>/` of their key. The engine reads the `id` of the `created` and `assigned` events in
+# task_events: a root card's last `assigned` event and a child's `created` event say which child is the one of the
+# passage in progress. Of a child's `blocked` and `block_loop_detected` events, the payload's `reason` is read when
+# present, for the journal only.
 CONTRACT: dict[str, Table] = {
     "tasks": Table(
         columns=tuple(dict.fromkeys(CARD_COLUMNS + CARD_FACT_COLUMNS + ITEM_CARD_COLUMNS)),
@@ -81,7 +85,8 @@ CONTRACT: dict[str, Table] = {
 # What the adapter writes to Hermès: each `hermes kanban [--board <slug>] <command>` the writer runs (writer.py), with
 # the options it passes. Every story that runs a new command or option adds it here: the contract checks each one in
 # the command's `--help`, and the tests check that every call of the fake runtime is declared. `create --parent` is
-# used by the write cycle only (write_cycle.py): the child card of an `agent` station depends on that behavior.
+# used by the write cycle only (write_cycle.py): the child card of an `agent` station depends on that behavior, and is
+# created by `create` without `--parent` (and never linked), its `--body` on several lines.
 # `boards list --json` reads the slugs without parsing a table; `show --json` is declared for the next stories.
 COMMANDS: dict[str, tuple[str, ...]] = {
     "boards create": (),

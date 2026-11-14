@@ -10,7 +10,18 @@ Under the item's own lock, with the card read again:
   owner. The wait's id is `<key>:owner:<card>:<event>`, the event being the card's last `scheduled` event;
 - a root card waiting at an `owner` station, with an answer of the owner in the answer box, has the station's command
   run with that answer. The answer is marked applied to the wait once the command is back, before any write, so it is
-  never handed to a command twice; `wait` leaves the card waiting, any other decision unblocks it and is applied.
+  never handed to a command twice; `wait` leaves the card waiting, any other decision unblocks it and is applied;
+- a ready root card at the lane of an `agent` station gets a child card at each passage, assigned to the station's
+  profile, with the idempotency key `<item>/<station>/<passage>` and the item's id on the first line of its body
+  (its issue's address on the second). The child is tied to its item by this key only, never by a parent or a link
+  of the runtime. The passage in progress began at the root card's last `assigned` event (the root card's creation
+  without one): its child is the latest of the station, when its `created` event (or its first event) came after.
+  Without one, a new child is created, its passage one more than the station's children. The child done, the root
+  card is advanced as by an `advance` without `to`; blocked (or in triage) or archived, the root card stays at its
+  station, with a line in the journal once; open, nothing is done. The root card itself is never handed to an agent:
+  a root card with a run is an anomaly, written once per run to the journal, and the item is handled as any other;
+  a root card done at a station that is not the last one was finished by another than the engine: an anomaly,
+  written once to the journal, without any write.
 A decision is applied this way: `advance` assigns the card to the lane of the station `to`, or of the next station
 without it, and completes the root card after the last station; `fail` (a command past its delay or with an unreadable
 output included) and an unknown `to` block the card with the station and the reason; `wait` changes nothing, and the
@@ -38,7 +49,7 @@ from datetime import datetime
 from typing import Protocol
 
 from workflow_core.engine.answers import UNBLOCK, Answer, AnswerBox
-from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
+from workflow_core.model.board import BoardReader, BoardUnavailableError, Item, child_cards, child_key
 from workflow_core.model.decision import Decision
 from workflow_core.model.manifest import ManifestStation as Station
 from workflow_core.model.state import CoreState
@@ -89,6 +100,21 @@ def stale(answer: Answer, item: Item) -> bool:
     except ValueError:
         return False
     return int(given) < opened.created_at
+
+
+def current_child(item: Item, children: list[Item]) -> Item | None:
+    """The child card of the passage in progress at the root card's station, among the station's children by passage:
+    the latest one, when it was created after the root card arrived at the station (its last `assigned` event, 0
+    without one; event ids grow within a board). A child without any event is taken as current: a new passage is
+    never created on a guess."""
+    if not children:
+        return None
+    latest = children[-1]
+    if not latest.events:
+        return latest
+    arrived = last_event(item, "assigned")
+    created = last_event(latest, "created") or latest.events[0]
+    return latest if created.id > (arrived.id if arrived is not None else 0) else None
 
 
 class Engine:
@@ -199,6 +225,21 @@ class Engine:
             if station is None:
                 continue
             element = item.idempotency_key
+            if item.runs:
+                # Only child cards are handed to agents: a run on a root card means someone took it (AD-4).
+                run = item.runs[-1]
+                self._tell_once(
+                    (element, "taken", str(run.id)),
+                    f"<4>{PREFIX}, {element} : anomalie : carte racine {item.id} prise par {run.profile or 'inconnu'} "
+                    f"(run {run.id})",
+                )
+            if item.status == "done" and workflow.next_station(station.key) is not None:
+                # The engine completes a root card only after the last station (AD-4).
+                self._tell_once(
+                    (element, "finished", station.key),
+                    f"<4>{PREFIX}, {element} : anomalie : carte racine {item.id} terminée à la station {station.key} "
+                    "par un autre que le moteur",
+                )
             if open_wait(workflow, item) is not None:
                 waiting.add(element)
                 answers = [answer for answer in pending if answer.item == element]
@@ -215,6 +256,8 @@ class Engine:
                     )
             elif item.status == "ready" and station.nature == "owner":
                 self._under_lock(workflow, item, lambda fresh, s=station: self._park(workflow, fresh, s))
+            elif item.status == "ready" and station.nature == "agent":
+                self._under_lock(workflow, item, lambda fresh, s=station: self._agent(workflow, fresh, s))
             elif item.status == "ready":
                 self._under_lock(workflow, item, lambda fresh, s=station: self._step(workflow, fresh, s))
         for answer in pending:
@@ -280,6 +323,47 @@ class Engine:
         fresh = next((card for card in self.reader.read_items(workflow.board) if card.id == item.id), None)
         wait = open_wait(workflow, fresh) if fresh is not None else None
         self.log(f"{PREFIX}, {element} : carte {item.id} en attente du propriétaire, attente {wait} ouverte")
+
+    def _agent(self, workflow: PluggedWorkflow, item: Item, station: Station) -> None:
+        """A ready root card at an `agent` station: its child card of the passage in progress is created when it has
+        none, and its end moves the root card on."""
+        element = item.idempotency_key
+        children = child_cards(self.reader.read_items(workflow.board), item, station.key)
+        child = current_child(item, children)
+        if child is None:
+            passage = len(children) + 1
+            issue = issue_of(item.body)
+            card = self.writer.create_child_card(
+                workflow.board,
+                title=f"{element} · {station.key} (passage {passage})",
+                profile=station.profile,
+                key=child_key(item, station.key, passage),
+                body="\n".join([element] + ([issue] if issue else [])),
+            )
+            self.log(
+                f"{PREFIX}, {element} : carte fille {card} demandée à la station {station.key} (créée, ou rendue par "
+                f"sa clé si elle existait déjà) (passage {passage}), confiée à {station.profile}"
+            )
+            return
+        if child.status == "done":
+            reason = f"carte fille {child.id} terminée"
+            self._apply(workflow, item, station, Decision(decision="advance", reason=reason))
+        elif child.status == "archived":
+            self._tell_once(
+                (element, child.id, "archived"),
+                f"<4>{PREFIX}, {element} : carte fille {child.id} archivée à la station {station.key}, carte racine "
+                f"{item.id} laissée à la station, aucun nouveau passage",
+            )
+        elif child.status in ("blocked", "triage"):
+            event = next(
+                (event for event in reversed(child.events) if event.kind in ("blocked", "block_loop_detected")), None
+            )
+            reason = event.payload.get("reason") if event is not None else None
+            self._tell_once(
+                (element, child.id, "blocked", str(event.id if event is not None else 0)),
+                f"<4>{PREFIX}, {element} : carte fille {child.id} bloquée à la station {station.key} "
+                f"({reason or 'sans raison'}), carte racine {item.id} laissée à la station",
+            )
 
     def _resume(self, workflow: PluggedWorkflow, item: Item, station: Station, answers: list[Answer]) -> None:
         """A card waiting at an `owner` station, and the answers for its item: the command decides on the first one

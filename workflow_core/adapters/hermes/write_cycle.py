@@ -15,7 +15,7 @@ from collections.abc import Callable
 
 from workflow_core.adapters.hermes.board import HermesBoardReader
 from workflow_core.adapters.hermes.writer import HermesBoardWriter
-from workflow_core.model.board import BoardUnavailableError, Item
+from workflow_core.model.board import BoardUnavailableError, Item, child_cards
 from workflow_core.model.writer import BoardWriteError
 
 THROWAWAY_PREFIX = "contrat-"
@@ -24,6 +24,9 @@ FIRST_ASSIGNEE = "contrat-premier"
 SECOND_ASSIGNEE = "contrat-second"
 KEY = "contrat:1"
 BODY = "Carte du cycle d'écriture du test de contrat."
+# The child card of an `agent` station: its key `<item>/<station>/<passage>`, its body the item's id first.
+CHILD_KEY = f"{KEY}/contrat/1"
+CHILD_BODY = f"{KEY}\n{BODY}"
 COMMENT = "Commentaire du cycle d'écriture."
 RESULT = "cycle d'écriture tenu"
 
@@ -88,7 +91,32 @@ def _steps(writer: HermesBoardWriter, reader: HermesBoardReader, board: str) -> 
     _expect("create --parent", "parents", card.parents, [first])
 
     _do("assign", lambda: writer.assign(board, first, SECOND_ASSIGNEE))
-    _expect("assign", "assigné", _read(reader, board, first, "assign").assignee, SECOND_ASSIGNEE)
+    card = _read(reader, board, first, "assign")
+    _expect("assign", "assigné", card.assignee, SECOND_ASSIGNEE)
+    # The engine knows when a root card arrived at its station by this event.
+    _expect("assign", "dernier événement", card.events[-1].kind if card.events else None, "assigned")
+    arrived = card.events[-1].id
+
+    # The child card of an `agent` station: no parent, ready at once, found by the prefix of its key.
+    step = "create (carte fille)"
+    child = _do(
+        step,
+        lambda: writer.create_child_card(
+            board, title="contrat : carte fille d'agent", profile=FIRST_ASSIGNEE, key=CHILD_KEY, body=CHILD_BODY
+        ),
+    )
+    items = _items(reader, board, step)
+    card = next((item for item in items if item.id == child), None)
+    if card is None:
+        raise WriteCycleError(step, f"carte {child} absente à la relecture")
+    _expect(step, "statut", card.status, "ready")
+    _expect(step, "parents", card.parents, [])
+    _expect(step, "corps", card.body, CHILD_BODY)
+    root = next(item for item in items if item.id == first)
+    _expect(step, "cartes filles", [item.id for item in child_cards(items, root, "contrat")], [child])
+    created = next((event.id for event in card.events if event.kind == "created"), None)
+    if created is None or created <= arrived:
+        raise WriteCycleError(step, f"événement created relu « {created} », attendu après l'assignation « {arrived} »")
 
     _do("schedule", lambda: writer.schedule(board, first))
     _expect("schedule", "statut", _read(reader, board, first, "schedule").status, "scheduled")

@@ -48,6 +48,12 @@ class BoardWriter(Protocol):
         issue's address as its body; return the card's id."""
         ...
 
+    def create_child_card(self, board: str, *, title: str, profile: str, key: str, body: str) -> str:
+        """Create a child card of an item, assigned to an agent's profile, with its idempotency key
+        `<item>/<station>/<passage>` and a body whose first line is the item's id; return the card's id. It is never
+        linked to its root card in the runtime: no parent, no link."""
+        ...
+
     def assign(self, board: str, card: str, lane: str) -> None:
         """Assign the card to another lane or profile."""
         ...

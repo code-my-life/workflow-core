@@ -35,6 +35,7 @@ def test_the_full_write_cycle_passes_and_removes_its_board(fake_runtime):
         "create",
         "create",
         "assign",
+        "create",
         "schedule",
         "unblock",
         "block",

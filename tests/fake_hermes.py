@@ -7,7 +7,9 @@ It notes each call (one JSON list of arguments per line, in the file named by FA
 - `kanban [--board <slug>] ...`: `boards create <slug>`, `boards list --json`, `boards rm --delete <slug>`, and on a
   board `create` (`--assignee`, `--idempotency-key`, `--body`, `--parent`, `--json`), `assign`, `schedule [reason]`,
   `unblock`, `block [reason] [--kind <kind>]`, `comment` and `complete --result`, applied to the bases of the test's
-  runtime home, with the runtime's real schema. As the runtime 0.22.2, `schedule`, `unblock`, `block` and `complete`
+  runtime home, with the runtime's real schema. As the runtime 0.22.2, `create` writes a `created` event (payload
+  `{"assignee", "status"}`; none when the idempotency key returns an existing card) and `assign` an `assigned` event
+  (payload `{"assignee", "from"}`); `schedule`, `unblock`, `block` and `complete`
   start only from their allowed statuses (otherwise code 1, « cannot <command> <card> »), and each writes its event
   in `task_events` (`scheduled`, `unblocked`, `blocked`, `completed`), its payload `{"reason"}` when it has one
   (`{"result"}` for `complete`). As the runtime's unblock-loop guard, `unblock` keeps the block's kind and
@@ -174,6 +176,11 @@ def card_command(db: sqlite3.Connection, command: list[str]) -> int | None:
         db.execute(f"INSERT INTO tasks ({', '.join(row)}) VALUES ({marks})", tuple(row.values()))
         if parent is not None:
             db.execute("INSERT INTO task_links (parent_id, child_id) VALUES (?, ?)", (parent, card))
+        # As the runtime's `create_task`: a `created` event, never for a card its idempotency key returned.
+        db.execute(
+            "INSERT INTO task_events (task_id, kind, payload, created_at) VALUES (?, 'created', ?, ?)",
+            (card, json.dumps({"assignee": row["assignee"], "status": status}), now),
+        )
         if "--json" in command:
             print(json.dumps(row))
         return 0
@@ -188,7 +195,13 @@ def card_command(db: sqlite3.Connection, command: list[str]) -> int | None:
         if answered != 0:
             return answered
     elif command[0] == "assign" and len(command) == 3:
+        (previous,) = db.execute("SELECT assignee FROM tasks WHERE id = ?", (card,)).fetchone()
         db.execute("UPDATE tasks SET assignee = ? WHERE id = ?", (command[2], card))
+        # As the runtime's `assign_task`: an `assigned` event.
+        db.execute(
+            "INSERT INTO task_events (task_id, kind, payload, created_at) VALUES (?, 'assigned', ?, ?)",
+            (card, json.dumps({"assignee": command[2], "from": previous}), now),
+        )
     elif command[0] == "comment" and len(command) == 3:
         db.execute(
             "INSERT INTO task_comments (task_id, author, body, created_at) VALUES (?, 'user', ?, ?)",
