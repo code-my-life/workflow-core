@@ -14,26 +14,11 @@ from workflow_core.model.state import CoreState
 from workflow_core.model.writer import BoardWriteError
 from workflow_core.plugin.manifest import plug
 
-from conftest import ESSAI_REPO, make_runtime_board
+from conftest import ESSAI_REPO, declared, make_runtime_board
 
 ISSUE = "https://github.com/code-my-life/workflow-essai/issues/1"
 # A title a shell would split and expand: it reaches the runtime as one argument.
 TITLE = 'essai:1 · Premier essai; echo "$HOME" $(id) > /tmp/x'
-
-
-def commands():
-    return runtime_adapter().contract.COMMANDS
-
-
-def declared(call: list[str]) -> bool:
-    """Whether a write uses only a command and options the contract declares."""
-    rest = call[3:]
-    for command, options in commands().items():
-        words = command.split()
-        if rest[: len(words)] == words:
-            used = [argument for argument in rest[len(words) :] if argument.startswith("--")]
-            return all(option in options for option in used)
-    return False
 
 
 def test_every_write_names_its_board_and_goes_through_the_command_line(fake_runtime):

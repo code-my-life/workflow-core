@@ -129,6 +129,21 @@ seule écriture du socle en observateur, et elle part même notificateur éteint
 - GitHub injoignable ou App absente : le journal du service le dit (`journalctl --user -u workflow-core.service`), le
   socle reste en observateur, et le démarrage suivant réessaie (`systemctl --user restart workflow-core.service`).
 
+## Le test de contrat et la version d'Hermès
+
+- Le test de contrat vérifie aussi les commandes que le socle lance : pour chacune de `COMMANDS` (`contract.py`),
+  `hermes kanban <commande> --help` doit sortir en code 0 et nommer chaque option déclarée. Sinon, le verdict porte
+  « commande `create` : option `--idempotency-key` absente » ou « commande `schedule` absente ».
+- `uv run pytest tests/contract -rs` (lancé par `scripts/install.sh`) fait en plus un cycle d'écriture complet sur un
+  board jetable `contrat-<heure Unix>`, relu après chaque pas, puis supprimé, même après un pas en échec. Un board
+  `contrat-*` laissé par un cycle interrompu est supprimé au cycle suivant. Aucun autre board n'est écrit.
+- Le socle relit `hermes --version` toutes les 5 minutes, et à la première passe du moteur après un démarrage : son
+  écrivain refuse toute écriture tant que cette relecture n'a pas confirmé la version du test de contrat. Une version
+  changée ou illisible le met en observateur, avec « version d'Hermès changée : 0.22.2 → 0.22.3 » dans le verdict de
+  `/api/machine` et une ligne au journal. Il y reste jusqu'au redémarrage : après une mise à jour d'Hermès, lancer
+  `uv run pytest tests/contract -rs` contre la nouvelle version, puis, s'il est vert,
+  `systemctl --user restart workflow-core.service`.
+
 ## Le moteur
 
 Toutes les 30 secondes, en mode normal seulement, une passe du moteur parcourt chaque workflow branché par son

@@ -25,6 +25,7 @@ from workflow_core.notify.contract_issue import ContractIssueTask, report_contra
 from workflow_core.notify.notifier import journal_line
 from workflow_core.notify.register import REGISTER_FILE
 from workflow_core.plugin.manifest import ManifestRefusedError, PluggedWorkflow, plug
+from workflow_core.version_watch import VersionWatch, VersionWatchRunner
 
 # journald reads a leading "<n>" on a service's output as the syslog priority of the line.
 ERROR = "<3>"
@@ -50,6 +51,7 @@ def build_service(
     github: Any = None,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
     engine_every: float = PASS_SECONDS,
+    version_clock: Callable[[], float] = time.monotonic,
 ) -> FastAPI:
     """The API, with the core's state after the contract check. A broken contract keeps the observer mode, is written
     to the journal and to its issue in code-my-life/workflow-core (the one write of the observer mode); the service
@@ -57,7 +59,11 @@ def build_service(
 
     The workflows with a sheet are served by the API and the notifier, as before; those plugged by their manifest are
     served by the engine only. The contract covers the served boards and the manifests' boards that already exist: a
-    board the engine has not created yet would otherwise break it, and the engine would never create it."""
+    board the engine has not created yet would otherwise break it, and the engine would never create it.
+
+    The runtime's version read at the start is read again every 5 minutes (`version_clock` replaces the clock of those
+    reads in the tests): a change puts the core in observer mode until a restart. The engine's writer refuses every
+    write until a first read confirms that version, which the engine's first pass makes."""
     served = {key: workflow for key, workflow in workflows.items() if not workflow.plugged_by_manifest}
     plugged = plug_manifests([workflow for workflow in workflows.values() if workflow.plugged_by_manifest])
     writer = adapter.make_board_writer()
@@ -109,7 +115,16 @@ def build_service(
             log=journal_line,
         )
 
-    engine = Engine(workflows=plugged, reader=reader, writer=writer, state=state)
+    watch = VersionWatch(
+        state, lambda: adapter.version_change(version), every=adapter.VERSION_CHECK_SECONDS, clock=version_clock
+    )
+    engine = Engine(
+        workflows=plugged,
+        reader=reader,
+        writer=adapter.make_board_writer(gate=watch.write_refusal),
+        state=state,
+        confirm_version=watch.ensure_confirmed,
+    )
 
     app = create_app(
         secret=secret,
@@ -125,10 +140,16 @@ def build_service(
         runtime_checks=adapter.make_machine_checks(),
         checks=checks,
         checks_every=checks_every,
-        background=[ContractIssueTask(report), NotifierRunner(notifier), EngineRunner(engine, engine_every)],
+        background=[
+            ContractIssueTask(report),
+            NotifierRunner(notifier),
+            EngineRunner(engine, engine_every),
+            VersionWatchRunner(watch, adapter.VERSION_CHECK_SECONDS),
+        ],
     )
     app.state.notifier = notifier
     app.state.engine = engine
+    app.state.version_watch = watch
     return app
 
 

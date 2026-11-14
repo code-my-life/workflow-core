@@ -59,6 +59,7 @@ class Engine:
         state: CoreState,
         run: CommandRunner = run_command,
         log: Callable[[str], None] = journal_line,
+        confirm_version: Callable[[], bool] | None = None,
     ) -> None:
         self.workflows = workflows
         self.reader = reader
@@ -66,6 +67,9 @@ class Engine:
         self.state = state
         self.run = run
         self.log = log
+        # Whether the runtime's version is confirmed since the start (read again when it is not yet): the service's
+        # version watch. False stops the pass before anything is read, run or written.
+        self.confirm_version = confirm_version
         self._guard = threading.Lock()
         self._boards_lock = threading.Lock()
         self._known_boards: set[str] = set()
@@ -83,7 +87,8 @@ class Engine:
 
     def run_pass(self) -> None:
         """One pass over every plugged workflow. Never raises: a failure is written to the journal, and the next pass
-        tries again. In observer mode, nothing is read, run or written."""
+        tries again. In observer mode, or while the runtime's version is not confirmed, nothing is read, run or
+        written."""
         mode = self.state.mode
         if mode != self._mode:
             self._mode = mode
@@ -92,6 +97,8 @@ class Engine:
             else:
                 self.log(f"{PREFIX}, mode observateur : aucune commande lancée, rien d'écrit")
         if mode != "normal":
+            return
+        if self.confirm_version is not None and not self.confirm_version():
             return
         for workflow in self.workflows:
             try:

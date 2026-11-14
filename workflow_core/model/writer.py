@@ -22,6 +22,18 @@ class BoardWriteError(Exception):
         self.stderr = stderr
 
 
+class BoardWriteRefusedError(BoardWriteError):
+    """A write the writer refused before running anything: the observer mode, or a runtime version not yet read
+    again since the start (ADR 0019)."""
+
+    def __init__(self, command: str, reason: str) -> None:
+        Exception.__init__(self, f"écriture « {command} » refusée : {reason}")
+        self.command = command
+        self.code = None
+        self.stderr = ""
+        self.reason = reason
+
+
 class BoardWriter(Protocol):
     """Writes to the runtime's boards by name."""
 
@@ -38,4 +50,24 @@ class BoardWriter(Protocol):
 
     def assign(self, board: str, card: str, lane: str) -> None:
         """Assign the card to another lane or profile."""
+        ...
+
+    def schedule(self, board: str, card: str) -> None:
+        """Park the card in `scheduled`."""
+        ...
+
+    def unblock(self, board: str, card: str) -> None:
+        """Return a blocked or scheduled card to `ready`."""
+        ...
+
+    def block(self, board: str, card: str, kind: str) -> None:
+        """Block the card, with a typed reason (`needs_input`, ...)."""
+        ...
+
+    def comment(self, board: str, card: str, text: str) -> None:
+        """Append a comment to the card."""
+        ...
+
+    def complete(self, board: str, card: str, result: str) -> None:
+        """Mark the card done, with its result."""
         ...
