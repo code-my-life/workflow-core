@@ -183,6 +183,52 @@ démarrage, avec la raison (« workflow essai non branché : manifeste absent : 
 Une écriture refusée par Hermès est écrite au journal avec la commande, son code et sa sortie d'erreur ; la passe
 suivante réessaie.
 
+## La relecture de GitHub
+
+Un élément d'un workflow branché par manifeste naît d'une **issue** ouverte dans le dépôt que déclare son manifeste
+(`issues_repo`). Le socle ne reçoit aucun webhook : il **relit** GitHub au démarrage, puis toutes les 10 minutes
+(`GITHUB_POLL_SECONDS = 600` dans `workflow_core/intake.py`), au nom de l'App `code-my-life-factory`. Il ne lit aucun
+autre dépôt. La relecture ne tourne que si un workflow est branché par son manifeste.
+
+Issues prises : les issues ouvertes (pas les pull requests, que l'API de GitHub range parmi les issues) ouvertes par le
+compte du propriétaire, `cddev` (celui au nom duquel factory-live ouvre une issue). Les autres sont ignorées sans
+commentaire. Une entrée de la configuration peut porter `issue_label` : seules les issues à ce label sont prises
+(`config/essai-test.toml` a `issue_label = "test"`). Une entrée sans `issue_label` ignore les issues au label `test` :
+le socle de production ne prend jamais une issue de la machine de test.
+
+Pour chaque issue nouvelle, le socle lance la commande `intake` du manifeste (`uv run --directory <dépôt> …`, avec son
+délai, sans les secrets du socle), avec l'issue en JSON sur son entrée :
+`{"schema_version": 1, "issue": {"repo", "number", "url", "title", "body", "labels"}}`. Elle rend
+`{"decision": "accept", "id": "<id>", "reason": "…"}` ou `{"decision": "refuse", "reason": "…"}`.
+- Acceptée : le socle crée la carte racine de l'élément `<clé>:<id>` (titre `<clé>:<id> · <titre de l'issue>`, nom de
+  voie de la première station, clé d'idempotence `<clé>:<id>`, adresse de l'issue dans le corps), puis commente
+  l'issue : « ✅ Cette issue devient l'élément `essai:7` du workflow `essai` ; il commence à la station `preparer`. »,
+  le lien `<WORKFLOW_CORE_LIVE_URL>/workflows/<clé>` (omis sans la variable), le motif, et la marque. Le moteur prend
+  l'élément à sa passe suivante.
+- Refusée : un commentaire « 🚫 Cette issue n'est pas prise par le workflow `essai` : <motif>. », avec la marque ;
+  aucune carte.
+- Sortie illisible, délai dépassé ou lancement impossible : ce n'est pas une décision. Le journal le dit, rien n'est
+  créé ni posté, et la relecture suivante relance la commande.
+
+Une issue traitée porte une **marque**, un commentaire HTML invisible à l'écran :
+`<!-- workflow-core:intake <dépôt>#<n> accept -->` ou `<!-- workflow-core:intake <dépôt>#<n> refuse -->`. Seule la
+marque d'un commentaire de l'App compte. Le socle note aussi l'issue dans la table `intake` d'`engine.db` (dossier
+d'état du socle : `repo`, `number`, `item`, `decision`, `handled_at`) pour ne pas relire ses commentaires à chaque
+relecture. Registre perdu ou supprimé : la marque suffit, et l'issue est notée de nouveau. Une issue marquée n'est plus
+jamais passée à `intake`. Pour qu'une issue soit relue, il faudrait retirer sa ligne de la table et son commentaire
+marqué.
+
+Si la carte est créée mais que le commentaire n'est pas posté (GitHub en échec, service arrêté), l'issue reste sans
+marque : à la relecture suivante, `intake` est relancée, la création rend la carte existante (même clé
+d'idempotence), et le commentaire est posté. Jamais deux cartes pour un élément.
+
+En mode observateur, ou tant que la version d'Hermès n'est pas confirmée, la relecture lit les issues mais ne lance
+pas `intake`, ne crée rien et ne poste rien ; le journal le dit une fois par issue (« en attente du mode normal »).
+
+Le journal du service préfixe ses lignes par `workflow-core: relecture` : issue acceptée (élément et carte), refusée
+(motif), décision dite dans l'issue (adresse du commentaire), déjà traitée, issues ou commentaires illisibles, commentaire
+non posté, intake sans décision.
+
 ## La machine de test
 
 La machine de test est la machine de production, avec le même Hermès, mais un board à part, `essai-test`. Un second
@@ -238,3 +284,30 @@ lit de même, avec le motif de son événement `blocked`.
 Lire le journal du socle de test : `tail -f ~/.local/state/workflow-core-essai-test/socle.log`. Chaque lancement de
 commande y est écrit (« commande de preparer lancée ») ; une carte en attente ne fait lancer aucune commande tant
 qu'aucune réponse n'est injectée. Arrêter le socle de test : Ctrl+C dans son terminal.
+
+### Preuve de la naissance d'un élément (relecture de GitHub)
+
+Le socle de test lancé comme ci-dessus (l'App dans le `.env`), ouvrir une issue de test dans le dépôt du workflow
+d'essai, au nom du propriétaire :
+
+```sh
+gh issue create -R code-my-life/workflow-essai --label test --title "Essai de naissance" \
+  --body "Issue de test de la relecture de GitHub"
+```
+
+Attendre au plus 10 minutes (la relecture suivante), puis lire le commentaire d'acceptation, signé par
+`code-my-life-factory`, et la carte créée :
+
+```sh
+gh issue view <n> -R code-my-life/workflow-essai --comments
+hermes kanban --board essai-test list
+```
+
+La liste montre une seule carte `essai:<n>`. Redémarrer le socle de test deux fois (Ctrl+C, puis la même commande) :
+la liste n'a toujours qu'une carte. Ouvrir une seconde issue au titre `[refus] essai` (avec le label `test`) : elle
+reçoit le commentaire de refus avec son motif, et aucune carte. Coller les liens des issues et la sortie de la liste
+dans la pull request, puis fermer les issues de test :
+
+```sh
+gh issue close <n> -R code-my-life/workflow-essai
+```

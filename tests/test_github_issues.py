@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import ClassVar
 from urllib.parse import parse_qs, urlparse
 
-from workflow_core.adapters.github import AppTokens, GitHubClient
+from workflow_core.adapters.github import AppTokens, GitHubClient, OpenIssue
 
 COMMENTS = [
     {
@@ -128,3 +128,54 @@ def test_list_issues_filters_by_creator_and_since_and_follows_every_page(tmp_pat
     assert all(q["creator"] == "code-my-life-factory[bot]" and "since" not in q for q in opened)
     assert all(q["since"] == "2026-11-11T16:13:20Z" and "creator" not in q for q in closed)
     assert sorted(issue["number"] for issue in issues) == [1, 2, 3, 4, 5]
+
+
+class OpenIssueGitHub(IssueListGitHub):
+    """Serves the open issues of a repository by pages of 2, a pull request among them, as GitHub lists them; each
+    query is recorded in `IssueListGitHub.queries`."""
+
+    ISSUES: ClassVar[list[dict]] = [
+        {
+            "number": n,
+            "html_url": f"https://github.com/code-my-life/workflow-essai/issues/{n}",
+            "title": f"Issue {n}",
+            "body": f"Corps {n}" if n != 2 else None,
+            "user": {"login": "cddev" if n != 3 else "inconnu"},
+            "labels": [{"name": "test"}, {"name": "type:essai"}] if n == 1 else [],
+            "state": "open",
+        }
+        for n in range(1, 5)
+    ] + [{"number": 9, "pull_request": {"url": "x"}, "user": {"login": "cddev"}, "state": "open"}]
+
+
+def test_open_issues_are_read_page_by_page_without_pull_requests(tmp_path):
+    key = tmp_path / "key.pem"
+    subprocess.run(["openssl", "genrsa", "-out", str(key), "2048"], check=True, capture_output=True)
+    env_file = tmp_path / "core.env"
+    env_file.write_text(f"GITHUB_APP_ID=1\nGITHUB_APP_PRIVATE_KEY_PATH={key}\n", encoding="utf-8")
+    server = ThreadingHTTPServer(("127.0.0.1", 0), OpenIssueGitHub)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    IssueListGitHub.queries = []
+    try:
+        tokens = AppTokens(
+            environ={},
+            env_file=env_file,
+            cache_dir=tmp_path / "state",
+            api_url=f"http://127.0.0.1:{server.server_address[1]}",
+        )
+        issues = GitHubClient(tokens).list_open_issues("code-my-life/workflow-essai")
+    finally:
+        server.shutdown()
+
+    assert [query.get("page", "1") for query in IssueListGitHub.queries] == ["1", "2", "3"]
+    assert all(query["state"] == "open" and query["per_page"] == "100" for query in IssueListGitHub.queries)
+    assert [issue.number for issue in issues] == [1, 2, 3, 4]
+    assert issues[0] == OpenIssue(
+        number=1,
+        url="https://github.com/code-my-life/workflow-essai/issues/1",
+        title="Issue 1",
+        body="Corps 1",
+        author="cddev",
+        labels=("test", "type:essai"),
+    )
+    assert (issues[1].body, issues[2].author, issues[3].labels) == ("", "inconnu", ())

@@ -39,6 +39,9 @@ TIMEOUT_SECONDS = 30
 
 # The login of the App's comments.
 APP_BOT = "code-my-life-factory[bot]"
+# The owner's account, the one on whose behalf factory-live opens an issue (ADR 0010): the only author whose issues
+# a workflow takes in.
+OWNER_LOGIN = "cddev"
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,18 @@ class IssueComment:
     author: str
     body: str
     url: str
+
+
+@dataclass(frozen=True)
+class OpenIssue:
+    """An open issue of a repository, as the reading of GitHub hands it to a workflow's intake command."""
+
+    number: int
+    url: str
+    title: str
+    body: str
+    author: str
+    labels: tuple[str, ...]
 
 
 class AppConfigError(Exception):
@@ -238,6 +253,31 @@ class GitHubClient:
                         author=(item.get("user") or {}).get("login") or "",
                         body=item.get("body") or "",
                         url=item.get("html_url") or "",
+                    )
+                )
+            url = next_page(headers)
+        return found
+
+    def list_open_issues(self, repo: str) -> list[OpenIssue]:
+        """Every open issue of a repository, read page by page (100 a page) to the last one, without the pull requests
+        GitHub lists among them. A page that cannot be read fails the whole reading."""
+        found: list[OpenIssue] = []
+        url: str | None = f"{self.tokens.api_url}/repos/{repo}/issues?state=open&per_page={PAGE_SIZE}"
+        while url:
+            answer, headers = request(url, authorization=f"token {self.tokens.token()}")
+            for item in answer if isinstance(answer, list) else []:
+                if not isinstance(item, dict) or "pull_request" in item:
+                    continue
+                found.append(
+                    OpenIssue(
+                        number=int(item["number"]),
+                        url=item.get("html_url") or "",
+                        title=item.get("title") or "",
+                        body=item.get("body") or "",
+                        author=(item.get("user") or {}).get("login") or "",
+                        labels=tuple(
+                            label.get("name") or "" for label in item.get("labels") or [] if isinstance(label, dict)
+                        ),
                     )
                 )
             url = next_page(headers)

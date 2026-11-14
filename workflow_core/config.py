@@ -95,6 +95,9 @@ class Workflow(BaseModel):
     # The agents a held card's relaunch command relays through, the first one that is not its assignee; without any,
     # the alert of a held card leaves the command out.
     notify_relay_agents: list[str] = Field(default_factory=list)
+    # For a workflow plugged by its manifest: only the issues that carry this label are taken in; without it, the
+    # issues labelled `test` are left out, so that a production core never takes an issue of the test machine.
+    issue_label: str | None = None
 
     @model_validator(mode="before")
     @classmethod

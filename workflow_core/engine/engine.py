@@ -124,7 +124,7 @@ class Engine:
             except Exception as error:  # never an exception out of the pass
                 self.log(f"<3>{PREFIX}, {workflow.key} : {type(error).__name__}: {error}")
 
-    def _ensure_board(self, workflow: PluggedWorkflow) -> None:
+    def ensure_board(self, workflow: PluggedWorkflow) -> None:
         """Create the workflow's board when its base does not exist; a board created or found is not checked again."""
         with self._boards_lock:
             if workflow.board in self._known_boards:
@@ -146,7 +146,7 @@ class Engine:
         self.log(line)
 
     def _workflow_pass(self, workflow: PluggedWorkflow) -> None:
-        self._ensure_board(workflow)
+        self.ensure_board(workflow)
         items = self.reader.read_items(workflow.board)
         # The answers are read after the cards: an answer applied by another pass meanwhile is no longer pending.
         pending = self.answers.pending(f"{workflow.key}:") if self.answers is not None else []

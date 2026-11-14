@@ -6,3 +6,5 @@
 key = "essai"
 repo = "~/perso/workflow-essai"
 board = "essai-test"
+# Only the issues labelled `test` are taken in by the test machine: the production core leaves them out.
+issue_label = "test"

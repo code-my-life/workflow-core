@@ -18,6 +18,7 @@ from workflow_core.engine import Engine, EngineRunner
 from workflow_core.engine.answers import ENGINE_DB, AnswerBox
 from workflow_core.engine.engine import PASS_SECONDS
 from workflow_core.events import JOURNAL_FILE, state_dir
+from workflow_core.intake import Intake, IntakeRegister, IntakeRunner
 from workflow_core.model.board import BoardReader
 from workflow_core.model.checks import CHECK_EVERY_SECONDS, DeclaredCheck
 from workflow_core.model.contract import ContractVerdict
@@ -65,7 +66,11 @@ def build_service(
 
     The runtime's version read at the start is read again every 5 minutes (`version_clock` replaces the clock of those
     reads in the tests): a change puts the core in observer mode until a restart. The engine's writer refuses every
-    write until a first read confirms that version, which the engine's first pass makes."""
+    write until a first read confirms that version, which the engine's first pass makes.
+
+    The reading of GitHub (`workflow_core.intake`) runs only with a workflow plugged by its manifest: at the start, then
+    every 10 minutes, it hands the new issues of the manifests' repositories to their intake commands, through the
+    engine's writer."""
     served = {key: workflow for key, workflow in workflows.items() if not workflow.plugged_by_manifest}
     reader = adapter.make_board_reader()
     plugged = plug_manifests(
@@ -122,13 +127,25 @@ def build_service(
     watch = VersionWatch(
         state, lambda: adapter.version_change(version), every=adapter.VERSION_CHECK_SECONDS, clock=version_clock
     )
+    # One writer for the engine and the reading of GitHub: both refuse to write until the version is confirmed.
+    engine_writer = adapter.make_board_writer(gate=watch.write_refusal)
     engine = Engine(
         workflows=plugged,
         reader=reader,
-        writer=adapter.make_board_writer(gate=watch.write_refusal),
+        writer=engine_writer,
         state=state,
         confirm_version=watch.ensure_confirmed,
         answers=AnswerBox(state_dir(environ) / ENGINE_DB),
+    )
+    intake = Intake(
+        workflows=plugged,
+        github=github,
+        writer=engine_writer,
+        state=state,
+        register=IntakeRegister(state_dir(environ) / ENGINE_DB),
+        confirm_version=watch.ensure_confirmed,
+        ensure_board=engine.ensure_board,
+        live_url=settings.live_url,
     )
 
     app = create_app(
@@ -149,11 +166,13 @@ def build_service(
             ContractIssueTask(report),
             NotifierRunner(notifier),
             EngineRunner(engine, engine_every),
+            IntakeRunner(intake),
             VersionWatchRunner(watch, adapter.VERSION_CHECK_SECONDS),
         ],
     )
     app.state.notifier = notifier
     app.state.engine = engine
+    app.state.intake = intake
     app.state.version_watch = watch
     return app
 

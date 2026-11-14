@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from workflow_core.config import Workflow
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
-from workflow_core.model.manifest import ManifestStation, judge_manifest
+from workflow_core.model.manifest import ManifestIntake, ManifestStation, judge_manifest
 
 MANIFEST_FILE = "workflow-manifest.json"
 # The statuses of a card that holds nothing any more.
@@ -33,12 +33,16 @@ class ManifestRefusedError(Exception):
 
 @dataclass(frozen=True)
 class PluggedWorkflow:
-    """A workflow plugged by its manifest: its key, its board, its repository, its stations in order."""
+    """A workflow plugged by its manifest: its key, its board, its repository, its stations in order, the repository
+    of its issues and its intake command, and the label its issues must carry (None: any but `test`)."""
 
     key: str
     board: str
     repo: Path
     stations: tuple[ManifestStation, ...]
+    issues_repo: str = ""
+    intake: ManifestIntake | None = None
+    issue_label: str | None = None
 
     def lane(self, station: str) -> str:
         """The lane of a station, `<key>-<station>`: the assignee of a card that stands there, never a profile."""
@@ -109,4 +113,13 @@ def plug(workflow: Workflow, *, reader: BoardReader | None = None) -> PluggedWor
     verdict = judge_manifest(data, key=key, read_sheet=read_sheet, lanes_in_use=lanes)
     if not verdict.ok:
         raise ManifestRefusedError(key, f"manifeste de {key} refusé : {verdict.rule} : {verdict.detail}")
-    return PluggedWorkflow(key=key, board=workflow.board, repo=repo, stations=tuple(verdict.manifest.stations))
+    manifest = verdict.manifest
+    return PluggedWorkflow(
+        key=key,
+        board=workflow.board,
+        repo=repo,
+        stations=tuple(manifest.stations),
+        issues_repo=manifest.issues_repo,
+        intake=manifest.intake,
+        issue_label=workflow.issue_label,
+    )

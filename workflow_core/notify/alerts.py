@@ -20,6 +20,12 @@ def marker(key: str) -> str:
     return f"<!-- workflow-core:attente {key} -->"
 
 
+def item_link(live_url: str | None, key: str) -> str | None:
+    """The link of a workflow's items in factory-live, `<live_url>/workflows/<key>`; None without factory-live's
+    address."""
+    return f"{live_url}/workflows/{key}" if live_url else None
+
+
 def parse_issue(url: str) -> tuple[str, str, int] | None:
     """`(owner, repository, number)` of an issue address."""
     found = ISSUE.match(url)

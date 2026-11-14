@@ -2,6 +2,8 @@
 # optionally the settings of the diagnosis: its triggers (held_after_minutes, approval_card_title, main_red_reason),
 # its sources (repo, profiles, plugins), the workflow's words (guard_suffixes, default_agent, relay_agent,
 # pr_acceptance, body_branch), and its alerts (notify, notify_skip_assignees, notify_relay_agents).
+# Une entrée branchée par manifeste peut porter issue_label : seules les issues à ce label sont prises ; sans lui, les
+# issues au label `test` sont ignorées.
 # The key of a workflow is the name of its board (ADR 0003). The manifests of the engine epic will replace this list.
 
 [[workflow]]

@@ -49,8 +49,8 @@ def test_a_manifest_entry_has_its_key_and_its_repository(tmp_path):
     assert declared["factory"].repo == Path("~/perso/hermes-software-factory")
     assert declared["factory"].manifest == "factory.yaml"
     test_machine = load_workflows(ROOT / "config" / "essai-test.toml")
-    assert [(w.key, w.board, w.repo, w.sheet) for w in test_machine.values()] == [
-        ("essai", "essai-test", Path("~/perso/workflow-essai"), None)
+    assert [(w.key, w.board, w.repo, w.sheet, w.issue_label) for w in test_machine.values()] == [
+        ("essai", "essai-test", Path("~/perso/workflow-essai"), None, "test")
     ]
 
 
