@@ -150,10 +150,33 @@ Toutes les 30 secondes, en mode normal seulement, une passe du moteur parcourt c
 **manifeste** (`workflow-manifest.json` à la racine de son dépôt, déclaré dans la configuration par `key` et `repo`).
 Le moteur crée le board du workflow si sa base n'existe pas, relit ses cartes, et reconnaît une **carte racine** (la
 carte d'un élément) à sa clé d'idempotence `<clé>:<id local>`. Une carte racine prête, assignée au **nom de voie**
-`<clé>-<station>` d'une station `code`, fait lancer la commande de la station dans le dépôt du workflow ; une
-décision `advance` réassigne la carte au nom de voie de la station suivante. Le moteur écrit dans Hermès par la seule
-ligne de commande `hermes kanban --board <slug>`, ne prend jamais une carte (`claim`), et saute un élément qu'une
-passe précédente traite encore. En mode observateur, il ne lance rien et n'écrit rien ; le journal le dit une fois.
+`<clé>-<station>` d'une station `code`, fait lancer la commande de la station dans le dépôt du workflow, puis le
+moteur applique sa **décision** :
+- `advance` réassigne la carte au nom de voie de la station `to`, ou de la suivante ; après la dernière station du
+  manifeste, il termine la carte racine (`complete <carte> --result <raison>`), seul moment où le moteur termine une
+  carte racine ;
+- `wait` laisse la carte telle quelle : la commande est relancée à la passe suivante, avec un essai de plus ;
+- `fail`, un délai dépassé ou une sortie illisible bloquent la carte avec son motif, « Échec de la station
+  preparer : délai de 30 s dépassé » (sans sorte de blocage). Une carte bloquée n'est plus lancée ; débloquée
+  (`hermes kanban --board <slug> unblock <carte>`), elle redevient prête à sa station et la commande est relancée.
+  Si elle échoue de nouveau après ce déblocage, Hermès l'envoie en `triage` au lieu de `blocked` (sa garde contre les
+  boucles de déblocage, événement `block_loop_detected`) ; le moteur ne lance plus une carte en `triage`.
+  Une station `to` inconnue du manifeste bloque aussi la carte, avec « station « <to> » inconnue ».
+
+Une carte racine prête au nom de voie d'une station `owner` (où l'on attend le propriétaire) est mise en **attente** :
+`schedule <carte> "En attente du propriétaire à la station <station>"`, et la carte passe en `scheduled`. L'attente a
+un identifiant, `<clé>:owner:<carte>:<événement>`, l'événement étant l'identifiant du dernier événement `scheduled`
+de la carte dans Hermès ; le journal le donne (« attente essai:owner:t_ab12cd34:812 ouverte »). Les **réponses du
+propriétaire** (un geste et sa note) arrivent dans la table `answers` de `engine.db`, dans le dossier d'état du socle.
+À la passe suivante, une réponse pour un élément en attente est passée à la commande de la station (champ `answer`)
+et marquée appliquée à l'attente, une seule fois ; une décision `wait` laisse la carte en attente, toute autre
+décision la débloque (`unblock`) puis s'applique comme ci-dessus. Une réponse pour un élément sans attente ouverte est
+marquée refusée et ne change rien. Après un redémarrage, l'attente est retrouvée dans Hermès et une réponse non
+traitée est traitée à la première passe.
+
+Le moteur écrit dans Hermès par la seule ligne de commande `hermes kanban --board <slug>`, ne prend jamais une carte
+(`claim`), et saute un élément qu'une passe précédente traite encore. En mode observateur, il ne lance rien, n'écrit
+rien et ne lit pas les réponses, qui attendent ; le journal le dit une fois.
 
 Un manifeste absent, illisible ou d'une autre clé laisse son workflow non branché : le journal du service le dit au
 démarrage, avec la raison (« workflow essai non branché : manifeste absent : … »), et les autres workflows tournent.
@@ -198,6 +221,20 @@ En moins d'une minute, la carte passe à `essai-revue` ; la vérifier, et vérif
 hermes kanban --board essai-test show <carte>
 ```
 
+À la passe suivante, la carte passe en `scheduled` : elle attend le propriétaire à `essai-revue`, et le journal donne
+l'identifiant de l'attente. Injecter la réponse du propriétaire avec l'outil de la machine de test, qui écrit dans la
+boîte des réponses du socle de test et imprime l'identifiant de la réponse :
+
+```sh
+uv run python scripts/inject_answer.py --state-dir ~/.local/state/workflow-core-essai-test --item essai:2 \
+  --gesture valider
+```
+
+(`--item` est la clé d'idempotence de la carte racine ; `--note <texte>` ajoute une note au geste.) À la passe suivante, la carte passe à `essai-clore`, puis, une passe
+plus loin, en `done`. Lire l'attente, puis la fin, avec `hermes kanban --board essai-test show <carte>` : le statut,
+les événements `scheduled`, `unblocked` et `completed`, et le résultat. Une carte bloquée par un échec de commande se
+lit de même, avec le motif de son événement `blocked`.
+
 Lire le journal du socle de test : `tail -f ~/.local/state/workflow-core-essai-test/socle.log`. Chaque lancement de
-commande y est écrit (« commande de preparer lancée ») ; deux minutes après le passage à `essai-revue`, aucun autre
-lancement ne doit y apparaître. Arrêter le socle de test : Ctrl+C dans son terminal.
+commande y est écrit (« commande de preparer lancée ») ; une carte en attente ne fait lancer aucune commande tant
+qu'aucune réponse n'est injectée. Arrêter le socle de test : Ctrl+C dans son terminal.

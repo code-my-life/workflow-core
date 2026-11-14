@@ -30,14 +30,17 @@ UNREADABLE = "sortie illisible"
 PRIVATE_PREFIXES = ("WORKFLOW_CORE_", "GITHUB_APP_")
 
 
-def command_input(*, item: str, issue: str | None, title: str, station: str, attempt: int) -> dict:
-    """The input of a station's command."""
+def command_input(
+    *, item: str, issue: str | None, title: str, station: str, attempt: int, answer: dict | None = None
+) -> dict:
+    """The input of a station's command; `answer` is the owner's answer at an `owner` station
+    (`{"gesture", "note"}`), None otherwise."""
     return {
         "schema_version": SCHEMA_VERSION,
         "item": {"id": item, "issue": issue, "title": title},
         "station": station,
         "attempt": attempt,
-        "answer": None,
+        "answer": answer,
     }
 
 

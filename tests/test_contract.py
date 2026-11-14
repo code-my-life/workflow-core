@@ -443,6 +443,18 @@ def test_a_base_missing_the_block_events_breaks_the_contract(runtime_home):
     assert verdict.problems == ["factory: task_events.payload absente"]
 
 
+def test_a_base_missing_the_task_events_breaks_the_contract(runtime_home):
+    # The engine knows a wait by the card's last `scheduled` event, read from task_events.
+    with sqlite3.connect(board_base(runtime_home, "factory")) as db:
+        db.execute("DROP TABLE task_events")
+    db.close()
+
+    verdict = check()
+
+    assert verdict.ok is False
+    assert verdict.problems == ["factory: table task_events absente"]
+
+
 def test_a_guard_event_without_a_reason_breaks_the_contract(runtime_home):
     # The notifier reads the reason of the runtime's respawn guard: a JSON object with a text `reason`.
     from workflow_core.model.state import CoreState
@@ -521,7 +533,13 @@ def test_every_call_uses_a_declared_command_and_option(fake_runtime):
     writer.assign("essai", child, "essai-preparer")
     writer.schedule("essai", child)
     writer.unblock("essai", child)
-    writer.block("essai", child, "needs_input")
+    writer.schedule("essai", child, "En attente du propriétaire à la station revue")
+    writer.unblock("essai", child)
+    writer.block("essai", child, kind="needs_input")
+    writer.unblock("essai", child)
+    writer.block("essai", child, "Échec de la station preparer : sortie illisible")
+    writer.unblock("essai", child)
+    writer.block("essai", child, "en attente", kind="needs_input")
     writer.unblock("essai", child)
     writer.comment("essai", child, "un commentaire")
     writer.complete("essai", child, "fait")

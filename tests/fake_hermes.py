@@ -5,9 +5,14 @@ It notes each call (one JSON list of arguments per line, in the file named by FA
 - `kanban <command...> --help` with `<command words joined by ->.txt` of the folder named by FAKE_RUNTIME_HELP; a
   command without its help file is unknown: code 2, as the runtime;
 - `kanban [--board <slug>] ...`: `boards create <slug>`, `boards list --json`, `boards rm --delete <slug>`, and on a
-  board `create` (`--assignee`, `--idempotency-key`, `--body`, `--parent`, `--json`), `assign`, `schedule`, `unblock`,
-  `block --kind`, `comment` and `complete --result`, applied to the bases of the test's runtime home, with the
-  runtime's real schema.
+  board `create` (`--assignee`, `--idempotency-key`, `--body`, `--parent`, `--json`), `assign`, `schedule [reason]`,
+  `unblock`, `block [reason] [--kind <kind>]`, `comment` and `complete --result`, applied to the bases of the test's
+  runtime home, with the runtime's real schema. As the runtime 0.22.2, `schedule`, `unblock`, `block` and `complete`
+  start only from their allowed statuses (otherwise code 1, « cannot <command> <card> »), and each writes its event
+  in `task_events` (`scheduled`, `unblocked`, `blocked`, `completed`), its payload `{"reason"}` when it has one
+  (`{"result"}` for `complete`). As the runtime's unblock-loop guard, `unblock` keeps the block's kind and
+  recurrences, a `block` of the same kind as the stored one (None equal to None) counts one more recurrence (one
+  otherwise), and at the second the card goes to `triage` with a `block_loop_detected` event; `complete` clears both.
 FAKE_RUNTIME_FAIL names a subcommand (or `all`) that fails with code 1 and an error output. The tests never run the
 machine's runtime.
 """
@@ -57,6 +62,83 @@ def version() -> int:
     return 0
 
 
+# The runtime's unblock-loop guard: a card blocked again for the same kind (None equal to None) this many times in a
+# row goes to `triage` instead of `blocked` (`BLOCK_RECURRENCE_LIMIT`, `_route_block`).
+BLOCK_RECURRENCE_LIMIT = 2
+# The statuses each command starts from in the runtime 0.22.2 (hermes_cli/kanban_db.py), and the event it writes.
+STARTS = {
+    "schedule": ({"todo", "ready", "running", "blocked"}, "scheduled"),
+    "unblock": ({"blocked", "scheduled"}, "unblocked"),
+    "block": ({"ready", "running"}, "blocked"),
+    "complete": ({"ready", "running", "blocked", "review"}, "completed"),
+}
+
+
+def split_kind(arguments: list[str]) -> tuple[list[str], str | None] | None:
+    """The positional arguments and the `--kind` value, in any order; None when `--kind` has no value."""
+    if "--kind" not in arguments:
+        return arguments, None
+    at = arguments.index("--kind")
+    if at + 1 >= len(arguments):
+        return None
+    return arguments[:at] + arguments[at + 2 :], arguments[at + 1]
+
+
+def lifecycle(db: sqlite3.Connection, command: list[str], card: str, now: int) -> int | None:
+    """Apply `schedule`, `unblock`, `block` or `complete`; None when its arguments are not the runtime's."""
+    name, rest = command[0], command[2:]
+    kind = None
+    if name == "block":
+        split = split_kind(rest)
+        if split is None:
+            return None
+        rest, kind = split
+    result = None
+    if name == "complete":
+        if rest[:1] != ["--result"] or len(rest) != 2:
+            return None
+        result, rest = rest[1], []
+    if len(rest) > 1 or (name == "unblock" and rest):
+        return None
+    reason = rest[0] if rest else None
+    status, previous_kind, recurrences = db.execute(
+        "SELECT status, block_kind, block_recurrences FROM tasks WHERE id = ?", (card,)
+    ).fetchone()
+    starts, event = STARTS[name]
+    if status not in starts:
+        print(f"cannot {name} {card}: status {status}", file=sys.stderr)
+        return 1
+    if name == "schedule":
+        db.execute("UPDATE tasks SET status = 'scheduled' WHERE id = ?", (card,))
+    elif name == "unblock":
+        # The block's kind and recurrences survive an unblock: only `complete` clears them.
+        db.execute("UPDATE tasks SET status = 'ready' WHERE id = ?", (card,))
+    elif name == "block":
+        recurrences = recurrences + 1 if previous_kind == kind else 1
+        if recurrences >= BLOCK_RECURRENCE_LIMIT:
+            status, event = "triage", "block_loop_detected"
+        else:
+            status = "blocked"
+        db.execute(
+            "UPDATE tasks SET status = ?, block_kind = ?, block_recurrences = ? WHERE id = ?",
+            (status, kind, recurrences, card),
+        )
+    else:
+        db.execute(
+            "UPDATE tasks SET status = 'done', result = ?, completed_at = ?, block_kind = NULL, block_recurrences = 0 "
+            "WHERE id = ?",
+            (result, now, card),
+        )
+    if name == "complete":
+        payload = json.dumps({"result": result})
+    else:
+        payload = json.dumps({"reason": reason}) if reason is not None else None
+    db.execute(
+        "INSERT INTO task_events (task_id, kind, payload, created_at) VALUES (?, ?, ?, ?)", (card, event, payload, now)
+    )
+    return 0
+
+
 def card_command(db: sqlite3.Connection, command: list[str]) -> int | None:
     """Apply a card command to a board's base; None when the command is not one the fake knows."""
     now = int(time.time())
@@ -101,22 +183,16 @@ def card_command(db: sqlite3.Connection, command: list[str]) -> int | None:
     if db.execute("SELECT 1 FROM tasks WHERE id = ?", (card,)).fetchone() is None:
         print(f"no such task: {card}", file=sys.stderr)
         return 1
-    if command[0] == "assign" and len(command) == 3:
+    if command[0] in STARTS:
+        answered = lifecycle(db, command, card, now)
+        if answered != 0:
+            return answered
+    elif command[0] == "assign" and len(command) == 3:
         db.execute("UPDATE tasks SET assignee = ? WHERE id = ?", (command[2], card))
-    elif command[0] == "schedule" and len(command) == 2:
-        db.execute("UPDATE tasks SET status = 'scheduled' WHERE id = ?", (card,))
-    elif command[0] == "unblock" and len(command) == 2:
-        db.execute("UPDATE tasks SET status = 'ready', block_kind = NULL WHERE id = ?", (card,))
-    elif command[0] == "block" and len(command) == 4 and command[2] == "--kind":
-        db.execute("UPDATE tasks SET status = 'blocked', block_kind = ? WHERE id = ?", (command[3], card))
     elif command[0] == "comment" and len(command) == 3:
         db.execute(
             "INSERT INTO task_comments (task_id, author, body, created_at) VALUES (?, 'user', ?, ?)",
             (card, command[2], now),
-        )
-    elif command[0] == "complete" and len(command) == 4 and command[2] == "--result":
-        db.execute(
-            "UPDATE tasks SET status = 'done', result = ?, completed_at = ? WHERE id = ?", (command[3], now, card)
         )
     else:
         return None

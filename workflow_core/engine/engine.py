@@ -3,12 +3,19 @@
 
 A pass creates the workflow's board when its base does not exist yet (once), reads its cards again, and knows the root
 cards by their idempotency key, `<key>:<local id>` without `/` (a child card's key is `<item>/<station>/<passage>`).
-For each ready root card assigned to the lane `<key>-<station>` of a `code` station, under the item's own lock, it runs
-the station's command and applies its decision: `advance` assigns the card to the lane of the station `to`, or of the
-next station without it. The engine never takes a card (`claim`): its lock is its own, held in memory.
-
-At this stage, `wait`, `fail`, the last station, an unknown `to` and the `owner` stations change nothing and leave a
-line in the journal.
+Under the item's own lock, with the card read again:
+- a ready root card at the lane `<key>-<station>` of a `code` station has the station's command run, and its decision
+  applied;
+- a ready root card at the lane of an `owner` station is parked (`schedule`) with its reason: the item waits for its
+  owner. The wait's id is `<key>:owner:<card>:<event>`, the event being the card's last `scheduled` event;
+- a root card waiting at an `owner` station, with an answer of the owner in the answer box, has the station's command
+  run with that answer. The answer is marked applied to the wait once the command is back, before any write, so it is
+  never handed to a command twice; `wait` leaves the card waiting, any other decision unblocks it and is applied.
+A decision is applied this way: `advance` assigns the card to the lane of the station `to`, or of the next station
+without it, and completes the root card after the last station; `fail` (a command past its delay or with an unreadable
+output included) and an unknown `to` block the card with the station and the reason; `wait` changes nothing, and the
+command runs again at the next pass with the next attempt. An answer for an item without an open wait, as read at the
+start of the pass, is marked refused. The engine never takes a card (`claim`): its lock is its own, held in memory.
 """
 
 from __future__ import annotations
@@ -20,6 +27,7 @@ import threading
 from collections.abc import Callable
 from typing import Protocol
 
+from workflow_core.engine.answers import Answer, AnswerBox
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
 from workflow_core.model.decision import Decision
 from workflow_core.model.manifest import ManifestStation as Station
@@ -44,6 +52,16 @@ def issue_of(body: str | None) -> str | None:
     return found[0] if found else None
 
 
+def open_wait(workflow: PluggedWorkflow, item: Item) -> str | None:
+    """The id of the item's open wait, `<key>:owner:<card>:<event>` from the card's last `scheduled` event, when the
+    card waits (`scheduled`) at the lane of an `owner` station; None otherwise."""
+    station = workflow.station_of_lane(item.assignee)
+    if item.status != "scheduled" or station is None or station.nature != "owner":
+        return None
+    event = next((event for event in reversed(item.events) if event.kind == "scheduled"), None)
+    return None if event is None else f"{workflow.key}:owner:{item.id}:{event.id}"
+
+
 class Engine:
     def __init__(
         self,
@@ -55,6 +73,7 @@ class Engine:
         run: CommandRunner = run_command,
         log: Callable[[str], None] = journal_line,
         confirm_version: Callable[[], bool] | None = None,
+        answers: AnswerBox | None = None,
     ) -> None:
         self.workflows = workflows
         self.reader = reader
@@ -65,6 +84,8 @@ class Engine:
         # Whether the runtime's version is confirmed since the start (read again when it is not yet): the service's
         # version watch. False stops the pass before anything is read, run or written.
         self.confirm_version = confirm_version
+        # The owner's answers; without a box, no answer is ever read.
+        self.answers = answers
         self._guard = threading.Lock()
         self._boards_lock = threading.Lock()
         self._known_boards: set[str] = set()
@@ -126,58 +147,160 @@ class Engine:
 
     def _workflow_pass(self, workflow: PluggedWorkflow) -> None:
         self._ensure_board(workflow)
-        for item in self.reader.read_items(workflow.board):
+        items = self.reader.read_items(workflow.board)
+        # The answers are read after the cards: an answer applied by another pass meanwhile is no longer pending.
+        pending = self.answers.pending(f"{workflow.key}:") if self.answers is not None else []
+        waiting: set[str] = set()
+        for item in items:
             if self._stopped.is_set():
                 return
-            if item.status != "ready" or not is_root_card(item, workflow.key):
+            if not is_root_card(item, workflow.key):
                 continue
             station = workflow.station_of_lane(item.assignee)
             if station is None:
                 continue
-            lock = self._lock_of(item.idempotency_key)
-            if not lock.acquire(blocking=False):
-                continue
-            try:
-                # The cards were read before a long command of this pass may have run: under the item's lock, the
-                # card is read again, and left alone if another pass moved it meanwhile.
-                fresh = next((card for card in self.reader.read_items(workflow.board) if card.id == item.id), None)
-                if fresh is None or fresh.status != "ready" or fresh.assignee != item.assignee:
-                    continue
-                self._step(workflow, fresh, station)
-            except (BoardWriteError, BoardUnavailableError) as error:
-                self.log(f"<3>{PREFIX}, {item.idempotency_key} : {error}")
-            finally:
-                lock.release()
+            if open_wait(workflow, item) is not None:
+                waiting.add(item.idempotency_key)
+                answer = next((answer for answer in pending if answer.item == item.idempotency_key), None)
+                if answer is not None:
+                    self._under_lock(
+                        workflow, item, lambda fresh, s=station, a=answer: self._resume(workflow, fresh, s, a)
+                    )
+            elif item.status == "ready" and station.nature == "owner":
+                self._under_lock(workflow, item, lambda fresh, s=station: self._park(workflow, fresh, s))
+            elif item.status == "ready":
+                self._under_lock(workflow, item, lambda fresh, s=station: self._step(workflow, fresh, s))
+        for answer in pending:
+            if answer.item not in waiting and not self._stopped.is_set():
+                self._refuse(answer)
 
-    def _step(self, workflow: PluggedWorkflow, item: Item, station: Station) -> None:
-        element = item.idempotency_key
-        if station.nature != "code":
-            self._tell_once(
-                (element, station.key, "nature"),
-                f"{PREFIX}, {element} à la station {station.key} ({station.nature}) : rien à faire à cette étape",
-            )
+    def _under_lock(self, workflow: PluggedWorkflow, item: Item, action: Callable[[Item], None]) -> None:
+        """Run the action on the card read again under the item's lock; an item another pass holds is skipped."""
+        lock = self._lock_of(item.idempotency_key)
+        if not lock.acquire(blocking=False):
             return
+        try:
+            # The cards were read before a long command of this pass may have run: under the item's lock, the card is
+            # read again, and left alone if another pass moved it meanwhile.
+            fresh = next((card for card in self.reader.read_items(workflow.board) if card.id == item.id), None)
+            if fresh is None or fresh.status != item.status or fresh.assignee != item.assignee:
+                return
+            action(fresh)
+        except (BoardWriteError, BoardUnavailableError) as error:
+            self.log(f"<3>{PREFIX}, {item.idempotency_key} : {error}")
+        finally:
+            lock.release()
+
+    def _attempt(self, element: str, station: Station) -> int:
         with self._guard:
             attempt = self._launches.get((element, station.key), 0) + 1
             self._launches[(element, station.key)] = attempt
-        label = f"moteur, {element} {station.key}"
+        return attempt
+
+    def _launch(self, workflow: PluggedWorkflow, item: Item, station: Station, answer: dict | None = None) -> Decision:
+        element = item.idempotency_key
+        attempt = self._attempt(element, station)
         payload = command_input(
-            item=element, issue=issue_of(item.body), title=item.title, station=station.key, attempt=attempt
+            item=element,
+            issue=issue_of(item.body),
+            title=item.title,
+            station=station.key,
+            attempt=attempt,
+            answer=answer,
         )
         self.log(f"{PREFIX}, {element} : commande de {station.key} lancée (essai {attempt})")
-        decision = self.run(workflow.repo, station.command, payload, station.timeout_seconds, self.log, label=label)
-        if decision.decision != "advance":
-            said = f"{decision.decision} ({decision.reason})"
-            self.log(f"{PREFIX}, {element} : {station.key} rend {said}, carte inchangée")
+        label = f"moteur, {element} {station.key}"
+        return self.run(workflow.repo, station.command, payload, station.timeout_seconds, self.log, label=label)
+
+    def _step(self, workflow: PluggedWorkflow, item: Item, station: Station) -> None:
+        """A ready card at a `code` station: run its command and apply its decision."""
+        if station.nature != "code":
+            self._tell_once(
+                (item.idempotency_key, station.key, "nature"),
+                f"{PREFIX}, {item.idempotency_key} à la station {station.key} ({station.nature}) : "
+                "rien à faire à cette étape",
+            )
             return
-        target = workflow.station(decision.to) if decision.to is not None else workflow.next_station(station.key)
-        if target is None:
-            why = f"station « {decision.to} » inconnue" if decision.to is not None else "dernière station"
-            self.log(f"{PREFIX}, {element} : {station.key} rend advance, {why} : carte inchangée")
+        self._apply(workflow, item, station, self._launch(workflow, item, station))
+
+    def _park(self, workflow: PluggedWorkflow, item: Item, station: Station) -> None:
+        """A ready card at an `owner` station: it waits for its owner."""
+        element = item.idempotency_key
+        self.writer.schedule(workflow.board, item.id, f"En attente du propriétaire à la station {station.key}")
+        fresh = next((card for card in self.reader.read_items(workflow.board) if card.id == item.id), None)
+        wait = open_wait(workflow, fresh) if fresh is not None else None
+        self.log(f"{PREFIX}, {element} : carte {item.id} en attente du propriétaire, attente {wait} ouverte")
+
+    def _resume(self, workflow: PluggedWorkflow, item: Item, station: Station, answer: Answer) -> None:
+        """A card waiting at an `owner` station, and an answer for its item: the command decides, once."""
+        element = item.idempotency_key
+        wait = open_wait(workflow, item)
+        # The pass's snapshot of the answers may be stale: another pass may have applied this one meanwhile, with a
+        # `wait` that left the card where it was.
+        if wait is None or not self.answers.is_pending(answer.id):
             return
+        decision = self._launch(workflow, item, station, {"gesture": answer.gesture, "note": answer.note})
+        # Marked before any write: whatever happens next, the answer is never handed to a command again.
+        if not self.answers.mark(answer.id, "applied", wait):
+            self.log(f"{PREFIX}, {element} : réponse {answer.id} déjà traitée, décision de {station.key} ignorée")
+            return
+        self.log(f"{PREFIX}, {element} : réponse {answer.id} ({answer.gesture}) appliquée à l'attente {wait}")
+        if decision.decision == "wait":
+            self.log(f"{PREFIX}, {element} : {station.key} rend wait ({decision.reason}), carte laissée en attente")
+            return
+        try:
+            self.writer.unblock(workflow.board, item.id)
+            self._apply(workflow, item, station, decision)
+        except BoardWriteError:
+            self.log(
+                f"<3>{PREFIX}, {element} : réponse {answer.id} ({answer.gesture}) appliquée à l'attente {wait}, "
+                f"mais la décision de {station.key} n'a pas pu être écrite"
+            )
+            raise
+
+    def _refuse(self, answer: Answer) -> None:
+        """An answer for an item without an open wait: refused, under the item's lock, without any write."""
+        lock = self._lock_of(answer.item)
+        if not lock.acquire(blocking=False):
+            return
+        try:
+            if self.answers.mark(answer.id, "refused"):
+                self.log(
+                    f"<4>{PREFIX}, {answer.item} : réponse {answer.id} ({answer.gesture}) refusée, "
+                    "aucune attente ouverte"
+                )
+        finally:
+            lock.release()
+
+    def _apply(self, workflow: PluggedWorkflow, item: Item, station: Station, decision: Decision) -> None:
+        element = item.idempotency_key
+        if decision.decision == "wait":
+            self.log(f"{PREFIX}, {element} : {station.key} rend wait ({decision.reason}), carte inchangée")
+            return
+        if decision.decision == "fail":
+            self._fail(workflow, item, station, decision.reason)
+            return
+        if decision.to is not None:
+            target = workflow.station(decision.to)
+            if target is None:
+                self._fail(workflow, item, station, f"station « {decision.to} » inconnue")
+                return
+        else:
+            target = workflow.next_station(station.key)
+            if target is None:
+                # Only here does the engine finish a root card (AD-4). The runtime refuses an empty result.
+                result = decision.reason or f"élément terminé à la station {station.key}"
+                self.writer.complete(workflow.board, item.id, result)
+                self.log(f"{PREFIX}, {element} : {station.key} rend advance, carte {item.id} terminée ({result})")
+                return
         lane = workflow.lane(target.key)
         self.writer.assign(workflow.board, item.id, lane)
         self.log(f"{PREFIX}, {element} : {station.key} rend advance, carte {item.id} passée à {lane}")
+
+    def _fail(self, workflow: PluggedWorkflow, item: Item, station: Station, reason: str) -> None:
+        motive = f"Échec de la station {station.key} : {reason}"
+        self.writer.block(workflow.board, item.id, motive)
+        self.log(f"<4>{PREFIX}, {item.idempotency_key} : carte {item.id} bloquée : {motive}")
 
 
 class EngineRunner:

@@ -1,5 +1,5 @@
 """The launcher of a station's command: past its delay or with an unreadable output, the command is a `fail`, and the
-card does not change (ADR 0005)."""
+engine blocks the card with the station and the reason (ADR 0005)."""
 
 from __future__ import annotations
 
@@ -36,8 +36,9 @@ def repo_with_preparer(tmp_path: Path, command: str, timeout: float) -> Path:
     return repo
 
 
-def pass_leaves_the_card(fake_runtime, repo: Path) -> list[str]:
-    """Run one engine pass on a ready root card at `preparer`; the card must keep its lane. Returns the journal."""
+def pass_blocks_the_card(fake_runtime, repo: Path, reason: str) -> list[str]:
+    """Run one engine pass on a ready root card at `preparer`; the card must be blocked at its lane with the station
+    and the reason, and nothing else written. Returns the journal."""
     make_runtime_board(
         fake_runtime.home,
         "essai",
@@ -62,9 +63,11 @@ def pass_leaves_the_card(fake_runtime, repo: Path) -> list[str]:
         state=CoreState(contract=verdict),
         log=lines.append,
     ).run_pass()
-    assert fake_runtime.writes() == []
+    motive = f"Échec de la station preparer : {reason}"
+    assert fake_runtime.writes() == [["kanban", "--board", "essai", "block", CARD, motive]]
     with sqlite3.connect(fake_runtime.home / "kanban" / "boards" / "essai" / "kanban.db") as db:
-        assert db.execute("SELECT assignee FROM tasks WHERE id = ?", (CARD,)).fetchone() == ("essai-preparer",)
+        row = db.execute("SELECT assignee, status, block_kind FROM tasks WHERE id = ?", (CARD,)).fetchone()
+        assert row == ("essai-preparer", "blocked", None)
     db.close()
     return lines
 
@@ -77,8 +80,10 @@ def test_a_command_past_its_timeout_is_a_fail(fake_runtime, tmp_path):
 
     assert time.monotonic() - began < 15
     assert (decision.decision, decision.reason, decision.to) == ("fail", "délai de 2 s dépassé", None)
-    journal = pass_leaves_the_card(fake_runtime, repo_with_preparer(tmp_path, "sleeps.py", 2))
-    assert any("rend fail (délai de 2 s dépassé), carte inchangée" in line for line in journal)
+    journal = pass_blocks_the_card(fake_runtime, repo_with_preparer(tmp_path, "sleeps.py", 2), "délai de 2 s dépassé")
+    assert any(
+        f"carte {CARD} bloquée : Échec de la station preparer : délai de 2 s dépassé" in line for line in journal
+    )
 
 
 def test_an_unreadable_output_is_a_fail(fake_runtime, tmp_path):
@@ -91,8 +96,8 @@ def test_an_unreadable_output_is_a_fail(fake_runtime, tmp_path):
     # A JSON output of the wrong shape is unreadable too.
     wrong = run_command(ESSAI_REPO, ["python", "-c", 'print(\'{"decision": "jump"}\')'], payload(), 30, lines.append)
     assert (wrong.decision, wrong.reason) == ("fail", "sortie illisible")
-    journal = pass_leaves_the_card(fake_runtime, repo_with_preparer(tmp_path, "chatty.py", 30))
-    assert any("rend fail (sortie illisible), carte inchangée" in line for line in journal)
+    journal = pass_blocks_the_card(fake_runtime, repo_with_preparer(tmp_path, "chatty.py", 30), "sortie illisible")
+    assert any(f"carte {CARD} bloquée : Échec de la station preparer : sortie illisible" in line for line in journal)
 
 
 def test_the_error_output_goes_to_the_journal_within_its_limit(fake_runtime):

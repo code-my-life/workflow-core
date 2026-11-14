@@ -96,7 +96,7 @@ def _steps(writer: HermesBoardWriter, reader: HermesBoardReader, board: str) -> 
     _do("unblock", lambda: writer.unblock(board, first))
     _expect("unblock", "statut", _read(reader, board, first, "unblock").status, "ready")
 
-    _do("block", lambda: writer.block(board, first, "needs_input"))
+    _do("block", lambda: writer.block(board, first, kind="needs_input"))
     card = _read(reader, board, first, "block")
     _expect("block", "statut", card.status, "blocked")
     _expect("block", "type de blocage", card.block_kind, "needs_input")

@@ -15,6 +15,7 @@ from workflow_core.api.app import create_app
 from workflow_core.clock import utc_now
 from workflow_core.config import Workflow
 from workflow_core.engine import Engine, EngineRunner
+from workflow_core.engine.answers import ENGINE_DB, AnswerBox
 from workflow_core.engine.engine import PASS_SECONDS
 from workflow_core.events import JOURNAL_FILE, state_dir
 from workflow_core.model.board import BoardReader
@@ -127,6 +128,7 @@ def build_service(
         writer=adapter.make_board_writer(gate=watch.write_refusal),
         state=state,
         confirm_version=watch.ensure_confirmed,
+        answers=AnswerBox(state_dir(environ) / ENGINE_DB),
     )
 
     app = create_app(

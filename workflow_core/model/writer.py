@@ -52,16 +52,16 @@ class BoardWriter(Protocol):
         """Assign the card to another lane or profile."""
         ...
 
-    def schedule(self, board: str, card: str) -> None:
-        """Park the card in `scheduled`."""
+    def schedule(self, board: str, card: str, reason: str | None = None) -> None:
+        """Park the card in `scheduled`, with its reason when given."""
         ...
 
     def unblock(self, board: str, card: str) -> None:
         """Return a blocked or scheduled card to `ready`."""
         ...
 
-    def block(self, board: str, card: str, kind: str) -> None:
-        """Block the card, with a typed reason (`needs_input`, ...)."""
+    def block(self, board: str, card: str, reason: str | None = None, *, kind: str | None = None) -> None:
+        """Block the card, with its reason and its kind (`needs_input`, ...) when given."""
         ...
 
     def comment(self, board: str, card: str, text: str) -> None:

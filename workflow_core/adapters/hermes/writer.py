@@ -114,14 +114,26 @@ class HermesBoardWriter:
     def assign(self, board: str, card: str, lane: str) -> None:
         self._run(board, ["assign", card, lane], "assign <card> <lane>")
 
-    def schedule(self, board: str, card: str) -> None:
-        self._run(board, ["schedule", card], "schedule <card>")
+    def schedule(self, board: str, card: str, reason: str | None = None) -> None:
+        # The reason is positional: `schedule <id> [reason ...]`, written in the `scheduled` event's payload.
+        if reason is None:
+            self._run(board, ["schedule", card], "schedule <card>")
+        else:
+            self._run(board, ["schedule", card, reason], "schedule <card> <reason>")
 
     def unblock(self, board: str, card: str) -> None:
         self._run(board, ["unblock", card], "unblock <card>")
 
-    def block(self, board: str, card: str, kind: str) -> None:
-        self._run(board, ["block", card, "--kind", kind], "block <card> --kind <kind>")
+    def block(self, board: str, card: str, reason: str | None = None, *, kind: str | None = None) -> None:
+        # The reason is positional: `block <id> [reason ...] [--kind <kind>]`.
+        arguments, shape = ["block", card], ["block <card>"]
+        if reason is not None:
+            arguments.append(reason)
+            shape.append("<reason>")
+        if kind is not None:
+            arguments += ["--kind", kind]
+            shape.append("--kind <kind>")
+        self._run(board, arguments, " ".join(shape))
 
     def comment(self, board: str, card: str, text: str) -> None:
         self._run(board, ["comment", card, text], "comment <card> <text>")
