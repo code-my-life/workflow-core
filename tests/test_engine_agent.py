@@ -12,8 +12,10 @@ from pathlib import Path
 from workflow_core.adapters import runtime_adapter
 from workflow_core.config import Workflow
 from workflow_core.engine import Engine
+from workflow_core.engine.answers import ENGINE_DB
 from workflow_core.model.writer import BoardWriteError
 from workflow_core.plugin.manifest import PluggedWorkflow, plug
+from workflow_core.signals import Signals
 
 from conftest import make_runtime_board
 from test_engine import Launches, engine, state
@@ -365,6 +367,23 @@ def test_the_agent_never_touches_the_root_card(fake_runtime):
     never_touched(fake_runtime, agent)
 
 
+def signals() -> list[tuple[str, str, str, str, str | None]]:
+    """The anomalies noted in the engine's base: key, kind, station, detail and issue, oldest first."""
+    return [
+        (signal.key, signal.kind, signal.station, signal.detail, signal.issue)
+        for signal in Signals(Path(os.environ["WORKFLOW_CORE_STATE_DIR"]) / ENGINE_DB).signals_of("essai")
+    ]
+
+
+def set_card(home: Path, **fields) -> None:
+    """Change the root card in the base, as another than the engine would."""
+    with sqlite3.connect(base(home)) as db:
+        db.execute(
+            f"UPDATE tasks SET {', '.join(f'{name} = ?' for name in fields)} WHERE id = ?", (*fields.values(), ROOT)
+        )
+    db.close()
+
+
 def test_a_root_card_taken_by_an_agent_is_an_anomaly(fake_runtime):
     run = {
         "task_id": ROOT,
@@ -378,29 +397,153 @@ def test_a_root_card_taken_by_an_agent_is_an_anomaly(fake_runtime):
 
     core.run_pass()
     core.run_pass()
+    # A restarted engine does not tell it again.
+    engine(launches=Launches(), workflow=essai_agent())[0].run_pass()
 
     anomalies = [line for line in lines if line.startswith("<4>") and "anomalie" in line]
-    assert len(anomalies) == 1
-    assert f"carte racine {ROOT} prise par essai-agent" in anomalies[0]
-    # The item is still handled: its child card is asked for once.
+    assert anomalies == [
+        f"<4>workflow-core: moteur, essai:7 : anomalie : carte racine {ROOT} prise par essai-agent (run 1)"
+    ]
+    assert signals() == [
+        (
+            f"essai:taken:{ROOT}:1",
+            "taken",
+            "brouillon",
+            f"La carte racine {ROOT} a été prise par essai-agent (run 1, terminé).",
+            ISSUE,
+        )
+    ]
+    # The run over, the item is still handled: its child card is asked for once.
     assert creates(fake_runtime) == [child_create(1)]
     assert card(fake_runtime.home) == ("ready", "essai-brouillon")
     never_touched(fake_runtime)
 
 
-def test_a_root_card_finished_by_another_is_an_anomaly(fake_runtime):
-    make_runtime_board(fake_runtime.home, "essai", tasks=[root_card(status="done", completed_at=1762900020)])
-    core, lines = engine(launches=Launches(), workflow=essai_agent())
+def test_a_root_card_with_a_run_in_progress_is_left_alone_while_it_runs(fake_runtime):
+    run = {"task_id": ROOT, "profile": "essai-agent", "status": "running", "started_at": 1762900010}
+    make_runtime_board(
+        fake_runtime.home,
+        "essai",
+        tasks=[root_card(assignee="essai-revue", status="scheduled")],
+        runs=[run],
+        events=[{"task_id": ROOT, "kind": "scheduled", "payload": "{}", "created_at": 1762900005}],
+    )
+    box = answer_box()
+    answer = box.receive("essai:7", "valider")
+    launches = Launches()
+    core, lines = engine(launches=launches, workflow=essai_agent(), answers=box)
 
+    for _ in range(3):
+        core.run_pass()
+
+    # Nothing written, nothing launched, and the owner's answer neither applied nor refused.
+    assert fake_runtime.writes() == []
+    assert launches.calls == []
+    assert box.is_pending(answer)
+    anomalies = [line for line in lines if line.startswith("<4>") and "anomalie" in line]
+    assert anomalies == [
+        f"<4>workflow-core: moteur, essai:7 : anomalie : carte racine {ROOT} prise par essai-agent (run 1), "
+        "élément laissé tant que le run dure"
+    ]
+    assert signals() == [
+        (
+            f"essai:taken:{ROOT}:1",
+            "taken",
+            "revue",
+            f"La carte racine {ROOT} a été prise par essai-agent (run 1, en cours).",
+            ISSUE,
+        )
+    ]
+
+    # The run over, the item is handled as usual, without a second line or note for the same run.
+    with sqlite3.connect(base(fake_runtime.home)) as db:
+        db.execute("UPDATE task_runs SET status = 'done', ended_at = 1762900030")
+    db.close()
+    core.run_pass()
+    assert launches.calls[0][0] == "revue"
+    assert not box.is_pending(answer)
+    assert len([line for line in lines if "anomalie" in line]) == 1
+    assert len(signals()) == 1
+
+
+def finished_elsewhere(fake_runtime, assignee: str) -> list[str]:
+    """A root card done at the lane, that the engine did not finish: two passes, then the card reopened and a
+    restarted engine's pass. The engine's journal lines."""
+    make_runtime_board(
+        fake_runtime.home,
+        "essai",
+        tasks=[root_card(assignee=assignee, status="done", completed_at=1762900020)],
+    )
+    box = answer_box()
+    core, lines = engine(launches=Launches(), workflow=essai_agent(), answers=box)
     core.run_pass()
     core.run_pass()
+    set_card(fake_runtime.home, status="ready")
+    launches = Launches()
+    again, more = engine(launches=launches, workflow=essai_agent(), answers=box)
+    again.run_pass()
+    assert launches.calls == []
+    assert more == ["workflow-core: moteur, mode normal : les passes lancent les commandes et écrivent"]
+    return lines
+
+
+def test_a_root_card_finished_by_another_is_an_anomaly(fake_runtime):
+    lines = finished_elsewhere(fake_runtime, "essai-brouillon")
 
     assert fake_runtime.writes() == []
     anomalies = [line for line in lines if line.startswith("<4>") and "anomalie" in line]
     assert anomalies == [
         f"<4>workflow-core: moteur, essai:7 : anomalie : carte racine {ROOT} terminée à la station brouillon "
-        "par un autre que le moteur"
+        "par un autre que le moteur, élément abandonné par le moteur"
     ]
+    assert signals() == [
+        (
+            f"essai:finished_elsewhere:{ROOT}",
+            "finished_elsewhere",
+            "brouillon",
+            f"La carte racine {ROOT} a été terminée à la station brouillon par un autre que le moteur.",
+            ISSUE,
+        )
+    ]
+
+
+def test_a_root_card_finished_by_another_at_the_last_station_is_an_anomaly(fake_runtime):
+    lines = finished_elsewhere(fake_runtime, "essai-clore")
+
+    assert fake_runtime.writes() == []
+    anomalies = [line for line in lines if line.startswith("<4>") and "anomalie" in line]
+    assert anomalies == [
+        f"<4>workflow-core: moteur, essai:7 : anomalie : carte racine {ROOT} terminée à la station clore "
+        "par un autre que le moteur, élément abandonné par le moteur"
+    ]
+    assert [signal[0] for signal in signals()] == [f"essai:finished_elsewhere:{ROOT}"]
+
+
+def test_a_root_card_finished_by_the_engine_is_never_an_anomaly(fake_runtime):
+    make_runtime_board(fake_runtime.home, "essai", tasks=[root_card(assignee="essai-clore")])
+    core, lines = engine(launches=Launches(), workflow=essai_agent())
+
+    core.run_pass()
+    core.run_pass()
+    assert card(fake_runtime.home) == ("done", "essai-clore")
+    restarted, more = engine(launches=Launches(), workflow=essai_agent())
+    restarted.run_pass()
+
+    assert not any("anomalie" in line for line in lines + more)
+    assert signals() == []
+
+
+def test_a_finish_the_board_refuses_is_not_kept_as_the_engine_s(fake_runtime):
+    make_runtime_board(fake_runtime.home, "essai", tasks=[root_card(assignee="essai-clore")])
+    fake_runtime.fail("complete")
+    core, _ = engine(launches=Launches(), workflow=essai_agent())
+    core.run_pass()
+    assert card(fake_runtime.home) == ("ready", "essai-clore")
+
+    # Then finished by another: an anomaly, the engine's refused finish not counted as its own.
+    set_card(fake_runtime.home, status="done")
+    core.run_pass()
+    assert [signal[0] for signal in signals()] == [f"essai:finished_elsewhere:{ROOT}"]
 
 
 def test_no_child_is_created_in_observer_mode(fake_runtime):

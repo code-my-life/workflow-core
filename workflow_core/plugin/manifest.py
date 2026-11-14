@@ -8,7 +8,8 @@ leaves its workflow unplugged, with the reason; the other workflows run.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from workflow_core.model.sheet import WorkflowSheet
 MANIFEST_FILE = "workflow-manifest.json"
 # The statuses of a card that holds nothing any more.
 FINISHED = ("done", "archived")
+# The first GitHub issue address of a card's body is its item's issue.
+ISSUE_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/issues/\d+", re.ASCII)
 
 
 class ManifestRefusedError(Exception):
@@ -73,16 +76,52 @@ class PluggedWorkflow:
         index = keys.index(key)
         return self.stations[index + 1] if index + 1 < len(self.stations) else None
 
+    def label(self, key: str) -> str:
+        """The label of a station in the workflow's sheet, else its key."""
+        stations = self.sheet.stations if self.sheet is not None else []
+        return next((station.label for station in stations if station.key == key), key)
+
 
 def lanes_of(workflow: PluggedWorkflow) -> frozenset[str]:
     """The lanes of a plugged workflow: `<key>-<station>` for every station of its manifest, whatever its nature."""
     return frozenset(workflow.lane(station.key) for station in workflow.stations)
 
 
+def is_root_key(idempotency: str | None, key: str) -> bool:
+    """Whether an idempotency key is the one of an item's root card of this workflow: `<key>:<local id>`."""
+    idempotency = idempotency or ""
+    return idempotency.startswith(f"{key}:") and len(idempotency) > len(key) + 1 and "/" not in idempotency
+
+
 def is_root_card(item: Item, key: str) -> bool:
     """Whether the card is the root card of an item of this workflow: its idempotency key is `<key>:<local id>`."""
-    idempotency = item.idempotency_key or ""
-    return idempotency.startswith(f"{key}:") and len(idempotency) > len(key) + 1 and "/" not in idempotency
+    return is_root_key(item.idempotency_key, key)
+
+
+def child_of(idempotency: str | None, key: str) -> tuple[str, str] | None:
+    """`(item, station)` of a child card of this workflow, its idempotency key `<item>/<station>/<passage>`; None for
+    any other card."""
+    parts = (idempotency or "").split("/")
+    if len(parts) != 3 or not is_root_key(parts[0], key) or not parts[1] or not parts[2].isdecimal():
+        return None
+    return parts[0], parts[1]
+
+
+def issue_of(body: str | None) -> str | None:
+    """The item's issue: the first GitHub issue address of a card's body."""
+    found = ISSUE_URL.search(body or "")
+    return found[0] if found else None
+
+
+def wait_id(workflow: PluggedWorkflow, card: str, status: str, assignee: str | None, events: Iterable) -> str | None:
+    """The id of a root card's open wait, `<key>:owner:<card>:<event>` from the card's last `scheduled` event, when
+    the card waits (`scheduled`) at the lane of an `owner` station; None otherwise. `events` are the card's events by
+    id, each with its `id` and its `kind` (an item's as a card's facts)."""
+    station = workflow.station_of_lane(assignee)
+    if status != "scheduled" or station is None or station.nature != "owner":
+        return None
+    event = next((event for event in reversed(list(events)) if event.kind == "scheduled"), None)
+    return None if event is None else f"{workflow.key}:owner:{card}:{event.id}"
 
 
 def lanes_in_use(reader: BoardReader, key: str, board: str) -> set[str]:

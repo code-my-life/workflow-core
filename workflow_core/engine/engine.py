@@ -18,10 +18,15 @@ Under the item's own lock, with the card read again:
   without one): its child is the latest of the station, when its `created` event (or its first event) came after.
   Without one, a new child is created, its passage one more than the station's children. The child done, the root
   card is advanced as by an `advance` without `to`; blocked (or in triage) or archived, the root card stays at its
-  station, with a line in the journal once; open, nothing is done. The root card itself is never handed to an agent:
-  a root card with a run is an anomaly, written once per run to the journal, and the item is handled as any other;
-  a root card done at a station that is not the last one was finished by another than the engine: an anomaly,
-  written once to the journal, without any write.
+  station, with a line in the journal once; open, nothing is done.
+The root card itself is never handed to an agent, and only the engine finishes it (`workflow_core.signals`, in
+`engine.db`):
+- a run on a root card is an anomaly, written once per run to the journal and noted for the notifier; while it runs
+  (no end), the item is left alone: nothing written, nothing run, its answers neither applied nor refused; once it
+  has ended, the item is handled as any other;
+- the engine notes each root card it completes, just before the write (taken back when the write fails); a root card
+  done that is not noted, at any station, was finished by another: an anomaly written once to the journal and noted,
+  and the engine never touches the item again, even after a restart.
 A decision is applied this way: `advance` assigns the card to the lane of the station `to`, or of the next station
 without it, and completes the root card after the last station; `fail` (a command past its delay or with an unreadable
 output included) and an unknown `to` block the card with the station and the reason, its kind never the one of its
@@ -44,13 +49,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import re
 import threading
 from collections.abc import Callable
 from datetime import datetime
 from typing import Protocol
 
-from workflow_core.engine.answers import UNBLOCK, Answer, AnswerBox
+from workflow_core.engine.answers import ENGINE_DB, UNBLOCK, Answer, AnswerBox
+from workflow_core.events import state_dir
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item, child_cards, child_key
 from workflow_core.model.decision import Decision
 from workflow_core.model.manifest import ManifestStation as Station
@@ -58,11 +63,10 @@ from workflow_core.model.state import CoreState
 from workflow_core.model.writer import BoardWriteError, BoardWriter
 from workflow_core.notify.notifier import journal_line
 from workflow_core.plugin.commands import command_input, run_command
-from workflow_core.plugin.manifest import PluggedWorkflow, is_root_card
+from workflow_core.plugin.manifest import PluggedWorkflow, is_root_card, issue_of, wait_id
+from workflow_core.signals import FINISHED_ELSEWHERE, TAKEN, Signals
 
 PASS_SECONDS = 30.0
-# The first GitHub issue address of a card's body is its item's issue.
-ISSUE_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/issues/\d+", re.ASCII)
 PREFIX = "workflow-core: moteur"
 # The kinds of the engine's blocks, taken in turn on a card: the board sends a card blocked again for the kind of its
 # previous block to `triage`, where nothing launches it any more; a kind that never repeats keeps it `blocked`, for the
@@ -74,19 +78,10 @@ class CommandRunner(Protocol):
     def __call__(self, repo, command: list[str], payload: dict, timeout: float, log, *, label: str) -> Decision: ...
 
 
-def issue_of(body: str | None) -> str | None:
-    found = ISSUE_URL.search(body or "")
-    return found[0] if found else None
-
-
 def open_wait(workflow: PluggedWorkflow, item: Item) -> str | None:
     """The id of the item's open wait, `<key>:owner:<card>:<event>` from the card's last `scheduled` event, when the
     card waits (`scheduled`) at the lane of an `owner` station; None otherwise."""
-    station = workflow.station_of_lane(item.assignee)
-    if item.status != "scheduled" or station is None or station.nature != "owner":
-        return None
-    event = next((event for event in reversed(item.events) if event.kind == "scheduled"), None)
-    return None if event is None else f"{workflow.key}:owner:{item.id}:{event.id}"
+    return wait_id(workflow, item.id, item.status, item.assignee, item.events)
 
 
 def last_event(item: Item, kind: str):
@@ -135,6 +130,7 @@ class Engine:
         log: Callable[[str], None] = journal_line,
         confirm_version: Callable[[], bool] | None = None,
         answers: AnswerBox | None = None,
+        records: Signals | None = None,
     ) -> None:
         self.workflows = workflows
         self.reader = reader
@@ -147,6 +143,8 @@ class Engine:
         self.confirm_version = confirm_version
         # The owner's answers; without a box, no answer is ever read.
         self.answers = answers
+        # The engine's own finishes and the anomalies it found, in `engine.db` of the core's state folder.
+        self.records = records if records is not None else Signals(state_dir() / ENGINE_DB)
         self._guard = threading.Lock()
         self._boards_lock = threading.Lock()
         self._known_boards: set[str] = set()
@@ -154,6 +152,8 @@ class Engine:
         # Launches of each station for each item since the start, by (item, station).
         self._launches: dict[tuple[str, str], int] = {}
         self._told: set[tuple[str, ...]] = set()
+        # The runs on root cards already noted in the base, with whether they were still running then.
+        self._noted: set[tuple[str, bool]] = set()
         self._mode: str | None = None
         # Set by `stop()`: a pass still running starts no new command after it.
         self._stopped = threading.Event()
@@ -212,16 +212,18 @@ class Engine:
         # The answers are read after the cards: an answer applied by another pass meanwhile is no longer pending.
         pending: list[Answer] = []
         unblocks: list[Answer] = []
+        unknown: list[Answer] = []
         for answer in self.answers.pending(f"{workflow.key}:") if self.answers is not None else []:
             if answer.source == "github" and answer.gesture == UNBLOCK:
                 unblocks.append(answer)
             elif answer.source == "github" and answer.gesture not in workflow.gestures:
-                if not self._stopped.is_set():
-                    self._refuse(answer, "geste inconnu du workflow")
+                unknown.append(answer)
             else:
                 pending.append(answer)
         waiting: set[str] = set()
         blocked: set[str] = set()
+        # The items whose root card has a run in progress: left alone, their answers kept for later.
+        held: set[str] = set()
         for item in items:
             if self._stopped.is_set():
                 return
@@ -231,21 +233,18 @@ class Engine:
             if station is None:
                 continue
             element = item.idempotency_key
-            if item.runs:
-                # Only child cards are handed to agents: a run on a root card means someone took it (AD-4).
-                run = item.runs[-1]
-                self._tell_once(
-                    (element, "taken", str(run.id)),
-                    f"<4>{PREFIX}, {element} : anomalie : carte racine {item.id} prise par {run.profile or 'inconnu'} "
-                    f"(run {run.id})",
-                )
-            if item.status == "done" and workflow.next_station(station.key) is not None:
-                # The engine completes a root card only after the last station (AD-4).
-                self._tell_once(
-                    (element, "finished", station.key),
-                    f"<4>{PREFIX}, {element} : anomalie : carte racine {item.id} terminée à la station {station.key} "
-                    "par un autre que le moteur",
-                )
+            if self.records.abandoned(workflow.key, element):
+                continue
+            if item.status == "done":
+                # Only the engine finishes a root card, and notes it just before (AD-4).
+                if not self.records.finished_by_engine(workflow.board, item.id):
+                    self._finished_elsewhere(workflow, item, station)
+                continue
+            # Only child cards are handed to agents: a run on a root card means someone took it (AD-4).
+            running = [self._taken(workflow, item, station, run) for run in item.runs]
+            if any(running):
+                held.add(element)
+                continue
             if open_wait(workflow, item) is not None:
                 waiting.add(element)
                 answers = [answer for answer in pending if answer.item == element]
@@ -266,12 +265,66 @@ class Engine:
                 self._under_lock(workflow, item, lambda fresh, s=station: self._agent(workflow, fresh, s))
             elif item.status == "ready":
                 self._under_lock(workflow, item, lambda fresh, s=station: self._step(workflow, fresh, s))
+        for answer in unknown:
+            if answer.item not in held and not self._stopped.is_set():
+                self._refuse(answer, "geste inconnu du workflow")
         for answer in pending:
-            if answer.item not in waiting and not self._stopped.is_set():
+            if answer.item not in waiting and answer.item not in held and not self._stopped.is_set():
                 self._refuse(answer)
         for answer in unblocks:
-            if answer.item not in blocked and not self._stopped.is_set():
+            if answer.item not in blocked and answer.item not in held and not self._stopped.is_set():
                 self._refuse(answer, "carte racine non bloquée")
+
+    def _finished_elsewhere(self, workflow: PluggedWorkflow, item: Item, station: Station) -> None:
+        """A root card done that the engine did not finish: noted once, and its item is never touched again."""
+        element = item.idempotency_key
+        noted = self.records.signal(
+            f"{workflow.key}:{FINISHED_ELSEWHERE}:{item.id}",
+            workflow=workflow.key,
+            item=element,
+            card=item.id,
+            kind=FINISHED_ELSEWHERE,
+            station=station.key,
+            detail=f"La carte racine {item.id} a été terminée à la station {station.key} par un autre que le moteur.",
+            issue=issue_of(item.body),
+            # A card finished before the notifier's switch-on time is never alerted.
+            opened_at=item.completed_at,
+        )
+        if noted:
+            self.log(
+                f"<4>{PREFIX}, {element} : anomalie : carte racine {item.id} terminée à la station {station.key} "
+                "par un autre que le moteur, élément abandonné par le moteur"
+            )
+
+    def _taken(self, workflow: PluggedWorkflow, item: Item, station: Station, run) -> bool:
+        """A run on a root card: noted once per run. Whether it is still in progress."""
+        element = item.idempotency_key
+        running = run.ended_at is None
+        profile = run.profile or "inconnu"
+        key = f"{workflow.key}:{TAKEN}:{item.id}:{run.id}"
+        # A run already noted is not written again at each pass; the base's row still holds it after a restart.
+        if (key, running) in self._noted:
+            return running
+        noted = self.records.signal(
+            key,
+            workflow=workflow.key,
+            item=element,
+            card=item.id,
+            kind=TAKEN,
+            station=station.key,
+            detail=f"La carte racine {item.id} a été prise par {profile} (run {run.id}, "
+            f"{'en cours' if running else 'terminé'}).",
+            issue=issue_of(item.body),
+            opened_at=run.started_at,
+        )
+        with self._guard:
+            self._noted.add((key, running))
+        if noted:
+            self.log(
+                f"<4>{PREFIX}, {element} : anomalie : carte racine {item.id} prise par {profile} (run {run.id})"
+                + (", élément laissé tant que le run dure" if running else "")
+            )
+        return running
 
     def _under_lock(self, workflow: PluggedWorkflow, item: Item, action: Callable[[Item], None]) -> None:
         """Run the action on the card read again under the item's lock; an item another pass holds is skipped."""
@@ -470,7 +523,14 @@ class Engine:
             if target is None:
                 # Only here does the engine finish a root card (AD-4). The runtime refuses an empty result.
                 result = decision.reason or f"élément terminé à la station {station.key}"
-                self.writer.complete(workflow.board, item.id, result)
+                # Noted before the write, taken back when it fails: a root card done that is not noted was finished
+                # by another.
+                self.records.note_finish(workflow.board, item.id, element)
+                try:
+                    self.writer.complete(workflow.board, item.id, result)
+                except BoardWriteError:
+                    self.records.forget_finish(workflow.board, item.id)
+                    raise
                 self.log(f"{PREFIX}, {element} : {station.key} rend advance, carte {item.id} terminée ({result})")
                 return
         lane = workflow.lane(target.key)

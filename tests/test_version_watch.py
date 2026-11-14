@@ -3,6 +3,7 @@ mode until a restart, and no write passes before a first read confirms the versi
 
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
@@ -89,9 +90,12 @@ def test_a_changed_version_switches_to_observer_within_five_minutes(fake_runtime
     assert served["contract"]["ok"] is False
     assert served["contract"]["problems"] == ["version d'Hermès changée : 0.22.2 → 0.22.3"]
     errors = [line for line in capsys.readouterr().err.splitlines() if line.startswith("<3>")]
-    assert errors == [
+    # Then the broken contract's issue, which this test's core cannot reach: a line, and nothing else.
+    assert errors[:1] == [
         "<3>workflow-core: version d'Hermès changée : 0.22.2 → 0.22.3 ; socle en observateur jusqu'au redémarrage"
     ]
+    assert len(errors) == 2
+    assert errors[1].startswith("<3>workflow-core: issue du contrat cassé non écrite : GITHUB_APP_ID absent ")
     # The next pass of the engine runs nothing: no call to the runtime, the card stays where it is.
     before = fake_runtime.calls()
     app.state.engine.run_pass()
@@ -119,9 +123,12 @@ def test_an_unreadable_version_switches_to_observer(fake_runtime, capsys):
     assert served["mode"] == "observer"
     assert served["contract"]["problems"] == ["version d'Hermès changée : 0.22.2 → illisible"]
     errors = [line for line in capsys.readouterr().err.splitlines() if line.startswith("<3>")]
-    assert errors == [
+    # Then the broken contract's issue, which this test's core cannot reach: a line, and nothing else.
+    assert errors[:1] == [
         "<3>workflow-core: version d'Hermès changée : 0.22.2 → illisible ; socle en observateur jusqu'au redémarrage"
     ]
+    assert len(errors) == 2
+    assert errors[1].startswith("<3>workflow-core: issue du contrat cassé non écrite : GITHUB_APP_ID absent ")
     with pytest.raises(BoardWriteRefusedError) as refused:
         app.state.engine.writer.assign("essai", CARD, "essai-revue")
     assert str(refused.value).endswith("refusée : mode observateur")
@@ -203,3 +210,52 @@ def test_a_version_read_that_raises_switches_to_observer(capsys):
     errors = [line for line in capsys.readouterr().err.splitlines() if line.startswith("<3>")]
     assert len(errors) == 1 and "socle en observateur jusqu'au redémarrage" in errors[0]
     assert watch.ensure_confirmed() is False
+
+
+def test_a_version_changed_while_running_opens_the_contract_issue_once(fake_runtime, tmp_path):
+    from datetime import UTC, datetime
+
+    from test_contract_alert import TITLE, FakeGitHub, contract_issue
+
+    marker = "<!-- workflow-core:contrat -->"
+    now = datetime(2026, 11, 14, 9, 0, tzinfo=UTC)
+    for issues, expected in (([], 200), ([contract_issue(8)], 8)):
+        github = FakeGitHub(issues)
+        clock = Clock()
+        app = build_service(
+            secret=SECRET,
+            workflows=ESSAI,
+            adapter=runtime_adapter(),
+            version_clock=clock,
+            github=github,
+            now=lambda: now,
+        )
+        watch = app.state.version_watch
+        watch.tick()
+        assert github.calls == []
+
+        fake_runtime.set_version(CHANGED)
+        clock.now += 300
+        watch.tick()
+        # Read no more once in observer mode: the issue is written once.
+        clock.now += 300
+        watch.tick()
+        fake_runtime.set_version(VERSION_LINE)
+
+        assert app.state.core.mode == "observer"
+        noted = json.loads((tmp_path / "state" / "contract-issue.json").read_text())
+        assert noted == {"issue": expected}
+        if expected == 200:
+            assert [call[0] for call in github.calls] == ["list_issues", "create_issue"]
+            (issue,) = github.issues
+            assert issue["title"] == TITLE
+            assert "pendant que le socle tournait" in issue["body"]
+            assert "- version d'Hermès changée : 0.22.2 → 0.22.3" in issue["body"]
+            assert issue["body"].endswith(marker)
+        else:
+            # The App's open issue is commented, never doubled.
+            assert [call for call in github.calls if call[0] != "list_issues"] == [
+                ("post_comment", "code-my-life/workflow-core", "8")
+            ]
+            assert "version d'Hermès changée : 0.22.2 → 0.22.3" in github.issues[0]["comments"][0]
+        (tmp_path / "state" / "contract-issue.json").unlink()

@@ -76,8 +76,9 @@ Le socle n'a besoin que d'Issues en écriture (et de Metadata). Une permission r
 ## Le notificateur
 
 Toutes les 30 secondes, une passe lit les cartes des workflows dont l'entrée de `config/workflows.toml` porte
-`notify = true` (seulement `factory`). Une carte bloquée reçoit une alerte dans son issue, sauf un blocage
-`dependency` et une carte assignée à une voie de `notify_skip_assignees`. Une carte prête mais retenue par la garde
+`notify = true` (seulement `factory`), et celles des workflows branchés par manifeste (plus bas). Une carte bloquée
+reçoit une alerte dans son issue, sauf un blocage `dependency` et une carte assignée à une voie de
+`notify_skip_assignees`. Une carte prête mais retenue par la garde
 `active_pr` d'Hermès depuis `held_after_minutes` minutes (30 par défaut) reçoit l'alerte « ⚠️ Carte prête mais
 retenue », avec la commande de relance par le premier agent de `notify_relay_agents` qui n'est pas son assigné ; une
 carte relancée puis retenue de nouveau reçoit une nouvelle alerte. Le test de contrat vérifie que le `payload` de
@@ -94,6 +95,45 @@ mis de côté (`alerts.db.illisible-<horodatage>`) et recréé vide ; le journal
 Rien n'est posté interrupteur éteint, ni en mode observateur (test de contrat échoué, ADR 0019). Un commentaire
 refusé par GitHub est écrit au journal et réessayé à la passe suivante. Une carte sans issue est dite une fois au
 journal.
+
+Une carte assignée à un nom de voie d'un workflow branché par manifeste (`<clé>-<station>`, par exemple
+`essai-revue`) n'est jamais une carte retenue : une voie n'est pas un agent, la carte peut y rester prête longtemps.
+Elle n'a donc jamais d'alerte « Carte prête mais retenue » ; ses blocages sont alertés comme les autres (#61).
+
+**Les workflows branchés par manifeste** (`essai`) sont toujours notifiés, sans clé `notify`, sous le même
+interrupteur, la même heure d'allumage, la même liste de dépôts et le même registre que la factory. Chaque alerte va
+dans l'issue dont l'adresse est écrite dans le corps de la carte :
+
+- une carte racine en attente (`scheduled`) à la voie d'une station `owner` reçoit « ⏸ Ta réponse est attendue :
+  <station> », avec l'identifiant de l'attente (`essai:owner:<carte>:<événement>`, aussi sa clé) et un geste
+  `/essai <geste> [note]` par geste du manifeste ;
+- une carte racine bloquée reçoit « ⛔ Échec à la station <station> », avec le motif écrit par le moteur et
+  `/essai unblock [note]` ; une carte fille d'une station `agent` (`essai:7/brouillon/1`) bloquée reçoit la même
+  alerte, avec la question de l'agent, dans l'issue de son élément : elle se débloque sur le board (opérateur). Leur
+  clé est celle d'une carte bloquée de la factory (`essai:needs_input:<carte>:<événement>`).
+
+**Les signalements du moteur.** Le moteur note dans `~/.local/state/workflow-core/engine.db` deux anomalies d'une
+carte racine, chacune dite une fois au journal (ligne `<4>`) et alertée une fois dans l'issue de l'élément
+(« ⚠️ ... ») ; le notificateur les lit sans jamais écrire dans `engine.db` :
+
+- A, **carte racine terminée par un autre que le moteur** (`essai:finished_elsewhere:<carte>`). Le moteur note
+  chaque carte racine qu'il termine lui-même, juste avant d'écrire sa fin (table `finishes`). Une carte racine
+  `done` qu'il n'a pas notée, à n'importe quelle station, est signalée, et le moteur ne touche plus jamais à son
+  élément, même après un redémarrage. Pour reprendre l'élément : comprendre qui a terminé la carte (journal
+  d'Hermès, `hermes kanban --board <board> show <carte>`), puis rouvrir une nouvelle issue.
+- B, **carte racine prise par un agent** (`essai:taken:<carte>:<run>`, une fois par run). Tant que le run dure,
+  le moteur ne touche pas à l'élément : aucune écriture, aucune commande, les réponses du propriétaire restent en
+  attente. Le run fini, l'élément reprend son cours. Seules les cartes filles se confient à un agent : regarder le
+  profil qui a pris la carte racine.
+
+L'heure d'un signalement est celle de la carte (sa fin pour A, le début du run pour B) : une carte terminée par un
+autre avant l'heure d'allumage, par exemple terminée par le moteur avant qu'il note ses fins, est dite au journal et
+abandonnée, mais jamais alertée.
+
+**C, version d'Hermès changée en marche.** La veille de version (toutes les 5 minutes) passe le socle en observateur
+jusqu'au redémarrage, et ouvre l'issue « contrat cassé » de code-my-life/workflow-core, ou commente celle déjà
+ouverte par l'App (jamais deux). GitHub injoignable : une ligne `<3>` au journal, rien d'autre. Pour en sortir :
+`systemctl --user restart workflow-core.service`, dont le test de contrat juge la nouvelle version.
 
 Éteindre le notificateur : retirer `WORKFLOW_CORE_NOTIFY` du `.env`, puis
 `systemctl --user restart workflow-core.service`.
@@ -127,6 +167,8 @@ Au démarrage, quand le test de contrat échoue, le socle passe en observateur e
 `code-my-life/workflow-core` l'issue « Le contrat du socle avec Hermès est cassé », signée par l'App. Elle porte la
 marque `<!-- workflow-core:contrat -->`, la version d'Hermès lue, l'heure du test et chaque problème trouvé. C'est la
 seule écriture du socle en observateur, et elle part même notificateur éteint.
+Une version d'Hermès changée pendant que le socle tourne ouvre la même issue (ou commente celle déjà ouverte), avec la
+version d'avant et celle lue (voir « Le notificateur », C).
 
 - Une issue de contrat cassé déjà ouverte reçoit un commentaire à chaque démarrage, au lieu d'une seconde issue ; une
   issue fermée depuis moins de 24 heures est rouverte et commentée.
@@ -147,9 +189,9 @@ seule écriture du socle en observateur, et elle part même notificateur éteint
 - Le socle relit `hermes --version` toutes les 5 minutes, et à la première passe du moteur après un démarrage : son
   écrivain refuse toute écriture tant que cette relecture n'a pas confirmé la version du test de contrat. Une version
   changée ou illisible le met en observateur, avec « version d'Hermès changée : 0.22.2 → 0.22.3 » dans le verdict de
-  `/api/machine` et une ligne au journal. Il y reste jusqu'au redémarrage : après une mise à jour d'Hermès, lancer
-  `uv run pytest tests/contract -rs` contre la nouvelle version, puis, s'il est vert,
-  `systemctl --user restart workflow-core.service`.
+  `/api/machine`, une ligne au journal et l'issue du contrat cassé (ouverte, ou commentée si elle l'est déjà). Il y
+  reste jusqu'au redémarrage : après une mise à jour d'Hermès, lancer `uv run pytest tests/contract -rs` contre la
+  nouvelle version, puis, s'il est vert, `systemctl --user restart workflow-core.service`.
 
 ## Le moteur
 
@@ -161,7 +203,8 @@ carte d'un élément) à sa clé d'idempotence `<clé>:<id local>`. Une carte ra
 moteur applique sa **décision** :
 - `advance` réassigne la carte au nom de voie de la station `to`, ou de la suivante ; après la dernière station du
   manifeste, il termine la carte racine (`complete <carte> --result <raison>`), seul moment où le moteur termine une
-  carte racine ;
+  carte racine : il le note juste avant dans `engine.db` (table `finishes`), et une carte racine terminée sans cette
+  note est signalée (voir « Le notificateur », A) ;
 - `wait` laisse la carte telle quelle : la commande est relancée à la passe suivante, avec un essai de plus ;
 - `fail`, un délai dépassé ou une sortie illisible bloquent la carte avec son motif, « Échec de la station
   preparer : délai de 60 s dépassé ». Une carte bloquée n'est plus lancée ; débloquée
@@ -182,8 +225,10 @@ propriétaire** (un geste et sa note) arrivent dans la table `answers` de `engin
 À la passe suivante, une réponse pour un élément en attente est passée à la commande de la station (champ `answer`)
 et marquée appliquée à l'attente, une seule fois ; une décision `wait` laisse la carte en attente, toute autre
 décision la débloque (`unblock`) puis s'applique comme ci-dessus. Une réponse pour un élément sans attente ouverte est
-marquée refusée et ne change rien. Après un redémarrage, l'attente est retrouvée dans Hermès et une réponse non
-traitée est traitée à la première passe.
+marquée refusée et ne change rien, sauf quand la carte racine de l'élément a un run en cours : ses réponses (et ses
+gestes inconnus) restent alors en attente jusqu'à la fin du run. Une carte racine terminée par un autre que le moteur
+n'est plus jamais touchée, même après un redémarrage (voir « Le notificateur », A). Après un redémarrage, l'attente
+est retrouvée dans Hermès et une réponse non traitée est traitée à la première passe.
 
 Le moteur écrit dans Hermès par la seule ligne de commande `hermes kanban --board <slug>`, ne prend jamais une carte
 (`claim`), et saute un élément qu'une passe précédente traite encore. En mode observateur, il ne lance rien, n'écrit

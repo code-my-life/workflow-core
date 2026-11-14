@@ -31,6 +31,7 @@ from workflow_core.notify.contract_issue import ContractIssueTask, report_contra
 from workflow_core.notify.notifier import journal_line
 from workflow_core.notify.register import REGISTER_FILE
 from workflow_core.plugin.manifest import ManifestRefusedError, PluggedWorkflow, lanes_of, plug
+from workflow_core.signals import Signals
 from workflow_core.version_watch import VersionWatch, VersionWatchRunner
 
 # journald reads a leading "<n>" on a service's output as the syslog priority of the line.
@@ -65,13 +66,15 @@ def build_service(
     still answers. `github` replaces the core's GitHub client (tests).
 
     The workflows with a sheet are served by the API and the notifier, as before; those plugged by their manifest are
-    run by the engine and served by the API, with the sheet and the gestures of their manifest read at the start. The
-    contract covers the served boards and the manifests' boards that already exist: a
-    board the engine has not created yet would otherwise break it, and the engine would never create it.
+    run by the engine, served by the API, with the sheet and the gestures of their manifest read at the start, and
+    always notified (their waits, their failures, and the anomalies the engine notes in `engine.db`). The contract
+    covers the served boards and the manifests' boards that already exist: a board the engine has not created yet
+    would otherwise break it, and the engine would never create it.
 
     The runtime's version read at the start is read again every 5 minutes (`version_clock` replaces the clock of those
-    reads in the tests): a change puts the core in observer mode until a restart. The engine's writer refuses every
-    write until a first read confirms that version, which the engine's first pass makes.
+    reads in the tests): a change puts the core in observer mode until a restart, and opens the broken contract's
+    issue (or comments the open one). The engine's writer refuses every write until a first read confirms that
+    version, which the engine's first pass makes.
 
     The reading of GitHub (`workflow_core.intake`) runs only with a workflow plugged by its manifest: at the start, then
     every 10 minutes, it hands the new issues of the manifests' repositories to their intake commands, through the
@@ -110,8 +113,12 @@ def build_service(
     if post_comment is None or read_comments is None:
         post_comment = post_comment or github.post_comment
         read_comments = read_comments or github.list_comments
+    # The engine's notes of its finishes and of the anomalies it found: the engine writes them, the notifier reads them.
+    records = Signals(state_dir(environ) / ENGINE_DB)
     notifier = Notifier(
         workflows=served,
+        plugged=plugged,
+        records=records,
         reader=reader,
         state=state,
         settings=settings,
@@ -133,8 +140,24 @@ def build_service(
             log=journal_line,
         )
 
+    def report_change(changed: ContractVerdict) -> None:
+        report_contract(
+            changed,
+            runtime=getattr(adapter, "RUNTIME_NAME", "runtime"),
+            version=None,
+            client=github,
+            state_dir=state_dir(environ),
+            now=now(),
+            log=journal_line,
+            while_running=True,
+        )
+
     watch = VersionWatch(
-        state, lambda: adapter.version_change(version), every=adapter.VERSION_CHECK_SECONDS, clock=version_clock
+        state,
+        lambda: adapter.version_change(version),
+        every=adapter.VERSION_CHECK_SECONDS,
+        clock=version_clock,
+        on_change=report_change,
     )
     # One writer for the engine and the reading of GitHub: both refuse to write until the version is confirmed.
     engine_writer = adapter.make_board_writer(gate=watch.write_refusal)
@@ -145,6 +168,7 @@ def build_service(
         state=state,
         confirm_version=watch.ensure_confirmed,
         answers=AnswerBox(state_dir(environ) / ENGINE_DB),
+        records=records,
     )
     owner = (os.environ if environ is None else environ).get(OWNER_LOGIN_VARIABLE) or None
     if plugged and owner is None:
