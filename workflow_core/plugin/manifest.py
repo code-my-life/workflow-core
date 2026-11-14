@@ -34,7 +34,8 @@ class ManifestRefusedError(Exception):
 @dataclass(frozen=True)
 class PluggedWorkflow:
     """A workflow plugged by its manifest: its key, its board, its repository, its stations in order, the repository
-    of its issues and its intake command, and the label its issues must carry (None: any but `test`)."""
+    of its issues and its intake command, the label its issues must carry (None: any but `test`), and the names of
+    the gestures the owner gives by a comment on an item's issue."""
 
     key: str
     board: str
@@ -43,6 +44,7 @@ class PluggedWorkflow:
     issues_repo: str = ""
     intake: ManifestIntake | None = None
     issue_label: str | None = None
+    gestures: tuple[str, ...] = ()
 
     def lane(self, station: str) -> str:
         """The lane of a station, `<key>-<station>`: the assignee of a card that stands there, never a profile."""
@@ -122,4 +124,5 @@ def plug(workflow: Workflow, *, reader: BoardReader | None = None) -> PluggedWor
         issues_repo=manifest.issues_repo,
         intake=manifest.intake,
         issue_label=workflow.issue_label,
+        gestures=tuple(gesture.name for gesture in manifest.gestures if gesture.kind == "comment"),
     )

@@ -9,9 +9,9 @@ import dataclasses
 import json
 import re
 import sqlite3
-import subprocess
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from datetime import UTC, datetime
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from workflow_core.adapters import runtime_adapter
-from workflow_core.adapters.github import APP_BOT, OWNER_LOGIN, AppTokens, GitHubClient
+from workflow_core.adapters.github import APP_BOT, OWNER_LOGIN, GitHubClient
 from workflow_core.config import Workflow
 from workflow_core.engine import Engine
 from workflow_core.engine.answers import ENGINE_DB
@@ -55,9 +55,16 @@ def issue(number: int, title: str = "Premier essai", *, author: str = OWNER_LOGI
     }
 
 
+def github_time(moment: datetime | None = None) -> str:
+    """A time as GitHub's API writes it, `2026-11-14T09:30:00Z`; now when none is given."""
+    return (moment or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 class FakeGitHub:
     """A local GitHub: the App's tokens, the issues of one repository (pull requests among them, as GitHub lists
-    them), and their comments; a posted comment is the App's, and posting can be refused."""
+    them), and their comments, with their ids, their creation times and their reactions; a posted comment is the
+    App's, a reaction posted is the App's, and posting either can be refused. A reading of the comments with `since`
+    keeps those created from that time on, and is noted."""
 
     def __init__(self, issues: list[dict]) -> None:
         self.issues = issues
@@ -65,11 +72,52 @@ class FakeGitHub:
         self.posted: list[tuple[int, str]] = []
         self.issue_reads = 0
         self.refuse_posts: int | None = None
-        self.lock = threading.Lock()
+        # The reactions of each comment, by its id, and those the App posted, in order.
+        self.reactions: dict[int, list[dict]] = {}
+        self.reacted: list[tuple[int, str]] = []
+        self.refuse_reactions: int | None = None
+        # Every reaction asked for, refused or not.
+        self.reaction_tries = 0
+        # The `since` of each reading of an issue's comments (None without it), by the issue's number.
+        self.comment_reads: list[tuple[int, str | None]] = []
+        # Reentrant: a comment posted is added under the lock, and adding one takes it.
+        self.lock = threading.RLock()
+        self._next_id = 1000
 
-    def add_comment(self, number: int, author: str, body: str) -> None:
-        kept = self.comments.setdefault(number, [])
-        kept.append({"user": {"login": author}, "body": body, "html_url": f"{issue_url(number)}#c{len(kept) + 1}"})
+    def add_comment(self, number: int, author: str, body: str, *, created_at: str | None = None) -> int:
+        """Add a comment to the issue, created now unless told otherwise; its id."""
+        with self.lock:
+            self._next_id += 1
+            comment_id = self._next_id
+            self.comments.setdefault(number, []).append(
+                {
+                    "id": comment_id,
+                    "user": {"login": author},
+                    "body": body,
+                    "html_url": f"{issue_url(number)}#issuecomment-{comment_id}",
+                    "created_at": created_at or github_time(),
+                }
+            )
+            return comment_id
+
+    def comment_page(self, number: int, since: str | None) -> list[dict]:
+        with self.lock:
+            self.comment_reads.append((number, since))
+            kept = [
+                comment for comment in self.comments.get(number, []) if since is None or comment["created_at"] >= since
+            ]
+            return [
+                {**comment, "reactions": {"total_count": len(self.reactions.get(comment["id"], []))}}
+                for comment in kept
+            ]
+
+    def app_reactions(self, comment_id: int) -> list[str]:
+        """The contents of the App's reactions to a comment."""
+        return [
+            reaction["content"]
+            for reaction in self.reactions.get(comment_id, [])
+            if reaction["user"]["login"] == APP_BOT
+        ]
 
     def handler(self) -> type[BaseHTTPRequestHandler]:
         fake = self
@@ -94,7 +142,10 @@ class FakeGitHub:
                     wanted = query.get("state", "open")
                     self._answer([item for item in fake.issues if wanted in (item["state"], "all")])
                 elif match := re.fullmatch(rf"/repos/{REPO}/issues/(\d+)/comments", url.path):
-                    self._answer(fake.comments.get(int(match[1]), []))
+                    self._answer(fake.comment_page(int(match[1]), query.get("since")))
+                elif match := re.fullmatch(rf"/repos/{REPO}/issues/comments/(\d+)/reactions", url.path):
+                    with fake.lock:
+                        self._answer(list(fake.reactions.get(int(match[1]), [])))
                 else:
                     self._answer({"message": "Not Found"}, 404)
 
@@ -102,6 +153,9 @@ class FakeGitHub:
                 url = urlparse(self.path)
                 if url.path.startswith("/app/installations/"):
                     self._answer({"token": "ghs_t", "expires_at": "2030-01-01T00:00:00Z", "permissions": {}}, 201)
+                    return
+                if reaction := re.fullmatch(rf"/repos/{REPO}/issues/comments/(\d+)/reactions", url.path):
+                    self._react(int(reaction[1]))
                     return
                 match = re.fullmatch(rf"/repos/{REPO}/issues/(\d+)/comments", url.path)
                 if match is None:
@@ -117,41 +171,22 @@ class FakeGitHub:
                     fake.add_comment(number, APP_BOT, body)
                 self._answer({"html_url": fake.comments[number][-1]["html_url"]}, 201)
 
+            def _react(self, comment_id: int) -> None:
+                content = json.loads(self.rfile.read(int(self.headers["Content-Length"])))["content"]
+                with fake.lock:
+                    fake.reaction_tries += 1
+                if fake.refuse_reactions is not None:
+                    self._answer({"message": "Resource not accessible by integration"}, fake.refuse_reactions)
+                    return
+                with fake.lock:
+                    fake.reacted.append((comment_id, content))
+                    fake.reactions.setdefault(comment_id, []).append({"content": content, "user": {"login": APP_BOT}})
+                self._answer({"content": content}, 201)
+
             def log_message(self, *args) -> None:
                 pass
 
         return Handler
-
-
-@pytest.fixture(scope="module")
-def app_key(tmp_path_factory) -> Path:
-    key = tmp_path_factory.mktemp("app") / "key.pem"
-    subprocess.run(["openssl", "genrsa", "-out", str(key), "2048"], check=True, capture_output=True)
-    return key
-
-
-@pytest.fixture
-def serve(tmp_path, app_key):
-    """Serve a fake GitHub and return the core's real client to it."""
-    servers: list[ThreadingHTTPServer] = []
-
-    def start(fake: FakeGitHub) -> GitHubClient:
-        env_file = tmp_path / "core.env"
-        env_file.write_text(f"GITHUB_APP_ID=1\nGITHUB_APP_PRIVATE_KEY_PATH={app_key}\n", encoding="utf-8")
-        server = ThreadingHTTPServer(("127.0.0.1", 0), fake.handler())
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        servers.append(server)
-        tokens = AppTokens(
-            environ={},
-            env_file=env_file,
-            cache_dir=tmp_path / "state",
-            api_url=f"http://127.0.0.1:{server.server_address[1]}",
-        )
-        return GitHubClient(tokens)
-
-    yield start
-    for server in servers:
-        server.shutdown()
 
 
 def state(ok: bool = True) -> CoreState:
@@ -437,6 +472,9 @@ class NoIssues:
     def list_comments(self, repo: str, number: int) -> list:
         return []
 
+    def list_comments_since(self, repo: str, number: int, since: str | None = None) -> list:
+        return []
+
     def post_comment(self, repo: str, number: int, body: str) -> str:
         raise AssertionError("nothing to post")
 
@@ -459,9 +497,12 @@ def test_the_service_reads_github_only_with_a_workflow_plugged_by_its_manifest(f
     app = service.build_service(secret="s", workflows=plugged, adapter=runtime_adapter(), github=NoIssues())
     assert [workflow.key for workflow in app.state.intake.workflows] == ["essai"]
     assert app.state.intake.workflows[0].issues_repo == REPO
+    # The owner's gestures are read with the issues, by the same runner.
+    assert [workflow.key for workflow in app.state.gestures.workflows] == ["essai"]
     with TestClient(app):
         assert len(started) == 1
         assert started[0].intake is app.state.intake
+        assert started[0].gestures is app.state.gestures
         assert started[0]._task is not None
 
     started.clear()

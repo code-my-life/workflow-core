@@ -42,6 +42,7 @@ from typing import Any, Protocol
 from workflow_core.adapters.github import APP_BOT, OWNER_LOGIN, OpenIssue
 from workflow_core.clock import utc_now
 from workflow_core.engine.answers import LOCK_TIMEOUT_SECONDS
+from workflow_core.gestures import Gestures
 from workflow_core.model.decision import IntakeDecision
 from workflow_core.model.state import CoreState
 from workflow_core.model.writer import BoardWriter
@@ -277,17 +278,20 @@ class Intake:
 
 class IntakeRunner:
     """Reads GitHub in the service: at the start, then every `every` seconds by `clock`, off the event loop. It runs
-    only when a workflow is plugged by its manifest."""
+    only when a workflow is plugged by its manifest. With the owner's gestures, each reading of the issues is followed
+    by a reading of the items' comments, and every check (`check_every`) reacts to the gestures handled meanwhile."""
 
     def __init__(
         self,
         intake: Intake,
+        gestures: Gestures | None = None,
         *,
         clock: Callable[[], float] = time.monotonic,
         every: float = GITHUB_POLL_SECONDS,
         check_every: float = 5.0,
     ) -> None:
         self.intake = intake
+        self.gestures = gestures
         self.clock = clock
         self.every = every
         self.check_every = check_every
@@ -295,13 +299,18 @@ class IntakeRunner:
         self._task: asyncio.Task | None = None
 
     def tick(self) -> bool:
-        """Read GitHub when no reading was made yet, or when the last one is `every` seconds old; whether it read."""
+        """Read GitHub when no reading was made yet, or when the last one is `every` seconds old; whether it read.
+        The gestures handled meanwhile get their reactions either way."""
         now = self.clock()
-        if self._last is not None and now - self._last < self.every:
-            return False
-        self._last = now
-        self.intake.read_once()
-        return True
+        read = self._last is None or now - self._last >= self.every
+        if read:
+            self._last = now
+            self.intake.read_once()
+            if self.gestures is not None:
+                self.gestures.read_once()
+        if self.gestures is not None:
+            self.gestures.react()
+        return read
 
     async def _loop(self) -> None:
         while True:

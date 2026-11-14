@@ -7,7 +7,10 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import sys
+import threading
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -555,3 +558,37 @@ def fake_runtime(tmp_path, monkeypatch):
     yield runtime
     undeclared = [call for call in runtime.writes() if not declared(call)]
     assert undeclared == [], f"calls to commands or options the contract does not declare: {undeclared}"
+
+
+@pytest.fixture(scope="module")
+def app_key(tmp_path_factory) -> Path:
+    key = tmp_path_factory.mktemp("app") / "key.pem"
+    subprocess.run(["openssl", "genrsa", "-out", str(key), "2048"], check=True, capture_output=True)
+    return key
+
+
+@pytest.fixture
+def serve(tmp_path, app_key):
+    """Serve a fake GitHub (one with a `handler()`, as `test_intake.FakeGitHub`) and return the core's real client
+    to it."""
+    from workflow_core.adapters.github import AppTokens, GitHubClient
+
+    servers: list[ThreadingHTTPServer] = []
+
+    def start(fake) -> GitHubClient:
+        env_file = tmp_path / "core.env"
+        env_file.write_text(f"GITHUB_APP_ID=1\nGITHUB_APP_PRIVATE_KEY_PATH={app_key}\n", encoding="utf-8")
+        server = ThreadingHTTPServer(("127.0.0.1", 0), fake.handler())
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        servers.append(server)
+        tokens = AppTokens(
+            environ={},
+            env_file=env_file,
+            cache_dir=tmp_path / "state",
+            api_url=f"http://127.0.0.1:{server.server_address[1]}",
+        )
+        return GitHubClient(tokens)
+
+    yield start
+    for server in servers:
+        server.shutdown()

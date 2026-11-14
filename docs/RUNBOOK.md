@@ -44,6 +44,10 @@ en cause.
 
 Dans l'epic du notificateur : lire et écrire des commentaires d'issue (`POST /repos/{dépôt}/issues/{n}/comments`).
 Pour fabriquer le jeton : `GET /orgs/code-my-life/installation` et `POST /app/installations/{id}/access_tokens`.
+Pour les gestes du propriétaire (voir « Les gestes ») : lire les commentaires d'une issue depuis une heure
+(`GET /repos/{dépôt}/issues/{n}/comments?since=…`, page par page), lire les réactions d'un commentaire qui en porte
+(`GET /repos/{dépôt}/issues/comments/{id}/reactions`, page par page), et réagir à un commentaire au nom de l'App
+(`POST /repos/{dépôt}/issues/comments/{id}/reactions`, `+1` ou `confused`). Toutes relèvent de la permission Issues.
 
 ### Permissions accordées à l'App
 
@@ -229,6 +233,61 @@ Le journal du service préfixe ses lignes par `workflow-core: relecture` : issue
 (motif), décision dite dans l'issue (adresse du commentaire), déjà traitée, issues ou commentaires illisibles, commentaire
 non posté, intake sans décision.
 
+## Les gestes
+
+Le propriétaire répond à un élément par un **geste** : un commentaire sur l'issue de l'élément (l'adresse écrite dans
+le corps de sa carte racine), posté sur GitHub ou depuis factory-live, qui le poste en son nom. Sa première ligne est
+exactement `/<clé> <geste>`, suivie d'une note facultative (le reste de la ligne) : `/essai valider c'est bon`. La casse
+compte (`/Essai valider` n'est pas un geste), et le geste doit ouvrir le commentaire.
+
+Seuls comptent les commentaires du compte du propriétaire (la constante `OWNER_LOGIN` de
+`workflow_core/adapters/github/__init__.py`, le même que pour la relecture des issues) ; tout autre commentaire est
+ignoré sans réaction, de même qu'un geste d'un autre workflow (`/factory unblock` sur l'issue d'un élément `essai` :
+la factory lit ses gestes elle-même). Gestes reconnus : ceux de sorte `comment` du manifeste (`valider` et `refaire`
+pour le workflow d'essai), plus `unblock`, valable pour tout workflow. Un geste de sorte `issue` (`ouvrir`) ne se donne
+pas en commentaire : `/essai ouvrir` est un geste inconnu.
+
+Lecture : à chaque relecture de GitHub (au démarrage, puis toutes les 10 minutes), après les issues, le socle lit les
+commentaires de l'issue de chaque élément dont la carte racine n'est pas terminée, et de chaque élément terminé dont
+l'issue est encore ouverte. Il ne lit que les commentaires créés ou modifiés depuis sa relecture précédente de cette
+issue (deux minutes plus tôt, pour les horloges ; le filtre `since` de GitHub porte sur l'heure de modification) ;
+tous, à la première relecture après un démarrage. Un commentaire déjà pris ne l'est jamais une seconde fois, même
+modifié. Un geste entre dans la boîte
+des réponses (`answers` d'`engine.db`) avec l'identifiant `github:<identifiant du commentaire>`, la source `github`, et
+l'heure de création du commentaire.
+
+**Une seule fois** : un identifiant déjà dans la boîte n'y entre jamais une seconde fois, et un commentaire qui porte
+déjà une réaction de l'App n'est jamais repris, même si `engine.db` est perdu.
+
+Application, par le moteur à sa passe suivante (30 secondes au plus) :
+- un geste du manifeste pour un élément en attente à une station `owner`, posté après l'ouverture de l'attente
+  (l'événement `scheduled` de la carte ; même seconde acceptée), est passé à la commande de la station (`answer`) et
+  marqué appliqué, comme une réponse de l'outil de la machine de test ;
+- un geste du manifeste sans attente ouverte (élément terminé, bloqué, à une station `code`), ou posté avant
+  l'ouverture de l'attente en cours (un écran périmé), est refusé ;
+- `unblock` sur un élément dont la carte racine est bloquée : la réponse est marquée appliquée au blocage
+  (`<clé>:blocked:<carte>:<événement blocked>`), la carte est débloquée (`unblock`), et la commande de sa station est
+  relancée aussitôt avec `answer` `{"gesture": "unblock", "note": …}`, sa décision appliquée. Si elle échoue de
+  nouveau, Hermès envoie la carte en `triage` (sa garde contre les boucles de déblocage) : un second `unblock` y est
+  refusé, la carte n'étant pas `blocked`. Sur un élément non bloqué, `unblock` est refusé. Un déblocage qu'Hermès
+  refuse est écrit au journal (`<3>`) ; la réponse reste appliquée : il faut poster un nouveau geste ;
+- un geste inconnu du workflow est refusé.
+
+Ces règles ne valent que pour les gestes de GitHub : une réponse de `scripts/inject_answer.py` (source `local`) garde
+le traitement décrit dans « Le moteur ».
+
+**Réaction** : une fois le geste traité, l'App réagit au commentaire, 👍 (`+1`) s'il est appliqué, 😕 (`confused`)
+s'il est refusé, en quelques secondes après la passe du moteur ; la colonne `reacted_at` de la boîte le note. Une
+réaction que GitHub refuse est écrite au journal (`<3>`) et réessayée après la relecture suivante, pas avant. Le
+propriétaire a donc sa réponse en moins de 11 minutes : 10 minutes au plus jusqu'à la relecture, 30 secondes jusqu'à
+la passe, puis la réaction.
+
+En **mode observateur**, les gestes lus entrent dans la boîte, mais le moteur n'applique rien et l'App ne réagit pas ;
+au retour du mode normal, chaque geste est appliqué une fois et reçoit sa réaction.
+
+Le journal du service préfixe ces lignes par `workflow-core: gestes` (geste reçu, réaction posée ou non posée,
+commentaires illisibles) ; l'application et le refus sont écrits par le moteur (`workflow-core: moteur`).
+
 ## La machine de test
 
 La machine de test est la machine de production, avec le même Hermès, mais un board à part, `essai-test`. Un second
@@ -311,3 +370,24 @@ dans la pull request, puis fermer les issues de test :
 ```sh
 gh issue close <n> -R code-my-life/workflow-essai
 ```
+
+### Preuve des gestes (C9 de code-my-life/workflow-core#57)
+
+Le socle de test lancé comme ci-dessus, et un élément d'essai né d'une issue au label `test` (voir la preuve
+précédente), attendre qu'il soit en attente à `essai-revue` (`hermes kanban --board essai-test show <carte>` :
+`scheduled`). Puis, au nom du propriétaire :
+
+```sh
+gh issue comment <n> -R code-my-life/workflow-essai --body "/essai refaire"
+```
+
+En moins de 11 minutes : la carte passe à `essai-preparer`, puis de nouveau en attente à `essai-revue`, et le
+commentaire porte 👍 de `code-my-life-factory`. Redémarrer le socle de test : la carte reste en attente, et le même
+commentaire n'est pas appliqué de nouveau. Poster ensuite `/essai valider` : la carte passe à `essai-clore` puis à
+`done`, avec 👍. Poster enfin `/essai valider` sur l'issue, l'élément fini : 😕. Lire les réactions :
+
+```sh
+gh api repos/code-my-life/workflow-essai/issues/<n>/comments --jq '.[] | {html_url, body, reactions}'
+```
+
+Coller les liens des commentaires dans la pull request, puis fermer l'issue de test.

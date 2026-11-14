@@ -29,6 +29,7 @@
   ],
   "gestures": [
     { "name": "ouvrir", "kind": "issue", "repo": "code-my-life/workflow-essai" },
-    { "name": "valider", "kind": "comment" }
+    { "name": "valider", "kind": "comment" },
+    { "name": "refaire", "kind": "comment" }
   ]
 }

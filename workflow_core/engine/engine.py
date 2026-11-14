@@ -16,6 +16,15 @@ without it, and completes the root card after the last station; `fail` (a comman
 output included) and an unknown `to` block the card with the station and the reason; `wait` changes nothing, and the
 command runs again at the next pass with the next attempt. An answer for an item without an open wait, as read at the
 start of the pass, is marked refused. The engine never takes a card (`claim`): its lock is its own, held in memory.
+
+An answer from GitHub (a gesture of the owner on the item's issue, AD-10) follows three more rules; an answer of the
+test machine's tool (`local`) does not:
+- a gesture the workflow's manifest does not declare (by a comment), and that is not `unblock`, is refused;
+- a gesture commented before the open wait's `scheduled` event is refused (a stale screen), and the next answer of the
+  item is tried;
+- `unblock`, for an item whose root card is blocked, is marked applied to `<key>:blocked:<card>:<event>` (the card's
+  last `blocked` event), unblocks the card, and runs the station's command again at once with the answer
+  `{"gesture": "unblock", "note": ...}`, its decision applied; for an item whose card is not blocked, it is refused.
 """
 
 from __future__ import annotations
@@ -25,9 +34,10 @@ import contextlib
 import re
 import threading
 from collections.abc import Callable
+from datetime import datetime
 from typing import Protocol
 
-from workflow_core.engine.answers import Answer, AnswerBox
+from workflow_core.engine.answers import UNBLOCK, Answer, AnswerBox
 from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
 from workflow_core.model.decision import Decision
 from workflow_core.model.manifest import ManifestStation as Station
@@ -60,6 +70,25 @@ def open_wait(workflow: PluggedWorkflow, item: Item) -> str | None:
         return None
     event = next((event for event in reversed(item.events) if event.kind == "scheduled"), None)
     return None if event is None else f"{workflow.key}:owner:{item.id}:{event.id}"
+
+
+def last_event(item: Item, kind: str):
+    """The card's last event of this kind, or None."""
+    return next((event for event in reversed(item.events) if event.kind == kind), None)
+
+
+def stale(answer: Answer, item: Item) -> bool:
+    """Whether a GitHub answer was given before the item's open wait was opened (the same second is not)."""
+    if answer.source != "github":
+        return False
+    opened = last_event(item, "scheduled")
+    if opened is None:
+        return False
+    try:
+        given = datetime.fromisoformat(answer.received_at).timestamp()
+    except ValueError:
+        return False
+    return int(given) < opened.created_at
 
 
 class Engine:
@@ -149,8 +178,18 @@ class Engine:
         self.ensure_board(workflow)
         items = self.reader.read_items(workflow.board)
         # The answers are read after the cards: an answer applied by another pass meanwhile is no longer pending.
-        pending = self.answers.pending(f"{workflow.key}:") if self.answers is not None else []
+        pending: list[Answer] = []
+        unblocks: list[Answer] = []
+        for answer in self.answers.pending(f"{workflow.key}:") if self.answers is not None else []:
+            if answer.source == "github" and answer.gesture == UNBLOCK:
+                unblocks.append(answer)
+            elif answer.source == "github" and answer.gesture not in workflow.gestures:
+                if not self._stopped.is_set():
+                    self._refuse(answer, "geste inconnu du workflow")
+            else:
+                pending.append(answer)
         waiting: set[str] = set()
+        blocked: set[str] = set()
         for item in items:
             if self._stopped.is_set():
                 return
@@ -159,12 +198,20 @@ class Engine:
             station = workflow.station_of_lane(item.assignee)
             if station is None:
                 continue
+            element = item.idempotency_key
             if open_wait(workflow, item) is not None:
-                waiting.add(item.idempotency_key)
-                answer = next((answer for answer in pending if answer.item == item.idempotency_key), None)
+                waiting.add(element)
+                answers = [answer for answer in pending if answer.item == element]
+                if answers:
+                    self._under_lock(
+                        workflow, item, lambda fresh, s=station, a=answers: self._resume(workflow, fresh, s, a)
+                    )
+            elif item.status == "blocked":
+                blocked.add(element)
+                answer = next((answer for answer in unblocks if answer.item == element), None)
                 if answer is not None:
                     self._under_lock(
-                        workflow, item, lambda fresh, s=station, a=answer: self._resume(workflow, fresh, s, a)
+                        workflow, item, lambda fresh, s=station, a=answer: self._unblock(workflow, fresh, s, a)
                     )
             elif item.status == "ready" and station.nature == "owner":
                 self._under_lock(workflow, item, lambda fresh, s=station: self._park(workflow, fresh, s))
@@ -173,6 +220,9 @@ class Engine:
         for answer in pending:
             if answer.item not in waiting and not self._stopped.is_set():
                 self._refuse(answer)
+        for answer in unblocks:
+            if answer.item not in blocked and not self._stopped.is_set():
+                self._refuse(answer, "carte racine non bloquée")
 
     def _under_lock(self, workflow: PluggedWorkflow, item: Item, action: Callable[[Item], None]) -> None:
         """Run the action on the card read again under the item's lock; an item another pass holds is skipped."""
@@ -231,14 +281,30 @@ class Engine:
         wait = open_wait(workflow, fresh) if fresh is not None else None
         self.log(f"{PREFIX}, {element} : carte {item.id} en attente du propriétaire, attente {wait} ouverte")
 
-    def _resume(self, workflow: PluggedWorkflow, item: Item, station: Station, answer: Answer) -> None:
-        """A card waiting at an `owner` station, and an answer for its item: the command decides, once."""
+    def _resume(self, workflow: PluggedWorkflow, item: Item, station: Station, answers: list[Answer]) -> None:
+        """A card waiting at an `owner` station, and the answers for its item: the command decides on the first one
+        that answers this wait, once; a GitHub answer given before the wait opened is refused on the way."""
         element = item.idempotency_key
         wait = open_wait(workflow, item)
-        # The pass's snapshot of the answers may be stale: another pass may have applied this one meanwhile, with a
-        # `wait` that left the card where it was.
-        if wait is None or not self.answers.is_pending(answer.id):
+        if wait is None:
             return
+        for answer in answers:
+            # The pass's snapshot of the answers may be stale: another pass may have applied this one meanwhile, with
+            # a `wait` that left the card where it was.
+            if not self.answers.is_pending(answer.id):
+                continue
+            if stale(answer, item):
+                if self.answers.mark(answer.id, "refused"):
+                    self.log(
+                        f"<4>{PREFIX}, {element} : réponse {answer.id} ({answer.gesture}) refusée, donnée avant "
+                        f"l'ouverture de l'attente {wait}"
+                    )
+                continue
+            self._answer_wait(workflow, item, station, answer, wait)
+            return
+
+    def _answer_wait(self, workflow: PluggedWorkflow, item: Item, station: Station, answer: Answer, wait: str) -> None:
+        element = item.idempotency_key
         decision = self._launch(workflow, item, station, {"gesture": answer.gesture, "note": answer.note})
         # Marked before any write: whatever happens next, the answer is never handed to a command again.
         if not self.answers.mark(answer.id, "applied", wait):
@@ -258,17 +324,39 @@ class Engine:
             )
             raise
 
-    def _refuse(self, answer: Answer) -> None:
-        """An answer for an item without an open wait: refused, under the item's lock, without any write."""
+    def _unblock(self, workflow: PluggedWorkflow, item: Item, station: Station, answer: Answer) -> None:
+        """A blocked root card, and the owner's `unblock`: marked applied, the card unblocked, and the station's
+        command run again at once with the answer, its decision applied."""
+        element = item.idempotency_key
+        if item.status != "blocked" or not self.answers.is_pending(answer.id):
+            return
+        event = last_event(item, "blocked")
+        wait = f"{workflow.key}:blocked:{item.id}:{event.id if event is not None else 0}"
+        # Marked before any write: whatever happens next, the answer is never applied again.
+        if not self.answers.mark(answer.id, "applied", wait):
+            return
+        self.log(f"{PREFIX}, {element} : réponse {answer.id} ({UNBLOCK}) appliquée au blocage {wait}")
+        try:
+            self.writer.unblock(workflow.board, item.id)
+        except BoardWriteError:
+            self.log(
+                f"<3>{PREFIX}, {element} : réponse {answer.id} ({UNBLOCK}) appliquée au blocage {wait}, "
+                f"mais la carte {item.id} n'a pas pu être débloquée"
+            )
+            raise
+        if station.command is None or self._stopped.is_set():
+            return
+        decision = self._launch(workflow, item, station, {"gesture": UNBLOCK, "note": answer.note})
+        self._apply(workflow, item, station, decision)
+
+    def _refuse(self, answer: Answer, why: str = "aucune attente ouverte") -> None:
+        """An answer that answers nothing: refused, under the item's lock, without any write."""
         lock = self._lock_of(answer.item)
         if not lock.acquire(blocking=False):
             return
         try:
             if self.answers.mark(answer.id, "refused"):
-                self.log(
-                    f"<4>{PREFIX}, {answer.item} : réponse {answer.id} ({answer.gesture}) refusée, "
-                    "aucune attente ouverte"
-                )
+                self.log(f"<4>{PREFIX}, {answer.item} : réponse {answer.id} ({answer.gesture}) refusée, {why}")
         finally:
             lock.release()
 

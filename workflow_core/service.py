@@ -18,6 +18,7 @@ from workflow_core.engine import Engine, EngineRunner
 from workflow_core.engine.answers import ENGINE_DB, AnswerBox
 from workflow_core.engine.engine import PASS_SECONDS
 from workflow_core.events import JOURNAL_FILE, state_dir
+from workflow_core.gestures import Gestures
 from workflow_core.intake import Intake, IntakeRegister, IntakeRunner
 from workflow_core.model.board import BoardReader
 from workflow_core.model.checks import CHECK_EVERY_SECONDS, DeclaredCheck
@@ -70,7 +71,8 @@ def build_service(
 
     The reading of GitHub (`workflow_core.intake`) runs only with a workflow plugged by its manifest: at the start, then
     every 10 minutes, it hands the new issues of the manifests' repositories to their intake commands, through the
-    engine's writer."""
+    engine's writer, then puts the owner's gestures commented on the items' issues in the engine's answer box
+    (`workflow_core.gestures`), and reacts to them once the engine has handled them."""
     served = {key: workflow for key, workflow in workflows.items() if not workflow.plugged_by_manifest}
     reader = adapter.make_board_reader()
     plugged = plug_manifests(
@@ -148,6 +150,14 @@ def build_service(
         live_url=settings.live_url,
     )
 
+    gestures = Gestures(
+        workflows=plugged,
+        github=github,
+        reader=reader,
+        answers=AnswerBox(state_dir(environ) / ENGINE_DB),
+        state=state,
+    )
+
     app = create_app(
         secret=secret,
         workflows=served,
@@ -166,13 +176,14 @@ def build_service(
             ContractIssueTask(report),
             NotifierRunner(notifier),
             EngineRunner(engine, engine_every),
-            IntakeRunner(intake),
+            IntakeRunner(intake, gestures),
             VersionWatchRunner(watch, adapter.VERSION_CHECK_SECONDS),
         ],
     )
     app.state.notifier = notifier
     app.state.engine = engine
     app.state.intake = intake
+    app.state.gestures = gestures
     app.state.version_watch = watch
     return app
 
