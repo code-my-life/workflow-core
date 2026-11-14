@@ -16,7 +16,7 @@ import asyncio
 import contextlib
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Protocol
 
@@ -64,8 +64,11 @@ class Notifier:
         register_path: Path,
         clock: Callable[[], float] = time.time,
         log: Callable[[str], None] = journal_line,
+        lanes: Mapping[str, frozenset[str]] | None = None,
     ) -> None:
         self.workflows = [workflow for workflow in workflows.values() if workflow.notify]
+        # The lanes of each workflow plugged by its manifest, by key: their cards are never held (`trigger_of`).
+        self.lanes: Mapping[str, frozenset[str]] = lanes or {}
         self.reader = reader
         self.state = state
         self.settings = settings
@@ -97,7 +100,7 @@ class Notifier:
             card = facts.card
             if card.status not in ("blocked", "ready") or card.assignee in workflow.notify_skip_assignees:
                 continue
-            trigger = trigger_of(facts, workflow, now)
+            trigger = trigger_of(facts, workflow, now, lanes=self.lanes.get(workflow.key, frozenset()))
             if trigger is None:
                 continue
             if card.status == "blocked" and trigger.kind in BLOCKED_KINDS:

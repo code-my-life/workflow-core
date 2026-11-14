@@ -96,16 +96,22 @@ def create_app(
     agents: AgentsReader | None = None,
     background: list[Any] = (),
     sheets: dict[str, WorkflowSheet] | None = None,
+    lanes: dict[str, frozenset[str]] | None = None,
 ) -> FastAPI:
     """The API. With a board watcher and a journal path, it also probes the boards and serves GET /api/events. The
     facts of a card, for its diagnosis, are read by `facts`, by default the board reader itself, and the other
     sources of the diagnosis by `sources`, by default the board reader's. `background` holds tasks started and
     stopped with the service (each with `async start()` and `async stop()`), such as the notifier. `sheets` holds
     the fixed sheets of the workflows plugged by their manifest, judged at the start; the others are read from their
-    sheet file at each request."""
+    sheet file at each request. `lanes` holds the lanes of those workflows, by key: their cards are never held."""
     if not secret:
         raise ValueError("the shared secret is empty")
     card_facts: CardFactsReader = facts if facts is not None else boards
+    workflow_lanes = lanes or {}
+
+    def lanes_of_workflow(workflow: Workflow) -> frozenset[str]:
+        return workflow_lanes.get(workflow.key, frozenset())
+
     diagnosis_sources: DiagnosisSources = sources if sources is not None else card_facts.diagnosis_sources()
     # The agents' live state, activity and usage: by default, the board reader's.
     live_reader: LiveReader | None = _given_or_boards(live, boards, "live_reader")
@@ -188,7 +194,7 @@ def create_app(
     def open_interventions(workflow: Workflow) -> list[Intervention]:
         # The interventions of the workflow's board, computed from its cards' facts (ADR 0012).
         cards = card_facts.read_board_facts(workflow.board)
-        return interventions_of(cards, workflow, clock(), card_facts.texts)
+        return interventions_of(cards, workflow, clock(), card_facts.texts, lanes=lanes_of_workflow(workflow))
 
     if watcher is not None and journal_path is not None:
         hub = EventHub(
@@ -311,7 +317,7 @@ def create_app(
         found = card_facts.read_card_facts(workflow.board, item)
         if found is None:
             raise UnknownItemError(workflow.board, item)
-        computed = diagnose_card(found, workflow, clock(), diagnosis_sources)
+        computed = diagnose_card(found, workflow, clock(), diagnosis_sources, lanes=lanes_of_workflow(workflow))
         trigger, result = computed if computed is not None else (None, None)
         return {
             "schema_version": SCHEMA_VERSION,
@@ -346,7 +352,9 @@ def create_app(
             "workflow": workflow.key,
             "diagnoses": [
                 {"item": trigger.card, "trigger": trigger_json(trigger), "diagnosis": diagnosis_json(result)}
-                for trigger, result in diagnose_board(cards, workflow, clock(), diagnosis_sources)
+                for trigger, result in diagnose_board(
+                    cards, workflow, clock(), diagnosis_sources, lanes=lanes_of_workflow(workflow)
+                )
             ],
         }
 

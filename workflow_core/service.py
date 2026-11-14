@@ -30,7 +30,7 @@ from workflow_core.notify import Notifier, NotifierRunner, NotifySettings
 from workflow_core.notify.contract_issue import ContractIssueTask, report_contract
 from workflow_core.notify.notifier import journal_line
 from workflow_core.notify.register import REGISTER_FILE
-from workflow_core.plugin.manifest import ManifestRefusedError, PluggedWorkflow, plug
+from workflow_core.plugin.manifest import ManifestRefusedError, PluggedWorkflow, lanes_of, plug
 from workflow_core.version_watch import VersionWatch, VersionWatchRunner
 
 # journald reads a leading "<n>" on a service's output as the syslog priority of the line.
@@ -82,6 +82,8 @@ def build_service(
     plugged = plug_manifests(
         [workflow for workflow in workflows.values() if workflow.plugged_by_manifest], reader=reader
     )
+    # The lanes of each plugged workflow: their cards are never held, for the notifier as for the diagnosis.
+    lanes = {workflow.key: lanes_of(workflow) for workflow in plugged}
     writer = adapter.make_board_writer()
     boards = sorted(
         {workflow.board for workflow in served.values()}
@@ -117,6 +119,7 @@ def build_service(
         read_comments=read_comments,
         register_path=state_dir(environ) / REGISTER_FILE,
         clock=clock,
+        lanes=lanes,
     )
 
     def report() -> None:
@@ -175,6 +178,7 @@ def build_service(
         secret=secret,
         workflows={**served, **{workflow.key: api_entry(workflows[workflow.key], workflow) for workflow in plugged}},
         sheets={workflow.key: workflow.sheet for workflow in plugged if workflow.sheet is not None},
+        lanes=lanes,
         boards=reader,
         state=state,
         watcher=adapter.make_board_watcher(),

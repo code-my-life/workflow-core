@@ -74,6 +74,11 @@ class PluggedWorkflow:
         return self.stations[index + 1] if index + 1 < len(self.stations) else None
 
 
+def lanes_of(workflow: PluggedWorkflow) -> frozenset[str]:
+    """The lanes of a plugged workflow: `<key>-<station>` for every station of its manifest, whatever its nature."""
+    return frozenset(workflow.lane(station.key) for station in workflow.stations)
+
+
 def is_root_card(item: Item, key: str) -> bool:
     """Whether the card is the root card of an item of this workflow: its idempotency key is `<key>:<local id>`."""
     idempotency = item.idempotency_key or ""

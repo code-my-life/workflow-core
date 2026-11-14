@@ -9,6 +9,7 @@ to examine (`compute`). The rules name no board and no agent: a workflow's own c
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
 
 from workflow_core.config import Workflow
 from workflow_core.diagnosis.episode import profile_name
@@ -81,8 +82,10 @@ def _agent(facts: CardFacts, event: EventFact | None) -> str | None:
     return profile_name(runs[-1]) if runs else facts.card.assignee
 
 
-def trigger_of(facts: CardFacts, workflow: Workflow, now: float) -> Trigger | None:
-    """The trigger of one card, or `None` when the card waits for nothing the diagnosis explains."""
+def trigger_of(facts: CardFacts, workflow: Workflow, now: float, *, lanes: Collection[str] = ()) -> Trigger | None:
+    """The trigger of one card, or `None` when the card waits for nothing the diagnosis explains. `lanes` are the
+    lanes of the workflow (`<key>-<station>`): never a profile, a card assigned to one may stay ready a long time, so
+    it is never held; its blocks are diagnosed as any other card's."""
     card = facts.card
     events = sorted(facts.events, key=lambda event: event.id)
     found: tuple[TriggerKind, EventFact | None, int] | None = None
@@ -92,7 +95,7 @@ def trigger_of(facts: CardFacts, workflow: Workflow, now: float) -> Trigger | No
         loop = _last(events, "block_loop_detected")
         if loop is not None:
             found = ("triage_loop", loop, loop.created_at)
-    elif card.status == "ready":
+    elif card.status == "ready" and card.assignee not in lanes:
         since = _held_since(events)
         if since is not None and now - since >= workflow.held_after_minutes * 60:
             found = ("held_active_pr", None, since)
@@ -109,7 +112,9 @@ def trigger_of(facts: CardFacts, workflow: Workflow, now: float) -> Trigger | No
     )
 
 
-def triggers_of(cards: list[CardFacts], workflow: Workflow, now: float) -> list[Trigger]:
-    """The triggers of a board's cards, oldest first."""
-    found = [trigger for facts in cards if (trigger := trigger_of(facts, workflow, now)) is not None]
+def triggers_of(
+    cards: list[CardFacts], workflow: Workflow, now: float, *, lanes: Collection[str] = ()
+) -> list[Trigger]:
+    """The triggers of a board's cards, oldest first; `lanes` as for `trigger_of`."""
+    found = [trigger for facts in cards if (trigger := trigger_of(facts, workflow, now, lanes=lanes)) is not None]
     return sorted(found, key=lambda trigger: trigger.opened_at)
