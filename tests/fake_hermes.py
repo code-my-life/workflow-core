@@ -8,7 +8,8 @@ It notes each call (one JSON list of arguments per line, in the file named by FA
   board `create` (`--assignee`, `--idempotency-key`, `--body`, `--parent`, `--json`), `assign`, `schedule [reason]`,
   `unblock`, `block [reason] [--kind <kind>]`, `comment` and `complete --result`, applied to the bases of the test's
   runtime home, with the runtime's real schema. As the runtime 0.22.2, `create` writes a `created` event (payload
-  `{"assignee", "status"}`; none when the idempotency key returns an existing card) and `assign` an `assigned` event
+  `{"assignee", "status"}`; none when the idempotency key returns an existing card, which `--json` prints whole,
+  its body among its fields, as a card created) and `assign` an `assigned` event
   (payload `{"assignee", "from"}`); `schedule`, `unblock`, `block` and `complete`
   start only from their allowed statuses (otherwise code 1, « cannot <command> <card> »), and each writes its event
   in `task_events` (`scheduled`, `unblocked`, `blocked`, `completed`), its payload `{"reason"}` when it has one
@@ -152,12 +153,16 @@ def card_command(db: sqlite3.Connection, command: list[str]) -> int | None:
     if command[0] == "create":
         key = option(command, "--idempotency-key")
         if key is not None:
-            found = db.execute(
-                "SELECT id FROM tasks WHERE idempotency_key = ? AND status != 'archived'", (key,)
-            ).fetchone()
+            cursor = db.execute(
+                "SELECT id, title, body, assignee, status, created_at, idempotency_key FROM tasks "
+                "WHERE idempotency_key = ? AND status != 'archived' ORDER BY created_at DESC LIMIT 1",
+                (key,),
+            )
+            found = cursor.fetchone()
             if found is not None:
+                # As the runtime: the existing card, whole, as `--json` prints a card created.
                 if "--json" in command:
-                    print(json.dumps({"id": found[0]}))
+                    print(json.dumps(dict(zip([column[0] for column in cursor.description], found, strict=True))))
                 return 0
         parent = option(command, "--parent")
         status = "ready"

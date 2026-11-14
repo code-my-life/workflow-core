@@ -370,11 +370,13 @@ l'issue du contrat cassé dans `code-my-life/workflow-core`.
 Le premier démarrage ne connaît pas encore le board `essai-test` : le contrat porte sur les autres lectures, et la
 première passe du moteur crée le board (« board essai-test créé » au journal).
 
-Créer une carte racine d'essai à la main, au nom de voie de la première station :
+Créer une carte racine d'essai à la main, au nom de voie de la première station. Sa clé d'idempotence est
+`essai:manuel-1`, puis `essai:manuel-2`, `essai:manuel-3` pour les cartes suivantes : jamais `essai:<numéro>`, la clé
+de l'élément né d'une issue de `code-my-life/workflow-essai`, qui serait déjà prise.
 
 ```sh
-hermes kanban --board essai-test create "essai:1 · Premier essai" --assignee essai-preparer \
-  --idempotency-key essai:1 --body https://github.com/code-my-life/workflow-essai/issues/1
+hermes kanban --board essai-test create "essai:manuel-1 · Premier essai" --assignee essai-preparer \
+  --idempotency-key essai:manuel-1 --body https://github.com/code-my-life/workflow-essai/issues/1
 ```
 
 En moins d'une minute, la carte passe à `essai-revue` ; la vérifier, et vérifier qu'elle n'a jamais été prise :
@@ -388,7 +390,7 @@ l'identifiant de l'attente. Injecter la réponse du propriétaire avec l'outil d
 boîte des réponses du socle de test et imprime l'identifiant de la réponse :
 
 ```sh
-uv run python scripts/inject_answer.py --state-dir ~/.local/state/workflow-core-essai-test --item essai:2 \
+uv run python scripts/inject_answer.py --state-dir ~/.local/state/workflow-core-essai-test --item essai:manuel-1 \
   --gesture valider
 ```
 

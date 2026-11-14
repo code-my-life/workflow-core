@@ -24,6 +24,8 @@ FIRST_ASSIGNEE = "contrat-premier"
 SECOND_ASSIGNEE = "contrat-second"
 KEY = "contrat:1"
 BODY = "Carte du cycle d'écriture du test de contrat."
+# The body of a second creation under the same key: the runtime keeps and gives back the first one.
+OTHER_BODY = "Autre corps, jamais écrit."
 # The child card of an `agent` station: its key `<item>/<station>/<passage>`, its body the item's id first.
 CHILD_KEY = f"{KEY}/contrat/1"
 CHILD_BODY = f"{KEY}\n{BODY}"
@@ -83,6 +85,16 @@ def _steps(writer: HermesBoardWriter, reader: HermesBoardReader, board: str) -> 
     _expect("create (même clé)", "carte", again, first)
     keyed = [item.id for item in _items(reader, board, "create (même clé)") if item.idempotency_key == KEY]
     _expect("create (même clé)", "cartes de la clé", keyed, [first])
+    # The intake relies on this: the existing card of a key comes back whole, its body that of its own creation.
+    step = "create (même clé, autre corps)"
+    held = _do(
+        step,
+        lambda: writer.create_root_card(
+            board, title="contrat : première carte", lane=FIRST_ASSIGNEE, item=KEY, issue=OTHER_BODY
+        ),
+    )
+    _expect(step, "carte", held.id, first)
+    _expect(step, "corps rendu", held.body, BODY)
 
     # The child card of an `agent` station relies on this: a card created under an unfinished parent waits in `todo`.
     child = create("create --parent", title="contrat : carte fille", assignee=SECOND_ASSIGNEE, parent=first)

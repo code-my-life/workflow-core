@@ -6,6 +6,7 @@ current board (ADR 0003).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol
 
 
@@ -34,6 +35,15 @@ class BoardWriteRefusedError(BoardWriteError):
         self.reason = reason
 
 
+@dataclass(frozen=True)
+class CreatedCard:
+    """A root card as its creation gives it back: its id and its body. For an idempotency key already taken, the
+    runtime gives back the existing card, whose body may name another issue."""
+
+    id: str
+    body: str | None
+
+
 class BoardWriter(Protocol):
     """Writes to the runtime's boards by name."""
 
@@ -43,9 +53,9 @@ class BoardWriter(Protocol):
 
     def create_board(self, board: str) -> None: ...
 
-    def create_root_card(self, board: str, *, title: str, lane: str, item: str, issue: str | None) -> str:
+    def create_root_card(self, board: str, *, title: str, lane: str, item: str, issue: str | None) -> CreatedCard:
         """Create the root card of an item, assigned to a lane, with the item's id as its idempotency key and its
-        issue's address as its body; return the card's id."""
+        issue's address as its body; return the card, or the existing card of that key, with its id and its body."""
         ...
 
     def create_child_card(self, board: str, *, title: str, profile: str, key: str, body: str) -> str:

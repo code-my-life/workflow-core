@@ -176,6 +176,15 @@ def _manifest_rule(
                 "shared-issues-repo",
                 f'issues repository "{repo}" is already read by the plugged workflow "{owner}"',
             )
+    # The core reads only the issues repositories of the manifest: an issue opened elsewhere by a gesture would never
+    # be read.
+    for gesture in manifest.gestures:
+        if gesture.kind == "issue" and gesture.repo not in manifest.issues_repos:
+            return (
+                "gesture-repo-not-read",
+                f'issue gesture "{gesture.name}" opens its issue in "{gesture.repo}", which is not one of the '
+                "manifest's issues_repos",
+            )
     return None
 
 

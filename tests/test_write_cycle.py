@@ -33,6 +33,8 @@ def test_the_full_write_cycle_passes_and_removes_its_board(fake_runtime):
         "boards",
         "create",
         "create",
+        # The same key again, through the root card's creation: the existing card comes back, whole.
+        "create",
         "create",
         "assign",
         "create",

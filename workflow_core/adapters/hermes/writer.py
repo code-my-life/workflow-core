@@ -18,7 +18,7 @@ from pathlib import Path
 
 from workflow_core.adapters.hermes.board import HOME_VARIABLE, HermesBoardReader, hermes_home
 from workflow_core.model.board import BoardUnavailableError
-from workflow_core.model.writer import BoardWriteError, BoardWriteRefusedError
+from workflow_core.model.writer import BoardWriteError, BoardWriteRefusedError, CreatedCard
 
 COMMAND = "hermes"
 WRITE_TIMEOUT_SECONDS = 30.0
@@ -73,23 +73,29 @@ class HermesBoardWriter:
         # `boards create` ignores `--board` in Hermès 0.22.2 and is idempotent: the slug is its argument.
         self._run(board, ["boards", "create", board], "boards create <slug>")
 
-    def _create(self, board: str, arguments: list[str], shape: str) -> str:
+    def _created(self, board: str, arguments: list[str], shape: str) -> CreatedCard:
+        """Run a `create ... --json` and read the card it prints: the card created, or the existing card of an
+        idempotency key already taken, whole in both cases."""
         output = self._run(board, arguments, shape)
         try:
-            card = json.loads(output).get("id")
+            found = json.loads(output)
+            card, body = found.get("id"), found.get("body")
         except (ValueError, AttributeError):
-            card = None
+            card, body = None, None
         if not isinstance(card, str):
             raise BoardWriteError(f"{COMMAND} kanban --board <board> {shape}", 0, f"sortie illisible : {output[:200]}")
-        return card
+        return CreatedCard(id=card, body=body if isinstance(body, str) else None)
 
-    def create_root_card(self, board: str, *, title: str, lane: str, item: str, issue: str | None) -> str:
+    def _create(self, board: str, arguments: list[str], shape: str) -> str:
+        return self._created(board, arguments, shape).id
+
+    def create_root_card(self, board: str, *, title: str, lane: str, item: str, issue: str | None) -> CreatedCard:
         arguments = ["create", title, "--assignee", lane, "--idempotency-key", item]
         if issue is not None:
             arguments += ["--body", issue]
         arguments.append("--json")
         shape = "create <title> --assignee <lane> --idempotency-key <item> --body <issue> --json"
-        return self._create(board, arguments, shape)
+        return self._created(board, arguments, shape)
 
     def create_child_card(self, board: str, *, title: str, profile: str, key: str, body: str) -> str:
         # Never `--parent`: in Hermès a parent is a dependency, and a child of an unfinished root card would wait in

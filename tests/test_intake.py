@@ -403,6 +403,45 @@ def test_a_refused_issue_gets_the_reason_and_no_card(fake_runtime, serve, tmp_pa
     assert registered(tmp_path) == [(REPO, 8, None, "refuse")]
 
 
+def test_an_element_key_already_held_by_another_issue_is_refused(fake_runtime, serve, tmp_path):
+    # A root card made by hand on the test machine with the key `essai:2`, for the issue 1, and done.
+    writer = runtime_adapter().make_board_writer()
+    writer.create_board("essai")
+    held = writer.create_root_card(
+        "essai", title="essai:2 · À la main", lane="essai-preparer", item="essai:2", issue=issue_url(1)
+    )
+    writer.complete("essai", held.id, "fait à la main")
+    writes = fake_runtime.writes()
+    # The issue 2, accepted with the id `2`, would be the item `essai:2`.
+    fake = FakeGitHub([issue(2, "Deuxième essai")])
+    intake, intakes, lines = reading(serve(fake), tmp_path)
+
+    intake.read_once()
+
+    # The creation gave back the card of the issue 1: nothing else is written.
+    assert fake_runtime.writes()[len(writes) :] == creates(fake_runtime)[-1:]
+    assert fake_runtime.writes()[: len(writes)] == writes
+    assert cards(fake_runtime) == [("essai:2", "essai-preparer", issue_url(1))]
+    assert fake.posted == [
+        (
+            2,
+            "🚫 Cette issue n'est pas prise par le workflow `essai` : l'élément `essai:2` existe déjà pour une autre "
+            f"issue, {issue_url(1)}.\n\n"
+            f"<!-- workflow-core:intake {REPO}#2 refuse -->",
+        )
+    ]
+    assert registered(tmp_path) == [(REPO, 2, None, "refuse")]
+    warned = [line for line in lines if line.startswith("<4>")]
+    assert len(warned) == 1, lines
+    assert f"{REPO}#2" in warned[0] and "essai:2" in warned[0] and issue_url(1) in warned[0] and held.id in warned[0]
+    assert not any("acceptée" in line for line in lines), lines
+
+    # Not taken again at the next reading.
+    intake.read_once()
+    assert intakes.numbers() == [2]
+    assert len(fake.posted) == 1
+
+
 def test_only_the_owner_s_open_issues_with_the_right_label_are_taken(fake_runtime, serve, tmp_path):
     fake = FakeGitHub(
         [

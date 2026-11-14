@@ -27,7 +27,7 @@ def test_every_write_names_its_board_and_goes_through_the_command_line(fake_runt
     assert writer.has_board("essai") is False
     writer.create_board("essai")
     assert writer.has_board("essai") is True
-    card = writer.create_root_card("essai", title=TITLE, lane="essai-preparer", item="essai:1", issue=ISSUE)
+    card = writer.create_root_card("essai", title=TITLE, lane="essai-preparer", item="essai:1", issue=ISSUE).id
     writer.assign("essai", card, "essai-revue")
 
     assert fake_runtime.writes() == [

@@ -63,7 +63,7 @@ from workflow_core.model.state import CoreState
 from workflow_core.model.writer import BoardWriteError, BoardWriter
 from workflow_core.notify.notifier import journal_line
 from workflow_core.plugin.commands import command_input, run_command
-from workflow_core.plugin.manifest import PluggedWorkflow, is_root_card, issue_of, wait_id
+from workflow_core.plugin.manifest import PluggedWorkflow, is_root_card, issue_of, lanes_of, wait_id
 from workflow_core.signals import FINISHED_ELSEWHERE, TAKEN, Signals
 
 PASS_SECONDS = 30.0
@@ -240,8 +240,11 @@ class Engine:
                 if not self.records.finished_by_engine(workflow.board, item.id):
                     self._finished_elsewhere(workflow, item, station)
                 continue
-            # Only child cards are handed to agents: a run on a root card means someone took it (AD-4).
-            running = [self._taken(workflow, item, station, run) for run in item.runs]
+            # Only child cards are handed to agents: a run on a root card means someone took it (AD-4). The runtime
+            # opens runs of its own when a card at a lane is scheduled, blocked or completed: a lane is never a
+            # launchable profile, so those runs are no agent's.
+            lanes = lanes_of(workflow)
+            running = [self._taken(workflow, item, station, run) for run in item.runs if run.profile not in lanes]
             if any(running):
                 held.add(element)
                 continue

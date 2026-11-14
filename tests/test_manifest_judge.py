@@ -96,6 +96,11 @@ def _shared_agent_profile(manifest: dict, sheet: dict) -> list[str]:
     return []
 
 
+def _gesture_repo_not_read(manifest: dict, sheet: dict) -> list[str]:
+    manifest["gestures"].append({"name": "signaler", "kind": "issue", "repo": "code-my-life/ailleurs"})
+    return []
+
+
 def _sheet_unreadable(manifest: dict, sheet: dict) -> list[str]:
     manifest["sheet"] = "absente.json"
     return []
@@ -129,6 +134,7 @@ BROKEN: dict[str, tuple[Callable[[dict, dict], list[str]], tuple[str, ...]]] = {
     "missing-command": (_missing_command, ('"revue"', "command")),
     "missing-profile": (_missing_profile, ('"relire"', "profile")),
     "shared-agent-profile": (_shared_agent_profile, ('"relire"', '"corriger"', '"relecteur"')),
+    "gesture-repo-not-read": (_gesture_repo_not_read, ('"signaler"', '"code-my-life/ailleurs"')),
     "sheet-unreadable": (_sheet_unreadable, ('"absente.json"',)),
     "sheet:duplicate-station": (_sheet_rule, ('"preparer"',)),
     "agents-on-sheet": (_agents_on_sheet, ('"revue"',)),

@@ -526,7 +526,7 @@ def test_every_call_uses_a_declared_command_and_option(fake_runtime):
     writer.create_board("essai")
     root = writer.create_root_card(
         "essai", title="Premier essai", lane="essai-preparer", item="essai:1", issue="https://example.org/issues/1"
-    )
+    ).id
     child = writer.create_card(
         "essai", title="Fille", assignee="essai-revue", idempotency_key="essai:1/x/1", parent=root
     )

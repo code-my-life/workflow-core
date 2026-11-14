@@ -20,6 +20,9 @@
    gives back the existing card for a key already taken). Then the App comments the issue: the item, its first
    station, its link in factory-live (left out without `WORKFLOW_CORE_LIVE_URL`), the reason, and the marker. The
    engine takes the item at its next pass.
+   When the creation gives back a card whose body's first issue address is not this issue's (the key is held by
+   another issue, or by a card made by hand), the issue is refused: a comment names the other issue, the journal
+   says it with `<4>`, nothing else is written, and the refusal is noted as any other.
 6. Refused, the issue gets a comment with the reason and the marker; no card is created.
 7. A card created whose comment could not be posted leaves the issue without a marker: at the next reading, the
    command runs again, the creation gives back the same card, and the comment is posted. The core alone writes these
@@ -49,7 +52,7 @@ from workflow_core.model.writer import BoardWriter
 from workflow_core.notify.alerts import item_link
 from workflow_core.notify.notifier import journal_line
 from workflow_core.plugin.commands import intake_input, run_intake
-from workflow_core.plugin.manifest import PluggedWorkflow
+from workflow_core.plugin.manifest import PluggedWorkflow, issue_of
 
 # Seconds between two readings of GitHub, until the webhooks reach the core.
 GITHUB_POLL_SECONDS = 600
@@ -250,8 +253,7 @@ class Intake:
         if decision is None:
             self.log(f"<4>{PREFIX}, {repo}#{number} : intake sans décision, réessai à la prochaine relecture")
             return
-        marker = intake_marker(repo, number, decision.decision)
-        item = None
+        verdict, item = decision.decision, None
         if decision.decision == "accept":
             item = f"{workflow.key}:{decision.id}"
             first = workflow.stations[0].key
@@ -259,18 +261,34 @@ class Intake:
             card = self.writer.create_root_card(
                 workflow.board, title=f"{item} · {issue.title}", lane=workflow.lane(first), item=item, issue=issue.url
             )
-            self.log(f"{PREFIX}, {repo}#{number} : acceptée, élément {item}, carte {card} à la station {first}")
-            body = accept_comment(
-                key=workflow.key,
-                item=item,
-                station=first,
-                reason=decision.reason,
-                link=item_link(self.live_url, workflow.key),
-                marker=marker,
-            )
+            holder = issue_of(card.body)
+            if holder is not None and holder.casefold() == issue.url.casefold():
+                self.log(f"{PREFIX}, {repo}#{number} : acceptée, élément {item}, carte {card.id} à la station {first}")
+                body = accept_comment(
+                    key=workflow.key,
+                    item=item,
+                    station=first,
+                    reason=decision.reason,
+                    link=item_link(self.live_url, workflow.key),
+                    marker=intake_marker(repo, number, verdict),
+                )
+            else:
+                # The creation gave back the card of another issue, or of a card made by hand: it is left as it is.
+                other = holder or "une carte sans adresse d'issue"
+                self.log(
+                    f"<4>{PREFIX}, {repo}#{number} : refusée, l'élément {item} existe déjà pour {other} "
+                    f"(carte {card.id})"
+                )
+                reason = (
+                    f"l'élément `{item}` existe déjà pour une autre issue, {holder}"
+                    if holder is not None
+                    else f"l'élément `{item}` existe déjà, sa carte ne porte l'adresse d'aucune issue"
+                )
+                verdict, item = "refuse", None
+                body = refuse_comment(key=workflow.key, reason=reason, marker=intake_marker(repo, number, verdict))
         else:
             self.log(f"{PREFIX}, {repo}#{number} : refusée : {decision.reason}")
-            body = refuse_comment(key=workflow.key, reason=decision.reason, marker=marker)
+            body = refuse_comment(key=workflow.key, reason=decision.reason, marker=intake_marker(repo, number, verdict))
         try:
             url = self.github.post_comment(repo, number, body)
         except Exception as error:
@@ -278,8 +296,8 @@ class Intake:
                 f"<3>{PREFIX}, {repo}#{number} : commentaire non posté, réessai à la prochaine relecture : {error}"
             )
             return
-        self.register.note(repo, number, item, decision.decision)
-        self.log(f"{PREFIX}, {repo}#{number} : décision {decision.decision} dite dans l'issue : {url}")
+        self.register.note(repo, number, item, verdict)
+        self.log(f"{PREFIX}, {repo}#{number} : décision {verdict} dite dans l'issue : {url}")
 
 
 class IntakeRunner:

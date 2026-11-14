@@ -556,3 +556,28 @@ def test_no_child_is_created_in_observer_mode(fake_runtime):
     assert fake_runtime.calls() == []
     assert children(fake_runtime.home) == []
     assert card(fake_runtime.home) == ("ready", "essai-brouillon")
+
+
+def test_a_run_the_runtime_opens_on_a_lane_is_not_an_agent(fake_runtime):
+    # The runtime opens a run of its own when a card at a lane is scheduled, blocked or completed: its profile is the
+    # lane, which is never a launchable profile, so it is no anomaly and the item is handled as usual.
+    run = {
+        "task_id": ROOT,
+        "profile": "essai-revue",
+        "status": "scheduled",
+        "started_at": 1762900010,
+        "ended_at": 1762900010,
+    }
+    make_runtime_board(
+        fake_runtime.home,
+        "essai",
+        tasks=[root_card(assignee="essai-revue", status="scheduled")],
+        runs=[run],
+        events=[{"task_id": ROOT, "kind": "scheduled", "payload": "{}", "created_at": 1762900005}],
+    )
+    core, lines = engine(launches=Launches(), workflow=essai_agent())
+
+    core.run_pass()
+
+    assert [line for line in lines if "anomalie" in line] == []
+    assert signals() == []

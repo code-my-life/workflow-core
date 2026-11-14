@@ -48,6 +48,14 @@ def test_a_refused_manifest_leaves_its_workflow_unplugged(runtime_home, tmp_path
     assert app.state.core.mode == "normal"
 
 
+def reads_only_second(manifest: dict) -> None:
+    """The third workflow reads `code-my-life/second` alone, and its issue gesture opens its issue there."""
+    manifest["issues_repos"] = ["code-my-life/second"]
+    for gesture in manifest["gestures"]:
+        if gesture["kind"] == "issue":
+            gesture["repo"] = "code-my-life/second"
+
+
 def test_two_workflows_never_read_the_same_issues_repo(runtime_home, tmp_path, capsys):
     workflows = {
         **load_workflows(DEFAULT_CONFIG),
@@ -62,7 +70,7 @@ def test_two_workflows_never_read_the_same_issues_repo(runtime_home, tmp_path, c
         ),
         "troisieme": Workflow(
             key="troisieme",
-            repo=repo_of(tmp_path, "troisieme", lambda manifest: manifest.update(issues_repos=["code-my-life/second"])),
+            repo=repo_of(tmp_path, "troisieme", reads_only_second),
         ),
     }
 
