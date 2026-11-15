@@ -1,5 +1,6 @@
 """The broken contract's issue: at each startup, a failed contract test opens, comments or reopens an issue in
-code-my-life/workflow-core; a contract kept again comments it and closes it (ADR 0019).
+code-my-life/workflow-core; a contract kept again comments it and closes it (ADR 0019). A runtime's version changed
+while the core runs opens or comments the same issue, once.
 
 It is the one write to GitHub allowed in observer mode, whatever the notifier's switch. Its state, the number of the
 noted issue, is `contract-issue.json` of the core's state folder. A GitHub failure is written to the journal and the
@@ -55,6 +56,43 @@ def _opening_body(verdict: ContractVerdict, runtime: str, version: str | None) -
     )
 
 
+def _changed_body(verdict: ContractVerdict, runtime: str) -> str:
+    return "\n".join(
+        [
+            f"La version de {runtime} a changé pendant que le socle tournait ({verdict.checked_at}) : le contrat n'a "
+            "été vérifié que pour la version lue au démarrage. Le socle est en observateur jusqu'à son redémarrage : "
+            "il sert encore factory-live, mais n'écrit plus rien, ni alerte ni carte.",
+            "",
+            "**Problèmes trouvés**, dans l'ordre :",
+            *_problems(verdict),
+            "",
+            "**À faire sur la machine** : relancer le socle, dont le test de contrat juge la nouvelle version.",
+            "```",
+            'journalctl --user -u workflow-core.service --since "-15 min"',
+            "systemctl --user restart workflow-core.service",
+            "```",
+            "",
+            "Cette issue reçoit un commentaire à chaque démarrage tant que le contrat reste cassé, et se ferme au "
+            "premier démarrage où il tient de nouveau.",
+            "",
+            FOOTER,
+            "",
+            MARKER,
+        ]
+    )
+
+
+def _changed_comment(verdict: ContractVerdict, runtime: str) -> str:
+    return "\n".join(
+        [
+            f"La version de {runtime} a changé pendant que le socle tournait ({verdict.checked_at}) :",
+            *_problems(verdict),
+            "",
+            FOOTER,
+        ]
+    )
+
+
 def _still_broken(verdict: ContractVerdict, runtime: str, version: str | None) -> str:
     return "\n".join(
         [
@@ -76,22 +114,21 @@ def report_contract(
     state_dir: Path,
     now: datetime,
     log: Callable[[str], None],
+    while_running: bool = False,
 ) -> None:
-    """Open, comment or close the broken contract's issue after the startup's verdict. Never raises."""
+    """Open, comment or close the broken contract's issue after the startup's verdict. Never raises. `while_running`:
+    the verdict of a version changed while the core runs (`workflow_core.version_watch`), whose problems name the
+    versions; it opens or comments the same issue, and never closes it."""
     path = state_dir / STATE_FILE
     noted = read_state(path).get("issue")
     try:
         if not verdict.ok:
             title = f"Le contrat du socle avec {runtime} est cassé"
-            number = open_or_comment(
-                client,
-                REPO,
-                MARKER,
-                now,
-                title,
-                _opening_body(verdict, runtime, version),
-                _still_broken(verdict, runtime, version),
-            )
+            if while_running:
+                body, comment = _changed_body(verdict, runtime), _changed_comment(verdict, runtime)
+            else:
+                body, comment = _opening_body(verdict, runtime, version), _still_broken(verdict, runtime, version)
+            number = open_or_comment(client, REPO, MARKER, now, title, body, comment)
             write_state(path, {"issue": number})
             log(f"<3>workflow-core: contrat cassé, issue {REPO}#{number}")
         elif noted is not None:

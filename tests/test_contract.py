@@ -10,7 +10,7 @@ from workflow_core.adapters import runtime_adapter
 from workflow_core.config import Workflow
 from workflow_core.service import build_service
 
-from conftest import FACTORY_ITEMS, fake_version_command
+from conftest import ESSAI_REPO, FACTORY_ITEMS, fake_version_command
 
 SECRET = "test-secret-not-a-real-one"
 WORKFLOWS = {
@@ -44,6 +44,16 @@ def test_a_base_missing_a_read_column_breaks_the_contract(runtime_home):
 
     assert verdict.ok is False
     assert verdict.problems == ["studio: tasks.block_kind absente"]
+
+
+def test_a_base_missing_the_idempotency_key_breaks_the_contract(runtime_home):
+    # The engine knows a root card by its idempotency key: a base without it cannot be read by the engine.
+    rebuild_tasks(board_base(runtime_home, "factory"), drop="idempotency_key")
+
+    verdict = check()
+
+    assert verdict.ok is False
+    assert verdict.problems == ["factory: tasks.idempotency_key absente"]
 
 
 def test_a_base_with_the_read_schema_keeps_the_contract(runtime_home):
@@ -433,6 +443,18 @@ def test_a_base_missing_the_block_events_breaks_the_contract(runtime_home):
     assert verdict.problems == ["factory: task_events.payload absente"]
 
 
+def test_a_base_missing_the_task_events_breaks_the_contract(runtime_home):
+    # The engine knows a wait by the card's last `scheduled` event, read from task_events.
+    with sqlite3.connect(board_base(runtime_home, "factory")) as db:
+        db.execute("DROP TABLE task_events")
+    db.close()
+
+    verdict = check()
+
+    assert verdict.ok is False
+    assert verdict.problems == ["factory: table task_events absente"]
+
+
 def test_a_guard_event_without_a_reason_breaks_the_contract(runtime_home):
     # The notifier reads the reason of the runtime's respawn guard: a JSON object with a text `reason`.
     from workflow_core.model.state import CoreState
@@ -464,3 +486,105 @@ def test_a_guard_event_without_a_reason_breaks_the_contract(runtime_home):
         register_path=runtime_home.parent / "alerts.db",
     ).run_pass()
     assert posted == []
+
+
+ESSAI = {"essai": Workflow(key="essai", repo=ESSAI_REPO)}
+
+
+def test_a_missing_option_of_a_used_command_breaks_the_contract(fake_runtime):
+    fake_runtime.forget_option("create", "--idempotency-key")
+
+    verdict = check([])
+
+    assert verdict.ok is False
+    assert verdict.problems == ["commande `create` : option `--idempotency-key` absente"]
+    app = build_service(secret=SECRET, workflows=ESSAI, adapter=runtime_adapter())
+    assert app.state.core.mode == "observer"
+    assert "commande `create` : option `--idempotency-key` absente" in app.state.core.contract.problems
+
+
+def test_a_missing_command_breaks_the_contract(fake_runtime):
+    fake_runtime.forget_command("schedule")
+
+    verdict = check([])
+
+    assert verdict.ok is False
+    assert verdict.problems == ["commande `schedule` absente"]
+
+
+def test_every_call_uses_a_declared_command_and_option(fake_runtime):
+    from workflow_core.engine import Engine
+    from workflow_core.model.contract import ContractVerdict
+    from workflow_core.model.state import CoreState
+    from workflow_core.plugin.manifest import plug
+
+    from conftest import declared, make_runtime_board
+
+    adapter = runtime_adapter()
+    writer = adapter.make_board_writer()
+    # Every method of the writer.
+    writer.create_board("essai")
+    root = writer.create_root_card(
+        "essai", title="Premier essai", lane="essai-preparer", item="essai:1", issue="https://example.org/issues/1"
+    ).id
+    child = writer.create_card(
+        "essai", title="Fille", assignee="essai-revue", idempotency_key="essai:1/x/1", parent=root
+    )
+    writer.assign("essai", child, "essai-preparer")
+    writer.schedule("essai", child)
+    writer.unblock("essai", child)
+    writer.schedule("essai", child, "En attente du propriétaire à la station revue")
+    writer.unblock("essai", child)
+    writer.block("essai", child, kind="needs_input")
+    writer.unblock("essai", child)
+    writer.block("essai", child, "Échec de la station preparer : sortie illisible")
+    writer.unblock("essai", child)
+    writer.block("essai", child, "en attente", kind="needs_input")
+    writer.unblock("essai", child)
+    writer.comment("essai", child, "un commentaire")
+    writer.complete("essai", child, "fait")
+    writer.create_board("jetable")
+    assert "jetable" in writer.list_boards()
+    writer.remove_board("jetable")
+    # A pass of the engine that moves a card forward.
+    make_runtime_board(
+        fake_runtime.home,
+        "essai-moteur",
+        tasks=[
+            {
+                "id": "t_0a0b0c0d",
+                "title": "essai:2 · Second essai",
+                "assignee": "essai-preparer",
+                "status": "ready",
+                "created_at": 1762900000,
+                "idempotency_key": "essai:2",
+            }
+        ],
+    )
+    verdict = ContractVerdict(ok=True, checked_at="2026-11-14T00:00:00+00:00", problems=[])
+    Engine(
+        workflows=[plug(Workflow(key="essai", board="essai-moteur", repo=ESSAI_REPO))],
+        reader=adapter.make_board_reader(),
+        writer=writer,
+        state=CoreState(contract=verdict),
+        log=lambda line: None,
+    ).run_pass()
+
+    calls = fake_runtime.writes()
+    assert ["kanban", "--board", "essai-moteur", "assign", "t_0a0b0c0d", "essai-revue"] in calls
+    assert {call[3] if call[1] == "--board" else call[1] for call in calls} >= {
+        "boards",
+        "create",
+        "assign",
+        "schedule",
+        "unblock",
+        "block",
+        "comment",
+        "complete",
+    }
+    assert [call for call in calls if not declared(call)] == []
+    # An undeclared command or option is found.
+    assert declared(["kanban", "--board", "essai", "claim", root]) is False
+    assert declared(["kanban", "--board", "essai", "create", "x", "--assignee", "a", "--triage"]) is False
+    assert declared(["kanban", "boards", "list", "--all"]) is False
+    assert declared(["kanban", "boards", "list", "--json"]) is True

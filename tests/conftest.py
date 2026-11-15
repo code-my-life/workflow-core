@@ -5,7 +5,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import sqlite3
+import subprocess
+import sys
+import threading
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -227,11 +232,29 @@ def make_board(
     return base
 
 
+# The runtime's help of each command the adapter runs, as `COLUMNS=80 hermes kanban <command> --help` prints it for
+# Hermès 0.22.2: one file per command, its words joined by `-` (`boards-rm.txt`).
+HELP_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "hermes-help"
+
+
 def fake_version_command(folder: Path, first_line: str = VERSION_LINE) -> Path:
-    """A fake runtime command in `folder` that prints this version output; put `folder` first on the PATH."""
+    """A fake runtime command in `folder` that prints this version output, and the help of each declared command from
+    tests/fixtures/hermes-help/ (an unknown command exits with 2); put `folder` first on the PATH."""
     folder.mkdir(parents=True, exist_ok=True)
     command = folder / "hermes"
-    command.write_text(f"#!/bin/sh\nprintf '%s\\n' '{first_line}' 'Install method: git'\n", encoding="utf-8")
+    command.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = kanban ]; then\n'
+        "  shift\n"
+        '  name=""\n'
+        '  for word in "$@"; do [ "$word" = --help ] && break; name="${name:+$name-}$word"; done\n'
+        f'  [ -f "{HELP_FIXTURES}/$name.txt" ] && exec cat "{HELP_FIXTURES}/$name.txt"\n'
+        "  echo \"hermes kanban: '$1' is not a \\`hermes kanban\\` command.\" >&2\n"
+        "  exit 2\n"
+        "fi\n"
+        f"printf '%s\\n' '{first_line}' 'Install method: git'\n",
+        encoding="utf-8",
+    )
     command.chmod(0o755)
     return folder
 
@@ -406,3 +429,172 @@ def diagnosis_input_of(data: dict):
         pr_url=data["prUrl"],
         owner=data.get("owner"),
     )
+
+
+# The trial workflow's repository, as the tests use it: its manifest and sample commands.
+ESSAI_REPO = Path(__file__).resolve().parent / "fixtures" / "workflows" / "essai"
+
+
+OPTION = r"(?<![\w-]){}(?![\w-])"
+
+
+def declared(call: list[str]) -> bool:
+    """Whether a call to the runtime's command uses only a command and options the contract declares: `kanban
+    [--board <slug>] <command...> [options]`."""
+    from workflow_core.adapters import runtime_adapter
+
+    if call[:1] != ["kanban"]:
+        return False
+    rest = call[1:]
+    if rest[:1] == ["--board"]:
+        rest = rest[2:]
+    for command, options in runtime_adapter().contract.COMMANDS.items():
+        words = command.split()
+        if rest[: len(words)] == words:
+            used = []
+            for argument in rest[len(words) :]:
+                # After `--`, every word is positional; `--name=value` is the option `--name`.
+                if argument == "--":
+                    break
+                if argument.startswith("--"):
+                    used.append(argument.partition("=")[0])
+            return all(option in options for option in used)
+    return False
+
+
+def is_help_or_version(call: list[str]) -> bool:
+    return call == ["--version"] or call[-1:] == ["--help"]
+
+
+class FakeRuntime:
+    """The fake runtime command of a test (tests/fake_hermes.py): its home, its calls, its help, its version, its
+    forced failure."""
+
+    def __init__(self, home: Path, calls: Path, monkeypatch, help_dir: Path, version_file: Path) -> None:
+        self.home = home
+        self.calls_file = calls
+        self.monkeypatch = monkeypatch
+        self.help_dir = help_dir
+        self.version_file = version_file
+
+    def calls(self) -> list[list[str]]:
+        """Every call to the runtime's command, in order, as lists of arguments."""
+        if not self.calls_file.is_file():
+            return []
+        return [json.loads(line) for line in self.calls_file.read_text(encoding="utf-8").splitlines()]
+
+    def writes(self) -> list[list[str]]:
+        """The calls that are neither the version's nor a command's help."""
+        return [call for call in self.calls() if not is_help_or_version(call)]
+
+    def fail(self, command: str) -> None:
+        """Make this subcommand (or `all`) fail with code 1 and an error output."""
+        self.monkeypatch.setenv("FAKE_RUNTIME_FAIL", command)
+
+    def help_file(self, command: str) -> Path:
+        return self.help_dir / f"{'-'.join(command.split())}.txt"
+
+    def forget_option(self, command: str, option: str) -> None:
+        """Take this option out of the command's help, as a runtime that no longer has it."""
+        path = self.help_file(command)
+        amputated = re.sub(OPTION.format(re.escape(option)), "", path.read_text(encoding="utf-8"))
+        path.write_text(amputated, encoding="utf-8")
+
+    def forget_command(self, command: str) -> None:
+        """Remove the command: its help and its run exit with 2, as an unknown command."""
+        self.help_file(command).unlink()
+
+    def set_version(self, first_line: str) -> None:
+        """The first line of the version output from now on."""
+        self.version_file.write_text(f"{first_line}\nInstall method: git\n", encoding="utf-8")
+
+
+def make_fake_runtime(folder: Path) -> tuple[Path, dict[str, str]]:
+    """Write in `folder` the fake runtime command (tests/fake_hermes.py), a copy of the help fixtures and a version
+    file, again over a previous one; return its bin folder, to put first on the PATH, and the variables it reads."""
+    bin_dir = folder / "fake-bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    fake = Path(__file__).resolve().parent / "fake_hermes.py"
+    runtime = bin_dir / "hermes"
+    runtime.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{fake}" "$@"\n', encoding="utf-8")
+    runtime.chmod(0o755)
+    help_dir = folder / "runtime-help"
+    shutil.copytree(HELP_FIXTURES, help_dir, dirs_exist_ok=True)
+    version_file = folder / "runtime-version.txt"
+    version_file.write_text(f"{VERSION_LINE}\nInstall method: git\n", encoding="utf-8")
+    return bin_dir, {
+        "FAKE_RUNTIME_CALLS": str(folder / "runtime-calls.jsonl"),
+        "FAKE_RUNTIME_HELP": str(help_dir),
+        "FAKE_RUNTIME_VERSION": str(version_file),
+    }
+
+
+@pytest.fixture
+def fake_runtime(tmp_path, monkeypatch):
+    """A runtime home without any board, named by the runtime's variable, and first on the PATH a fake runtime command
+    (tests/fake_hermes.py) and a fake `uv` that runs `uv run --directory <repo> python ...` with the tests'
+    interpreter in that repository: no test runs the machine's runtime nor its uv. At its end, every call the test
+    made to the fake runtime, its help and version aside, uses only a command and options the contract declares."""
+    home = tmp_path / "runtime"
+    home.mkdir()
+    bin_dir, variables = make_fake_runtime(tmp_path)
+    uv = bin_dir / "uv"
+    uv.write_text(
+        "#!/bin/sh\n"
+        '[ "$1" = run ] && [ "$2" = --directory ] || { echo "fake uv: unexpected call $*" >&2; exit 97; }\n'
+        'cd "$3" || exit 97\n'
+        "shift 3\n"
+        f'if [ "$1" = python ]; then shift; exec "{sys.executable}" "$@"; fi\n'
+        'exec "$@"\n',
+        encoding="utf-8",
+    )
+    uv.chmod(0o755)
+    monkeypatch.setenv(RUNTIME_HOME_VAR, str(home))
+    for name, value in variables.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("FAKE_RUNTIME_FAIL", raising=False)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    runtime = FakeRuntime(
+        home,
+        Path(variables["FAKE_RUNTIME_CALLS"]),
+        monkeypatch,
+        Path(variables["FAKE_RUNTIME_HELP"]),
+        Path(variables["FAKE_RUNTIME_VERSION"]),
+    )
+    yield runtime
+    undeclared = [call for call in runtime.writes() if not declared(call)]
+    assert undeclared == [], f"calls to commands or options the contract does not declare: {undeclared}"
+
+
+@pytest.fixture(scope="module")
+def app_key(tmp_path_factory) -> Path:
+    key = tmp_path_factory.mktemp("app") / "key.pem"
+    subprocess.run(["openssl", "genrsa", "-out", str(key), "2048"], check=True, capture_output=True)
+    return key
+
+
+@pytest.fixture
+def serve(tmp_path, app_key):
+    """Serve a fake GitHub (one with a `handler()`, as `test_intake.FakeGitHub`) and return the core's real client
+    to it."""
+    from workflow_core.adapters.github import AppTokens, GitHubClient
+
+    servers: list[ThreadingHTTPServer] = []
+
+    def start(fake) -> GitHubClient:
+        env_file = tmp_path / "core.env"
+        env_file.write_text(f"GITHUB_APP_ID=1\nGITHUB_APP_PRIVATE_KEY_PATH={app_key}\n", encoding="utf-8")
+        server = ThreadingHTTPServer(("127.0.0.1", 0), fake.handler())
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        servers.append(server)
+        tokens = AppTokens(
+            environ={},
+            env_file=env_file,
+            cache_dir=tmp_path / "state",
+            api_url=f"http://127.0.0.1:{server.server_address[1]}",
+        )
+        return GitHubClient(tokens)
+
+    yield start
+    for server in servers:
+        server.shutdown()

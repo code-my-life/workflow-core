@@ -1,4 +1,5 @@
-"""The adapter to GitHub: the core's tokens of the `code-my-life-factory` App, and the issue comments it writes.
+"""The adapter to GitHub: the core's tokens of the `code-my-life-factory` App, the issue comments it reads and writes,
+and its reactions to them.
 
 The App's id and the path of its private key come from the environment, else from the core's own `.env`
 (`~/.config/workflow-core/.env`). The installation token is kept in the core's own cache, `app-token.json` of its
@@ -39,13 +40,34 @@ TIMEOUT_SECONDS = 30
 
 # The login of the App's comments.
 APP_BOT = "code-my-life-factory[bot]"
+# The variable of the owner's account, the one on whose behalf factory-live opens an issue (ADR 0010): the only author
+# whose issues and gestures a workflow takes in. Set in the core's `.env`, never written in the repository.
+OWNER_LOGIN_VARIABLE = "WORKFLOW_CORE_OWNER_LOGIN"
 
 
 @dataclass(frozen=True)
 class IssueComment:
+    """A comment of an issue. Its id, its creation time (ISO 8601, as GitHub writes it) and the contents of the App's
+    reactions to it are read only by `list_comments_since`."""
+
     author: str
     body: str
     url: str
+    id: int = 0
+    created_at: str = ""
+    app_reactions: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class OpenIssue:
+    """An open issue of a repository, as the reading of GitHub hands it to a workflow's intake command."""
+
+    number: int
+    url: str
+    title: str
+    body: str
+    author: str
+    labels: tuple[str, ...]
 
 
 class AppConfigError(Exception):
@@ -238,6 +260,77 @@ class GitHubClient:
                         author=(item.get("user") or {}).get("login") or "",
                         body=item.get("body") or "",
                         url=item.get("html_url") or "",
+                    )
+                )
+            url = next_page(headers)
+        return found
+
+    def list_comments_since(self, repo: str, number: int, since: str | None = None) -> list[IssueComment]:
+        """The comments of an issue updated from `since` on (ISO 8601 with `Z`; every comment without it), read page by
+        page (100 a page) to the last one, each with its id, its author, its body, its creation time and the contents
+        of the App's reactions. Those reactions are read, page by page, only for a comment that has some. A page that
+        cannot be read fails the whole reading."""
+        query = f"per_page={PAGE_SIZE}" + (f"&since={quote(since)}" if since else "")
+        found: list[IssueComment] = []
+        url: str | None = f"{self.tokens.api_url}/repos/{repo}/issues/{number}/comments?{query}"
+        while url:
+            answer, headers = request(url, authorization=f"token {self.tokens.token()}")
+            for item in answer if isinstance(answer, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                comment_id = int(item.get("id") or 0)
+                reactions = (item.get("reactions") or {}).get("total_count") or 0
+                found.append(
+                    IssueComment(
+                        author=(item.get("user") or {}).get("login") or "",
+                        body=item.get("body") or "",
+                        url=item.get("html_url") or "",
+                        id=comment_id,
+                        created_at=item.get("created_at") or "",
+                        app_reactions=self._app_reactions(repo, comment_id) if reactions and comment_id else (),
+                    )
+                )
+            url = next_page(headers)
+        return found
+
+    def _app_reactions(self, repo: str, comment_id: int) -> tuple[str, ...]:
+        """The contents of the App's reactions to a comment, read page by page."""
+        found: list[str] = []
+        url: str | None = (
+            f"{self.tokens.api_url}/repos/{repo}/issues/comments/{comment_id}/reactions?per_page={PAGE_SIZE}"
+        )
+        while url:
+            answer, headers = request(url, authorization=f"token {self.tokens.token()}")
+            for reaction in answer if isinstance(answer, list) else []:
+                if isinstance(reaction, dict) and (reaction.get("user") or {}).get("login") == APP_BOT:
+                    found.append(reaction.get("content") or "")
+            url = next_page(headers)
+        return tuple(found)
+
+    def add_reaction(self, repo: str, comment_id: int, content: str) -> None:
+        """React to an issue's comment in the App's name: `+1` or `confused`."""
+        self._call(f"/repos/{repo}/issues/comments/{comment_id}/reactions", method="POST", body={"content": content})
+
+    def list_open_issues(self, repo: str) -> list[OpenIssue]:
+        """Every open issue of a repository, read page by page (100 a page) to the last one, without the pull requests
+        GitHub lists among them. A page that cannot be read fails the whole reading."""
+        found: list[OpenIssue] = []
+        url: str | None = f"{self.tokens.api_url}/repos/{repo}/issues?state=open&per_page={PAGE_SIZE}"
+        while url:
+            answer, headers = request(url, authorization=f"token {self.tokens.token()}")
+            for item in answer if isinstance(answer, list) else []:
+                if not isinstance(item, dict) or "pull_request" in item:
+                    continue
+                found.append(
+                    OpenIssue(
+                        number=int(item["number"]),
+                        url=item.get("html_url") or "",
+                        title=item.get("title") or "",
+                        body=item.get("body") or "",
+                        author=(item.get("user") or {}).get("login") or "",
+                        labels=tuple(
+                            label.get("name") or "" for label in item.get("labels") or [] if isinstance(label, dict)
+                        ),
                     )
                 )
             url = next_page(headers)

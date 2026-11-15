@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -18,6 +20,7 @@ from workflow_core.adapters.hermes.board import (
     CARD_FACT_COLUMNS,
     COMMENT_COLUMNS,
     EVENT_COLUMNS,
+    ITEM_CARD_COLUMNS,
     LINK_COLUMNS,
     RUN_COLUMNS,
     RUN_FACT_COLUMNS,
@@ -43,6 +46,7 @@ from workflow_core.adapters.hermes.sessions import (
 )
 from workflow_core.adapters.hermes.values import dotted
 from workflow_core.adapters.hermes.version import read_runtime_version
+from workflow_core.adapters.hermes.writer import COMMAND
 from workflow_core.clock import utc_now
 from workflow_core.model.board import BoardUnavailableError
 from workflow_core.model.contract import ContractVerdict
@@ -56,10 +60,15 @@ class Table:
     nullable: frozenset[str] = frozenset()
 
 
-# What the adapter reads of Hermès 0.22.2. Every story that reads something new adds it here.
+# What the adapter reads of Hermès 0.22.2. Every story that reads something new adds it here. The items' columns
+# (ITEM_CARD_COLUMNS) carry `idempotency_key`, by which the engine knows a root card, and reads the child cards of an
+# item by the prefix `<item>/` of their key. The engine reads the `id` of the `created` and `assigned` events in
+# task_events: a root card's last `assigned` event and a child's `created` event say which child is the one of the
+# passage in progress. Of a child's `blocked` and `block_loop_detected` events, the payload's `reason` is read when
+# present, for the journal only.
 CONTRACT: dict[str, Table] = {
     "tasks": Table(
-        columns=CARD_COLUMNS + CARD_FACT_COLUMNS,
+        columns=tuple(dict.fromkeys(CARD_COLUMNS + CARD_FACT_COLUMNS + ITEM_CARD_COLUMNS)),
         values={
             "status": frozenset(
                 {"triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done", "archived"}
@@ -73,6 +82,57 @@ CONTRACT: dict[str, Table] = {
     "task_comments": Table(columns=COMMENT_COLUMNS),
     "task_events": Table(columns=EVENT_COLUMNS),
 }
+# What the adapter writes to Hermès: each `hermes kanban [--board <slug>] <command>` the writer runs (writer.py), with
+# the options it passes. Every story that runs a new command or option adds it here: the contract checks each one in
+# the command's `--help`, and the tests check that every call of the fake runtime is declared. `create --parent` is
+# used by the write cycle only (write_cycle.py): the child card of an `agent` station depends on that behavior, and is
+# created by `create` without `--parent` (and never linked), its `--body` on several lines.
+# `boards list --json` reads the slugs without parsing a table; `show --json` is declared for the next stories.
+COMMANDS: dict[str, tuple[str, ...]] = {
+    "boards create": (),
+    "boards list": ("--json",),
+    "boards rm": ("--delete",),
+    "create": ("--assignee", "--idempotency-key", "--body", "--parent", "--json"),
+    "assign": (),
+    "schedule": (),
+    "unblock": (),
+    "block": ("--kind",),
+    "comment": (),
+    "complete": ("--result",),
+    "show": ("--json",),
+}
+HELP_TIMEOUT_SECONDS = 10.0
+
+
+def _help_problems(command: str, options: tuple[str, ...]) -> list[str]:
+    """The problems of one declared command: absent, or each declared option missing from its `--help`."""
+    try:
+        result = subprocess.run(
+            [COMMAND, "kanban", *command.split(), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=HELP_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return [f"commande `{command}` absente"]
+    if result.returncode != 0:
+        return [f"commande `{command}` absente"]
+    # `--body` is not found in `--body-file`.
+    return [
+        f"commande `{command}` : option `{option}` absente"
+        for option in options
+        if re.search(rf"(?<![\w-]){re.escape(option)}(?![\w-])", result.stdout) is None
+    ]
+
+
+def command_problems() -> list[str]:
+    """Every declared command absent from the installed Hermès, or missing a declared option, in declaration order."""
+    with ThreadPoolExecutor(max_workers=len(COMMANDS)) as pool:
+        found = list(pool.map(lambda declared: _help_problems(*declared), COMMANDS.items()))
+    return [problem for problems in found for problem in problems]
+
+
 # The payloads the adapter reads in task_events: for each kind of event, the keys whose value must be a text. The
 # notifier reads the reason of the runtime's respawn guard (`active_pr` for a held card).
 EVENT_PAYLOADS: dict[str, tuple[str, ...]] = {"respawn_guarded": ("reason",)}
@@ -336,7 +396,8 @@ def card_log_problems(reader: HermesBoardReader, board: str) -> list[str]:
 
 
 def check_contract(boards: list[str], environ: dict[str, str] | None = None) -> ContractVerdict:
-    """Check the contract against the base of each named board, read-only, and against the version output."""
+    """Check the contract against the base of each named board, read-only, against the version output, and against
+    the help of each declared command."""
     reader = make_board_reader(environ)
     problems = [problem for board in boards for problem in board_problems(reader, board)]
     problems += [problem for board in boards for problem in card_log_problems(reader, board)]
@@ -347,6 +408,7 @@ def check_contract(boards: list[str], environ: dict[str, str] | None = None) -> 
     _, version_problem = read_runtime_version()
     if version_problem is not None:
         problems.append(version_problem)
+    problems += command_problems()
     return ContractVerdict(
         ok=not problems,
         checked_at=utc_now(),

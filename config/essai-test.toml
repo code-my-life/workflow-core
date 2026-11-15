@@ -1,0 +1,10 @@
+# The test machine's configuration (docs/RUNBOOK.md, « La machine de test »): a second core, launched from a branch
+# with WORKFLOW_CORE_CONFIG=config/essai-test.toml, serves only the trial workflow, plugged by its manifest, on its own
+# board `essai-test` of the same runtime. The production configuration stays config/workflows.toml.
+
+[[workflow]]
+key = "essai"
+repo = "~/perso/workflow-essai"
+board = "essai-test"
+# Only the issues labelled `test` are taken in by the test machine: the production core leaves them out.
+issue_label = "test"

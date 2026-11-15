@@ -25,3 +25,18 @@ def read_runtime_version() -> tuple[str | None, str | None]:
     if result.returncode != 0 or match is None:
         return None, f"version : première ligne inattendue « {first} » (code {result.returncode})"
     return match["version"], None
+
+
+# Seconds between two reads of the version while the core runs (ADR 0019).
+VERSION_CHECK_SECONDS = 300
+
+
+def version_change(reference: str | None, read=read_runtime_version) -> str | None:
+    """The problem when the installed version is no longer the one the contract was checked against, None when it
+    is."""
+    version, _ = read()
+    if version is None:
+        return f"version d'Hermès changée : {reference} → illisible"
+    if version != reference:
+        return f"version d'Hermès changée : {reference} → {version}"
+    return None

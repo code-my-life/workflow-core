@@ -1,6 +1,6 @@
 # ADR 0007 : le socle seul écrit dans `~/.hermes`, depuis la somme des besoins déclarés
 
-Date : 2026-11-11. Statut : accepté. Reprise de la décision AD-7 de l'architecture du chantier archi-studio
+Date : 2026-11-11. Statut : accepté, amendé le 2026-11-12. Reprise de la décision AD-7 de l'architecture du chantier archi-studio
 (2026-11-11), qui la donne pour adoptée.
 
 ## Contexte
@@ -18,3 +18,7 @@ L'architecture du chantier ne détaille pas d'option écartée pour cette décis
 ## Conséquences
 
 Exigences et dépôts tenus par cette décision : R7, R8, R18.
+
+## Amendement du 2026-11-12
+
+Reprise de l'amendement AD-7 de l'architecture du chantier archi-studio (2026-11-12). Un board est une donnée du kanban, pas un réglage de la machine : le socle crée le board d'un workflow par l'adaptateur, comme il y crée les cartes.

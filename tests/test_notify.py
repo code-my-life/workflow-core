@@ -631,3 +631,64 @@ def test_a_blocked_alert_names_the_owner_not_an_account(home, tmp_path):
     # No GitHub account is named: no mention, and no login between backquotes but the workflow's and the card's.
     assert "@" not in body
     assert "seul `" not in body
+
+
+def test_the_factory_alerts_keep_their_text_and_key(home, tmp_path):
+    make_board(
+        home,
+        "factory",
+        [
+            card("t_ab12cd34", title="Le juge refuse une fiche", body=f"Issue : {ISSUE}"),
+            held_card("t_00000001"),
+        ],
+        events=[
+            blocked(5509, "t_ab12cd34", NOON + 60),
+            event(1, "t_00000001", "created", READY),
+            guarded(2, "t_00000001", READY),
+        ],
+    )
+    github = FakeGitHub()
+
+    notifier(tmp_path, github, now=READY + 31 * 60, workflows=HELD_WORKFLOWS).run_pass()
+
+    assert [(repo, number) for repo, number, _ in github.posted] == [("code-my-life/workflow-core", 99)] * 2
+    blocked_body = next(body for _, _, body in github.posted if "t_ab12cd34" in body)
+    held_body = next(body for _, _, body in github.posted if "t_00000001" in body)
+    assert blocked_body == (
+        "### ⏸ Décision attendue\n"
+        "Workflow `factory` · élément `factory:workflow-core#99` · carte `t_ab12cd34` : Le juge refuse une fiche\n"
+        "\n"
+        "**Question de l'agent**\n"
+        "\n"
+        "> Faut-il garder l'ancienne route ?\n"
+        "\n"
+        "**Pour répondre** (seul le propriétaire est écouté) : commente sur cette issue\n"
+        "```\n"
+        "/factory unblock ta décision ou ta réponse\n"
+        "```\n"
+        "\n"
+        f"[Voir l'élément dans factory-live]({LIVE}/issues/workflow-core/99)\n"
+        "\n"
+        "<sub>Alerte du socle workflow-core</sub>\n"
+        "\n"
+        "<!-- workflow-core:attente factory:needs_input:t_ab12cd34:5509 -->"
+    )
+    assert held_body == (
+        "### ⚠️ Carte prête mais retenue\n"
+        "Workflow `factory` · élément `factory:workflow-core#99` · carte `t_00000001` : Le juge refuse une fiche\n"
+        "\n"
+        "Prête depuis 31 min, aucun agent ne la prend : la garde `active_pr` la retient (un commentaire de la carte "
+        "cite déjà sa pull request, et aucun relais n'a suivi). Ne pas la bloquer : elle passerait en triage.\n"
+        "\n"
+        "**Relance** (opérateur) :\n"
+        "```\n"
+        'hermes kanban --board factory reassign t_00000001 scribe --reason "relais active_pr" && '
+        'hermes kanban --board factory reassign t_00000001 coder --reason "reprise sur la PR"\n'
+        "```\n"
+        "\n"
+        f"[Voir l'élément dans factory-live]({LIVE}/issues/workflow-core/99)\n"
+        "\n"
+        "<sub>Alerte du socle workflow-core</sub>\n"
+        "\n"
+        f"<!-- workflow-core:attente factory:held_active_pr:t_00000001:{int(READY)} -->"
+    )

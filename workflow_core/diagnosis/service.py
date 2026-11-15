@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 
 from workflow_core.config import Workflow
 from workflow_core.diagnosis.diagnose import diagnose
@@ -113,10 +113,11 @@ def diagnosis_input(
 
 
 def diagnose_card(
-    facts: CardFacts, workflow: Workflow, now: float, sources: DiagnosisSources
+    facts: CardFacts, workflow: Workflow, now: float, sources: DiagnosisSources, *, lanes: Collection[str] = ()
 ) -> tuple[Trigger, Diagnosis] | None:
-    """The trigger of a card and its diagnosis; `None` when the card is not a trigger."""
-    trigger = trigger_of(facts, workflow, now)
+    """The trigger of a card and its diagnosis; `None` when the card is not a trigger. `lanes`: the workflow's lanes,
+    whose cards are never held (`trigger_of`)."""
+    trigger = trigger_of(facts, workflow, now, lanes=lanes)
     if trigger is None:
         return None
     input = diagnosis_input(facts, trigger.event, workflow.board, now, sources, workflow)
@@ -124,12 +125,12 @@ def diagnose_card(
 
 
 def diagnose_board(
-    cards: list[CardFacts], workflow: Workflow, now: float, sources: DiagnosisSources
+    cards: list[CardFacts], workflow: Workflow, now: float, sources: DiagnosisSources, *, lanes: Collection[str] = ()
 ) -> list[tuple[Trigger, Diagnosis]]:
-    """Every trigger of a board with its diagnosis, by opening time."""
+    """Every trigger of a board with its diagnosis, by opening time; `lanes` as for `diagnose_card`."""
     by_id = {facts.card.id: facts for facts in cards}
     found = []
-    for trigger in triggers_of(cards, workflow, now):
+    for trigger in triggers_of(cards, workflow, now, lanes=lanes):
         input = diagnosis_input(by_id[trigger.card], trigger.event, workflow.board, now, sources, workflow)
         found.append((trigger, diagnose(input, sources.texts, workflow)))
     return found

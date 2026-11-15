@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from conftest import FACTORY_CARDS, STUDIO_CARDS, fake_version_command, make_board
+from conftest import FACTORY_CARDS, STUDIO_CARDS, fake_version_command, make_board, make_fake_runtime
 
 ROOT = Path(__file__).resolve().parent.parent
 UNIT = ROOT / "systemd" / "workflow-core.service"
@@ -79,8 +79,10 @@ def run_install(home: Path, calls: Path, runtime_home: Path | None = None) -> su
     fake = bin_dir / "systemctl"
     fake.write_text(f'#!/bin/sh\necho "$@" >> {calls}\n', encoding="utf-8")
     fake.chmod(0o755)
-    fake_version_command(bin_dir)
-    env = {**os.environ, "HOME": str(home), "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+    # The fake runtime command: the contract's write cycle runs on it, in the given runtime home.
+    runtime_bin, variables = make_fake_runtime(home / "fake-runtime")
+    path = os.pathsep.join([str(bin_dir), str(runtime_bin), os.environ["PATH"]])
+    env = {**os.environ, **variables, "HOME": str(home), "PATH": path}
     env.pop("XDG_CONFIG_HOME", None)
     env[RUNTIME_HOME_VAR] = str(runtime_home or home / "no-runtime")
     return subprocess.run(["bash", str(INSTALL)], env=env, capture_output=True, text=True, timeout=30)
@@ -125,7 +127,8 @@ def test_the_install_runs_the_contract_tests_and_reports_a_failure(tmp_path):
     kept = run_install(home, calls, runtime)
     assert kept.returncode == 0, kept.stdout + kept.stderr
     assert "tests/contract" in kept.stdout
-    assert "2 passed" in kept.stdout
+    # The checks of the bases, of the version line and of the commands, and the write cycle on the fake runtime.
+    assert "4 passed" in kept.stdout
 
     with sqlite3.connect(base) as db:
         db.execute("ALTER TABLE tasks DROP COLUMN assignee")

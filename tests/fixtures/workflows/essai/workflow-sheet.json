@@ -1,0 +1,13 @@
+{
+  "item": { "type": "essai", "label": "Essai" },
+  "stations": [
+    { "key": "preparer", "label": "Préparer", "icon": "dot", "kind": "script", "col": 0, "row": 0 },
+    { "key": "revue", "label": "Revue", "icon": "dot", "kind": "owner", "col": 1, "row": 0 },
+    { "key": "clore", "label": "Clore", "icon": "dot", "kind": "script", "col": 2, "row": 0 }
+  ],
+  "edges": [
+    { "from": "preparer", "to": "revue", "kind": "line" },
+    { "from": "revue", "to": "clore", "kind": "line" }
+  ],
+  "models": []
+}

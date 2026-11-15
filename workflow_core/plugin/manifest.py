@@ -1,0 +1,190 @@
+"""Plug a workflow by its manifest: `<repo>/workflow-manifest.json`, judged at the start (ADR 0005, amended; ADR 0006).
+
+The manifest is judged by `judge_manifest`, with its sheet read from the repository and the lanes still in use on the
+workflow's board, read through the card reader without writing. A manifest that is absent, unreadable or refused
+leaves its workflow unplugged, with the reason; the other workflows run.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from pathlib import Path
+
+from pydantic import ValidationError
+
+from workflow_core.config import Workflow
+from workflow_core.model.board import BoardReader, BoardUnavailableError, Item
+from workflow_core.model.manifest import (
+    ManifestGesture,
+    ManifestIntake,
+    ManifestStation,
+    judge_manifest,
+    published_sheet,
+)
+from workflow_core.model.sheet import WorkflowSheet
+
+MANIFEST_FILE = "workflow-manifest.json"
+# The statuses of a card that holds nothing any more.
+FINISHED = ("done", "archived")
+# The first GitHub issue address of a card's body is its item's issue.
+ISSUE_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/issues/\d+", re.ASCII)
+
+
+class ManifestRefusedError(Exception):
+    """A workflow left unplugged, with its reason in French."""
+
+    def __init__(self, key: str, reason: str) -> None:
+        super().__init__(f"workflow {key} non branché : {reason}")
+        self.key = key
+        self.reason = reason
+
+
+@dataclass(frozen=True)
+class PluggedWorkflow:
+    """A workflow plugged by its manifest: its key, its board, its repository, its stations in order, the repositories
+    of its issues and its intake command, the label its issues must carry (None: any but `test`), the names of the
+    gestures the owner gives by a comment on an item's issue, the sheet the API serves (judged at the plugging, its
+    stations' agents taken from the manifest), and every gesture of the manifest, in its order."""
+
+    key: str
+    board: str
+    repo: Path
+    stations: tuple[ManifestStation, ...]
+    issues_repos: tuple[str, ...] = ()
+    intake: ManifestIntake | None = None
+    issue_label: str | None = None
+    gestures: tuple[str, ...] = ()
+    sheet: WorkflowSheet | None = None
+    declared_gestures: tuple[ManifestGesture, ...] = ()
+
+    def lane(self, station: str) -> str:
+        """The lane of a station, `<key>-<station>`: the assignee of a card that stands there, never a profile."""
+        return f"{self.key}-{station}"
+
+    def station_of_lane(self, assignee: str | None) -> ManifestStation | None:
+        return next((station for station in self.stations if self.lane(station.key) == assignee), None)
+
+    def station(self, key: str) -> ManifestStation | None:
+        return next((station for station in self.stations if station.key == key), None)
+
+    def next_station(self, key: str) -> ManifestStation | None:
+        """The station after this one in the manifest; None after the last."""
+        keys = [station.key for station in self.stations]
+        index = keys.index(key)
+        return self.stations[index + 1] if index + 1 < len(self.stations) else None
+
+    def label(self, key: str) -> str:
+        """The label of a station in the workflow's sheet, else its key."""
+        stations = self.sheet.stations if self.sheet is not None else []
+        return next((station.label for station in stations if station.key == key), key)
+
+
+def lanes_of(workflow: PluggedWorkflow) -> frozenset[str]:
+    """The lanes of a plugged workflow: `<key>-<station>` for every station of its manifest, whatever its nature."""
+    return frozenset(workflow.lane(station.key) for station in workflow.stations)
+
+
+def is_root_key(idempotency: str | None, key: str) -> bool:
+    """Whether an idempotency key is the one of an item's root card of this workflow: `<key>:<local id>`."""
+    idempotency = idempotency or ""
+    return idempotency.startswith(f"{key}:") and len(idempotency) > len(key) + 1 and "/" not in idempotency
+
+
+def is_root_card(item: Item, key: str) -> bool:
+    """Whether the card is the root card of an item of this workflow: its idempotency key is `<key>:<local id>`."""
+    return is_root_key(item.idempotency_key, key)
+
+
+def child_of(idempotency: str | None, key: str) -> tuple[str, str] | None:
+    """`(item, station)` of a child card of this workflow, its idempotency key `<item>/<station>/<passage>`; None for
+    any other card."""
+    parts = (idempotency or "").split("/")
+    if len(parts) != 3 or not is_root_key(parts[0], key) or not parts[1] or not parts[2].isdecimal():
+        return None
+    return parts[0], parts[1]
+
+
+def issue_of(body: str | None) -> str | None:
+    """The item's issue: the first GitHub issue address of a card's body."""
+    found = ISSUE_URL.search(body or "")
+    return found[0] if found else None
+
+
+def wait_id(workflow: PluggedWorkflow, card: str, status: str, assignee: str | None, events: Iterable) -> str | None:
+    """The id of a root card's open wait, `<key>:owner:<card>:<event>` from the card's last `scheduled` event, when
+    the card waits (`scheduled`) at the lane of an `owner` station; None otherwise. `events` are the card's events by
+    id, each with its `id` and its `kind` (an item's as a card's facts)."""
+    station = workflow.station_of_lane(assignee)
+    if status != "scheduled" or station is None or station.nature != "owner":
+        return None
+    event = next((event for event in reversed(list(events)) if event.kind == "scheduled"), None)
+    return None if event is None else f"{workflow.key}:owner:{card}:{event.id}"
+
+
+def lanes_in_use(reader: BoardReader, key: str, board: str) -> set[str]:
+    """The lanes the workflow's unfinished root cards are assigned to. A board whose base does not exist yet holds
+    nothing: the workflow is new. Only reads."""
+    try:
+        items = reader.read_items(board)
+    except BoardUnavailableError:
+        return set()
+    return {
+        item.assignee for item in items if item.assignee and item.status not in FINISHED and is_root_card(item, key)
+    }
+
+
+def _why(error: Exception) -> str:
+    if isinstance(error, ValidationError) and error.errors():
+        first = error.errors()[0]
+        return f"{'.'.join(str(part) for part in first['loc']) or 'racine'} : {first['msg']}"
+    return str(error) or type(error).__name__
+
+
+def plug(
+    workflow: Workflow, *, reader: BoardReader | None = None, issues_repos_taken: Mapping[str, str] | None = None
+) -> PluggedWorkflow:
+    """The workflow plugged by the manifest of its repository, once judged; `ManifestRefusedError` with the reason
+    otherwise. Without a reader, no lane is in use; `issues_repos_taken` maps the issues repositories of the workflows
+    already plugged to their keys."""
+    key = workflow.key
+    repo = workflow.repo_path
+    if repo is None:
+        raise ManifestRefusedError(key, "aucun dépôt déclaré")
+    path = repo / MANIFEST_FILE
+    if not path.is_file():
+        raise ManifestRefusedError(key, f"manifeste absent : {path}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ManifestRefusedError(key, f"manifeste illisible : {path} ({_why(error)})") from error
+    lanes: set[str] = set()
+    if reader is not None:
+        try:
+            lanes = lanes_in_use(reader, key, workflow.board)
+        except Exception as error:
+            raise ManifestRefusedError(key, f"voies en usage illisibles : {_why(error)}") from error
+
+    def read_sheet(relative: str) -> object:
+        return json.loads((repo / relative).read_text(encoding="utf-8"))
+
+    verdict = judge_manifest(
+        data, key=key, read_sheet=read_sheet, lanes_in_use=lanes, issues_repos_taken=issues_repos_taken
+    )
+    if not verdict.ok:
+        raise ManifestRefusedError(key, f"manifeste de {key} refusé : {verdict.rule} : {verdict.detail}")
+    manifest = verdict.manifest
+    return PluggedWorkflow(
+        key=key,
+        board=workflow.board,
+        repo=repo,
+        stations=tuple(manifest.stations),
+        issues_repos=tuple(manifest.issues_repos),
+        intake=manifest.intake,
+        issue_label=workflow.issue_label,
+        gestures=tuple(gesture.name for gesture in manifest.gestures if gesture.kind == "comment"),
+        sheet=published_sheet(manifest, verdict.sheet),
+        declared_gestures=tuple(manifest.gestures),
+    )

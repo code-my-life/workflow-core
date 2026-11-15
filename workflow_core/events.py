@@ -354,12 +354,15 @@ class EventHub:
             self.journal.close()
 
     def _sheet_changed(self, key: str, workflow: Workflow) -> bool:
-        """True when the workflow's sheet file changed since the last probe; never at the first one."""
-        try:
-            found = workflow.sheet_path.stat()
-            stamp: tuple[int, int] | None = (found.st_mtime_ns, found.st_size)
-        except OSError:
-            stamp = None
+        """True when the workflow's sheet file changed since the last probe; never at the first one. A workflow
+        plugged by its manifest has no sheet file: its sheet is fixed at the start, never changed."""
+        stamp: tuple[int, int] | None = None
+        if workflow.sheet is not None:
+            try:
+                found = workflow.sheet_path.stat()
+                stamp = (found.st_mtime_ns, found.st_size)
+            except OSError:
+                stamp = None
         if key not in self._sheet_stamps:
             self._sheet_stamps[key] = stamp
             return False

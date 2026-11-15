@@ -10,6 +10,7 @@ from the workflow's entry (`default_agent`, `relay_agent`), and the gesture from
 from __future__ import annotations
 
 import math
+from collections.abc import Collection
 
 from workflow_core.clock import iso_ms
 from workflow_core.config import Workflow
@@ -150,9 +151,13 @@ def build(trigger: Trigger, facts: CardFacts, workflow: Workflow, now: float, te
     )
 
 
-def interventions_of(cards: list[CardFacts], workflow: Workflow, now: float, texts: RuntimeTexts) -> list[Intervention]:
-    """The open interventions of a board's cards, by opening time."""
+def interventions_of(
+    cards: list[CardFacts], workflow: Workflow, now: float, texts: RuntimeTexts, *, lanes: Collection[str] = ()
+) -> list[Intervention]:
+    """The open interventions of a board's cards, by opening time; the cards of the workflow's `lanes` are never
+    held (`trigger_of`)."""
     by_card = {facts.card.id: facts for facts in cards}
     return [
-        build(trigger, by_card[trigger.card], workflow, now, texts) for trigger in triggers_of(cards, workflow, now)
+        build(trigger, by_card[trigger.card], workflow, now, texts)
+        for trigger in triggers_of(cards, workflow, now, lanes=lanes)
     ]
