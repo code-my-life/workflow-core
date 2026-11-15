@@ -18,7 +18,7 @@ from urllib.parse import quote
 from workflow_core.adapters.hermes.board import hermes_home
 from workflow_core.model.checks import MachineCheck, machine_check
 
-GROUP = "hermes"
+GROUP = "runtime"
 # A gateway whose last heartbeat is older than this is down.
 GATEWAY_ALIVE_SECONDS = 90
 LLAMA_TIMEOUT_SECONDS = 1.5
