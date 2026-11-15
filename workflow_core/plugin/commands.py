@@ -4,12 +4,14 @@ The command runs as `uv run --directory <repo> <command...>`, launched with a li
 in its own process group. Its input is a JSON object on its standard input:
 `{"schema_version": 1, "item": {"id", "issue", "title"}, "station", "attempt", "answer"}`; its output, on its standard
 output, is a decision `{"decision", "reason", "to"}`. A command past its delay is killed with its whole group and
-becomes `fail`; an output that is not a decision becomes `fail` too. Its error output goes to the journal, 2,000
+becomes `fail`; a command that ends with an exit code other than 0 becomes `fail` (« code de sortie <n> »), whatever
+its output; an output that is not a decision becomes `fail` too. Its error output goes to the journal, 2,000
 characters at most.
 
 A workflow's intake command runs the same way, with `{"schema_version": 1, "issue": {"repo", "number", "url",
 "title", "body", "labels"}}` on its input; its output is `{"decision": "accept", "id"}` or `{"decision": "refuse",
-"reason"}`. A launch that fails, a delay passed or an unreadable output is no decision at all.
+"reason"}`. A launch that fails, a delay passed, an exit code other than 0 or an unreadable output is no decision at
+all.
 """
 
 from __future__ import annotations
@@ -86,7 +88,9 @@ def _launch(
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            # A byte that is no UTF-8 is replaced, never raised: an output so damaged is no decision.
+            encoding="utf-8",
+            errors="replace",
             start_new_session=True,
             env=environ,
         )
@@ -108,6 +112,16 @@ def _launch(
     return _Ran(stdout=stdout, code=process.returncode)
 
 
+def _exit_problem(ran: _Ran, log: Callable[[str], None], label: str) -> str | None:
+    """« code de sortie <n> » for a command that ended with an exit code other than 0, written to the journal; None
+    otherwise."""
+    if ran.code == 0:
+        return None
+    problem = f"code de sortie {ran.code}"
+    log(f"<3>workflow-core: {label} : {problem}")
+    return problem
+
+
 def _unreadable(ran: _Ran, log: Callable[[str], None], label: str) -> None:
     log(f"<3>workflow-core: {label} : {UNREADABLE} (code {ran.code}) : {ran.stdout[:STDERR_LIMIT]!r}")
 
@@ -125,6 +139,9 @@ def run_command(
     ran = _launch(repo, command, payload, timeout, log, label)
     if ran.problem is not None:
         return Decision.fail(ran.problem)
+    exited = _exit_problem(ran, log, label)
+    if exited is not None:
+        return Decision.fail(exited)
     try:
         return Decision.model_validate(json.loads(ran.stdout))
     except (ValueError, ValidationError):
@@ -150,12 +167,14 @@ def run_intake(
     label: str = "intake",
 ) -> IntakeDecision | None:
     """Run a workflow's intake command on an issue and return its decision; None when it could not be launched, ran
-    past its delay or gave an unreadable output, each written to the journal: none of them is a decision. Never
-    raises."""
+    past its delay, ended with an exit code other than 0 or gave an unreadable output, each written to the journal:
+    none of them is a decision. Never raises."""
     ran = _launch(repo, command, payload, timeout, log, label)
     if ran.problem is not None:
         if not ran.told:
             log(f"<3>workflow-core: {label} : {ran.problem}")
+        return None
+    if _exit_problem(ran, log, label) is not None:
         return None
     try:
         return IntakeDecision.model_validate(json.loads(ran.stdout))

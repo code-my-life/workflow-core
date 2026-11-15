@@ -1,10 +1,13 @@
 """The write cycle of the contract test: every command the writer runs, done once on a throwaway board and read back
 (ADR 0001, amended; ADR 0019).
 
-The board is `contrat-<Unix time>`, never a board in service. Its cards are assigned to names that are not profiles,
-so Hermès' dispatcher never launches them. After each step, the board is read again by the read-only reader and the
-expected state is checked. The board is removed at the end, even after a failed step; a `contrat-*` board left by an
-interrupted cycle is removed first.
+The board is `workflow-core-contrat-<Unix time>`, a prefix reserved to the cycle, never a board in service. Its cards
+are assigned to names that are not profiles, so Hermès' dispatcher never launches them. After each step, the board is
+read again by the read-only reader and the expected state is checked. `schedule` and `block` are called as the engine
+calls them: with a reason, the `scheduled` event read back (the wait's id depends on it), and the block kinds in turn
+(`needs_input`, `unblock`, `capability`), the card staying `blocked`, never in `triage`. The board is removed at the
+end, even after a failed step; a board of the reserved prefix left by an interrupted cycle is removed first, and no
+other.
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ from workflow_core.adapters.hermes.writer import HermesBoardWriter
 from workflow_core.model.board import BoardUnavailableError, Item, child_cards
 from workflow_core.model.writer import BoardWriteError
 
-THROWAWAY_PREFIX = "contrat-"
+THROWAWAY_PREFIX = "workflow-core-contrat-"
 # Assignees that are not profiles: the dispatcher never launches their cards.
 FIRST_ASSIGNEE = "contrat-premier"
 SECOND_ASSIGNEE = "contrat-second"
@@ -31,6 +34,9 @@ CHILD_KEY = f"{KEY}/contrat/1"
 CHILD_BODY = f"{KEY}\n{BODY}"
 COMMENT = "Commentaire du cycle d'écriture."
 RESULT = "cycle d'écriture tenu"
+SCHEDULE_REASON = "contrat : en attente"
+FIRST_BLOCK = "contrat : premier blocage"
+SECOND_BLOCK = "contrat : second blocage"
 
 
 class WriteCycleError(Exception):
@@ -130,19 +136,28 @@ def _steps(writer: HermesBoardWriter, reader: HermesBoardReader, board: str) -> 
     if created is None or created <= arrived:
         raise WriteCycleError(step, f"événement created relu « {created} », attendu après l'assignation « {arrived} »")
 
-    _do("schedule", lambda: writer.schedule(board, first))
-    _expect("schedule", "statut", _read(reader, board, first, "schedule").status, "scheduled")
+    # As the engine parks a card: with a reason, its `scheduled` event the wait's id.
+    _do("schedule", lambda: writer.schedule(board, first, SCHEDULE_REASON))
+    card = _read(reader, board, first, "schedule")
+    _expect("schedule", "statut", card.status, "scheduled")
+    _expect("schedule", "dernier événement", card.events[-1].kind if card.events else None, "scheduled")
+    _expect("schedule", "raison de l'événement scheduled", card.events[-1].payload.get("reason"), SCHEDULE_REASON)
 
     _do("unblock", lambda: writer.unblock(board, first))
     _expect("unblock", "statut", _read(reader, board, first, "unblock").status, "ready")
 
-    _do("block", lambda: writer.block(board, first, kind="needs_input"))
-    card = _read(reader, board, first, "block")
-    _expect("block", "statut", card.status, "blocked")
-    _expect("block", "type de blocage", card.block_kind, "needs_input")
-
-    _do("unblock (après block)", lambda: writer.unblock(board, first))
-    _expect("unblock (après block)", "statut", _read(reader, board, first, "unblock (après block)").status, "ready")
+    # As the engine blocks a card: with a reason, the kinds in turn; the card stays blocked, never in triage.
+    for step, kind, reason in (
+        ("block --kind needs_input", "needs_input", FIRST_BLOCK),
+        ("block --kind capability", "capability", SECOND_BLOCK),
+    ):
+        _do(step, lambda kind=kind, reason=reason: writer.block(board, first, reason, kind=kind))
+        card = _read(reader, board, first, step)
+        _expect(step, "statut", card.status, "blocked")
+        _expect(step, "type de blocage", card.block_kind, kind)
+        unblocked = f"unblock (après {step})"
+        _do(unblocked, lambda: writer.unblock(board, first))
+        _expect(unblocked, "statut", _read(reader, board, first, unblocked).status, "ready")
 
     _do("comment", lambda: writer.comment(board, first, COMMENT))
     bodies = [comment.body for comment in _read(reader, board, first, "comment").comments]

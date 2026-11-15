@@ -13,9 +13,13 @@ It notes each call (one JSON list of arguments per line, in the file named by FA
   (payload `{"assignee", "from"}`); `schedule`, `unblock`, `block` and `complete`
   start only from their allowed statuses (otherwise code 1, « cannot <command> <card> »), and each writes its event
   in `task_events` (`scheduled`, `unblocked`, `blocked`, `completed`), its payload `{"reason"}` when it has one
-  (`{"result"}` for `complete`). As the runtime's unblock-loop guard, `unblock` keeps the block's kind and
-  recurrences, a `block` of the same kind as the stored one (None equal to None) counts one more recurrence (one
-  otherwise), and at the second the card goes to `triage` with a `block_loop_detected` event; `complete` clears both.
+  (`{"result"}` for `complete`, which refuses a blank result, code 1, as the runtime's empty-completion gate). As
+  the runtime's unblock-loop guard, `unblock` keeps the block's kind and recurrences, a `block` of the same kind as
+  the stored one (None equal to None) counts one more recurrence (one otherwise), and at the second the card goes to
+  `triage` with a `block_loop_detected` event; `complete` clears both.
+Its card commands read their words as the runtime's parser (argparse): `--name=value` is an option and its value,
+every word after `--` is positional, and a word that looks like an option (`-x`: a `-` first, no space) where a value
+is expected, or unknown, is refused with code 2.
 FAKE_RUNTIME_FAIL names a subcommand (or `all`) that fails with code 1 and an error output. The tests never run the
 machine's runtime.
 """
@@ -106,6 +110,13 @@ def lifecycle(db: sqlite3.Connection, command: list[str], card: str, now: int) -
         if rest[:1] != ["--result"] or len(rest) != 2:
             return None
         result, rest = rest[1], []
+        # As the runtime's empty-completion gate: a blank result, without a result stored, completes nothing.
+        (stored,) = db.execute("SELECT result FROM tasks WHERE id = ?", (card,)).fetchone()
+        if not result.strip() and not (stored or "").strip():
+            print(
+                f"cannot complete {card}: completion blocked: {card} has no result or summary evidence", file=sys.stderr
+            )
+            return 1
     if len(rest) > 1 or (name == "unblock" and rest):
         return None
     reason = rest[0] if rest else None
@@ -147,8 +158,60 @@ def lifecycle(db: sqlite3.Connection, command: list[str], card: str, now: int) -
     return 0
 
 
+# The options of the card commands, as the runtime's parser knows them: those that take a value, and the flags.
+VALUED = {"--assignee", "--idempotency-key", "--body", "--parent", "--kind", "--result"}
+FLAGS = {"--json"}
+
+
+def looks_like_option(word: str) -> bool:
+    """As argparse: a known option, alone or as `--name=value` (spaces in the value included), or else a word
+    starting with `-`, without a space and not `-` alone, is an option, never a value."""
+    if word.partition("=")[0] in VALUED | FLAGS:
+        return True
+    return word.startswith("-") and word != "-" and " " not in word
+
+
+def parsed(command: list[str]) -> list[str] | None:
+    """A card command as the runtime's parser reads it, put back in one form: its name, its positional arguments, then
+    each option and its value. `--name=value` is one option; after `--`, every word is positional. None, with the
+    parser's error on the error output, for a word that looks like an option where a value is expected, or an
+    unknown option."""
+    name, words = command[0], command[1:]
+    positional: list[str] = []
+    options: list[str] = []
+    at = 0
+    while at < len(words):
+        word = words[at]
+        at += 1
+        if word == "--":
+            positional += words[at:]
+            break
+        if not looks_like_option(word):
+            positional.append(word)
+            continue
+        option, given, value = word.partition("=")
+        if option in FLAGS and not given:
+            options.append(option)
+        elif option in VALUED and given:
+            options += [option, value]
+        elif option in VALUED and at < len(words) and not looks_like_option(words[at]):
+            options += [option, words[at]]
+            at += 1
+        elif option in VALUED:
+            print(f"error: argument {option}: expected one argument", file=sys.stderr)
+            return None
+        else:
+            print(f"error: unrecognized arguments: {word}", file=sys.stderr)
+            return None
+    return [name, *positional, *options]
+
+
 def card_command(db: sqlite3.Connection, command: list[str]) -> int | None:
     """Apply a card command to a board's base; None when the command is not one the fake knows."""
+    read = parsed(command)
+    if read is None:
+        return 2
+    command = read
     now = int(time.time())
     if command[0] == "create":
         key = option(command, "--idempotency-key")

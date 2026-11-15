@@ -24,7 +24,7 @@ sont dans `docs/decisions/`, une par fichier (ADR 0001 à 0019).
 | Hermès confiné | `python3 scripts/check_runtime_confined.py` |
 | Jeton de l'App GitHub (sans le service) | `uv run python -m workflow_core.adapters.github token` ou `check` (voir `docs/RUNBOOK.md`) |
 | Issue de panne, à la main (sans le service) | `.venv/bin/python -m workflow_core.notify.outage` (lancée par le chien de garde chaque minute) |
-| Test de contrat (Hermès installé) | `uv run pytest tests/contract -rs` (aussi lancé par `uv run pytest`) : la lecture des boards est sautée sans base de board ; le cycle d'écriture sur un board jetable `contrat-<heure Unix>` tourne dès que `hermes` est sur le PATH, sauté seulement sans lui, comme en CI |
+| Test de contrat (Hermès installé) | `uv run pytest tests/contract -rs` (aussi lancé par `uv run pytest`) : la lecture des boards est sautée sans base de board ; le cycle d'écriture sur un board jetable `workflow-core-contrat-<heure Unix>` tourne dès que `hermes` est sur le PATH, sauté seulement sans lui, comme en CI |
 | JSON Schema de la fiche | `uv run python scripts/write_sheet_schema.py` (après un changement de la forme) |
 | JSON Schema du manifeste | `uv run python scripts/write_manifest_schema.py` (après un changement de la forme du manifeste : réécrit `schema/workflow-manifest.schema.json`) |
 | JSON Schema des réponses de l'API | `uv run python scripts/write_api_schemas.py` (après un changement d'une réponse : réécrit `workflows`, `sheet-response`, `items`, `machine`, `event`, `error`, `live`, `activity`, `usage`, `declared-data`, `interventions` et `agents` `.schema.json` dans `schema/`) |
@@ -44,7 +44,7 @@ sont dans `docs/decisions/`, une par fichier (ADR 0001 à 0019).
 ## Échecs connus
 
 - Deux `uv run pytest` lancés en même temps sur une machine où `hermes` est installé : le cycle d'écriture de
-  `tests/contract` de l'un supprime au départ le board `contrat-*` de l'autre, qui échoue. Un seul lancement à la fois.
+  `tests/contract` de l'un supprime au départ le board `workflow-core-contrat-*` de l'autre, qui échoue. Un seul lancement à la fois.
 - `tests/test_events.py::test_an_intervention_opening_and_closing_go_on_the_stream_once` lit le flux par fenêtres
   fixes de 1,5 s : sous forte charge, une sonde en retard peut le faire échouer une fois. Le relancer.
 

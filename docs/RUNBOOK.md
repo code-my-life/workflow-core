@@ -187,8 +187,12 @@ version d'avant et celle lue (voir « Le notificateur », C).
   `hermes kanban <commande> --help` doit sortir en code 0 et nommer chaque option déclarée. Sinon, le verdict porte
   « commande `create` : option `--idempotency-key` absente » ou « commande `schedule` absente ».
 - `uv run pytest tests/contract -rs` (lancé par `scripts/install.sh`) fait en plus un cycle d'écriture complet sur un
-  board jetable `contrat-<heure Unix>`, relu après chaque pas, puis supprimé, même après un pas en échec. Un board
-  `contrat-*` laissé par un cycle interrompu est supprimé au cycle suivant. Aucun autre board n'est écrit. Deux
+  board jetable `workflow-core-contrat-<heure Unix>` (un préfixe réservé au cycle), relu après chaque pas, puis
+  supprimé, même après un pas en échec. Il appelle `schedule` et `block` comme le moteur : avec une raison, relit
+  l'événement `scheduled` (dont dépend l'identifiant d'une attente), et vérifie l'alternance `block --kind
+  needs_input`, `unblock`, `block --kind capability` : la carte reste `blocked`, jamais `triage`. Un board
+  `workflow-core-contrat-*` laissé par un cycle interrompu est supprimé au cycle suivant, et aucun autre : un board dont
+  le nom commence seulement par `contrat-` n'est jamais touché. Aucun autre board n'est écrit. Deux
   lancements du test de contrat en même temps sur la machine (deux `uv run pytest`) se gênent : chaque cycle supprime
   au départ le board de l'autre, qui échoue ; ne lancer qu'un test de contrat à la fois.
 - Le socle relit `hermes --version` toutes les 5 minutes, et à la première passe du moteur après un démarrage : son
@@ -207,11 +211,14 @@ carte d'un élément) à sa clé d'idempotence `<clé>:<id local>`. Une carte ra
 `<clé>-<station>` d'une station `code`, fait lancer la commande de la station dans le dépôt du workflow, puis le
 moteur applique sa **décision** :
 - `advance` réassigne la carte au nom de voie de la station `to`, ou de la suivante ; après la dernière station du
-  manifeste, il termine la carte racine (`complete <carte> --result <raison>`), seul moment où le moteur termine une
+  manifeste, il termine la carte racine (`complete <carte> --result=<raison>`, la raison de la décision, ou
+  « élément terminé à la station <station> » si elle est vide ou faite d'espaces), seul moment où le moteur termine une
   carte racine : il le note juste avant dans `engine.db` (table `finishes`), et une carte racine terminée sans cette
-  note est signalée (voir « Le notificateur », A) ;
+  note est signalée (voir « Le notificateur », A). Une écriture de cette fin qui dépasse son délai peut avoir été
+  faite : la carte est relue, et terminée, sa note est gardée (le journal le dit en `<4>`) ;
 - `wait` laisse la carte telle quelle : la commande est relancée à la passe suivante, avec un essai de plus ;
-- `fail`, un délai dépassé ou une sortie illisible bloquent la carte avec son motif, « Échec de la station
+- `fail`, un délai dépassé, un code de sortie différent de 0 (motif « code de sortie <n> », quelle que soit la
+  sortie) ou une sortie illisible bloquent la carte avec son motif, « Échec de la station
   preparer : délai de 60 s dépassé ». Une carte bloquée n'est plus lancée ; débloquée
   (`hermes kanban --board <slug> unblock <carte>`), elle redevient prête à sa station et la commande est relancée.
   Chaque blocage porte une **sorte** (`block --kind`), jamais celle du blocage précédent de la carte : `needs_input`,
@@ -223,26 +230,39 @@ moteur applique sa **décision** :
   Une station `to` inconnue du manifeste bloque aussi la carte, avec « station « <to> » inconnue ».
 
 Une carte racine prête au nom de voie d'une station `owner` (où l'on attend le propriétaire) est mise en **attente** :
-`schedule <carte> "En attente du propriétaire à la station <station>"`, et la carte passe en `scheduled`. L'attente a
+`schedule <carte> -- "En attente du propriétaire à la station <station>"`, et la carte passe en `scheduled`. L'attente a
 un identifiant, `<clé>:owner:<carte>:<événement>`, l'événement étant l'identifiant du dernier événement `scheduled`
 de la carte dans Hermès ; le journal le donne (« attente essai:owner:t_ab12cd34:812 ouverte »). Les **réponses du
 propriétaire** (un geste et sa note) arrivent dans la table `answers` de `engine.db`, dans le dossier d'état du socle.
 À la passe suivante, une réponse pour un élément en attente est passée à la commande de la station (champ `answer`)
 et marquée appliquée à l'attente, une seule fois ; une décision `wait` laisse la carte en attente, toute autre
-décision la débloque (`unblock`) puis s'applique comme ci-dessus. Une réponse pour un élément sans attente ouverte est
+décision la débloque (`unblock`) puis s'applique comme ci-dessus. Si Hermès refuse ou rate l'écriture de cette
+décision, rien n'a bougé : la réponse devient refusée (😕 pour un geste de GitHub), le journal le dit (`<3>`), et le
+propriétaire peut la reposer. Tant que les écritures sont refusées (mode observateur, version d'Hermès pas encore
+relue), une réponse n'est pas passée à la commande et reste en attente. Une réponse pour un élément sans attente ouverte est
 marquée refusée et ne change rien, sauf quand la carte racine de l'élément a un run en cours : ses réponses (et ses
 gestes inconnus) restent alors en attente jusqu'à la fin du run. Une carte racine terminée par un autre que le moteur
 n'est plus jamais touchée, même après un redémarrage (voir « Le notificateur », A). Après un redémarrage, l'attente
 est retrouvée dans Hermès et une réponse non traitée est traitée à la première passe.
 
-Le moteur écrit dans Hermès par la seule ligne de commande `hermes kanban --board <slug>`, ne prend jamais une carte
+Le moteur écrit dans Hermès par la seule ligne de commande `hermes kanban --board <slug>` ; une valeur libre n'y est
+jamais lue comme une option : `--body=<corps>`, `--result=<résultat>`, et les raisons de `schedule` et `block` et le
+texte de `comment` après `--`. Il ne prend jamais une carte
 (`claim`), et saute un élément qu'une passe précédente traite encore. En mode observateur, il ne lance rien, n'écrit
-rien et ne lit pas les réponses, qui attendent ; le journal le dit une fois.
+rien et ne lit pas les réponses, qui attendent ; le journal le dit une fois. Le mode est relu avant chaque lancement
+de commande et chaque marquage de réponse : une passe en cours au passage en observateur ne lance plus rien et ne
+marque plus rien.
 
 Un manifeste absent, illisible ou d'une autre clé laisse son workflow non branché : le journal du service le dit au
 démarrage, avec la raison (« workflow essai non branché : manifeste absent : … »), et les autres workflows tournent.
 Une écriture refusée par Hermès est écrite au journal avec la commande, son code et sa sortie d'erreur ; la passe
 suivante réessaie.
+
+**Limite connue : une commande n'est pas isolée du socle.** La commande d'un workflow (station ou `intake`) tourne
+sous le même utilisateur Unix que le socle. Elle ne reçoit ni `WORKFLOW_CORE_*`, ni `GITHUB_APP_*`, ni `VIRTUAL_ENV`,
+mais elle peut lire le jeton en cache de l'App et la clé privée de l'App, et écrire dans le dossier d'état du socle
+(dont `engine.db`). Règle : seul un dépôt du propriétaire se branche tant que code-my-life/workflow-core#149 n'est pas
+faite.
 
 ## La relecture de GitHub
 
@@ -256,7 +276,8 @@ tourne que si un workflow est branché par son manifeste.
 Issues prises : les issues ouvertes (pas les pull requests, que l'API de GitHub range parmi les issues) ouvertes par le
 compte du propriétaire (celui au nom duquel factory-live ouvre une issue), que le socle lit dans la variable
 `WORKFLOW_CORE_OWNER_LOGIN` de son `.env` : l'y ajouter avant de brancher un workflow. Sans elle, aucune issue n'est
-prise, et le journal le dit une fois au démarrage. Les autres issues sont ignorées sans commentaire. Une entrée de la configuration peut porter `issue_label` : seules les issues à ce label sont prises
+prise, et le journal le dit une fois au démarrage. Le compte est comparé sans tenir compte de la casse, comme GitHub
+le fait des logins. Les autres issues sont ignorées sans commentaire. Une entrée de la configuration peut porter `issue_label` : seules les issues à ce label sont prises
 (`config/essai-test.toml` a `issue_label = "test"`). Une entrée sans `issue_label` ignore les issues au label `test` :
 le socle de production ne prend jamais une issue de la machine de test.
 
@@ -275,8 +296,8 @@ délai, sans les secrets du socle), avec l'issue en JSON sur son entrée :
   au journal, et rien d'autre d'écrit.
 - Refusée : un commentaire « 🚫 Cette issue n'est pas prise par le workflow `essai` : <motif>. », avec la marque ;
   aucune carte.
-- Sortie illisible, délai dépassé ou lancement impossible : ce n'est pas une décision. Le journal le dit, rien n'est
-  créé ni posté, et la relecture suivante relance la commande.
+- Sortie illisible, délai dépassé, code de sortie différent de 0 ou lancement impossible : ce n'est pas une
+  décision. Le journal le dit, rien n'est créé ni posté, et la relecture suivante relance la commande.
 
 Une issue traitée porte une **marque**, un commentaire HTML invisible à l'écran :
 `<!-- workflow-core:intake <dépôt>#<n> accept -->` ou `<!-- workflow-core:intake <dépôt>#<n> refuse -->`. Seule la
@@ -288,7 +309,9 @@ marqué.
 
 Si la carte est créée mais que le commentaire n'est pas posté (GitHub en échec, service arrêté), l'issue reste sans
 marque : à la relecture suivante, `intake` est relancée, la création rend la carte existante (même clé
-d'idempotence), et le commentaire est posté. Jamais deux cartes pour un élément.
+d'idempotence), et le commentaire est posté. Jamais deux cartes pour un élément, à une condition : la commande
+`intake` est **déterministe**, la même issue rend toujours le même `id`. Relancée après un commentaire d'acceptation
+non posté, une commande qui rendrait un autre `id` créerait une seconde carte.
 
 En mode observateur, ou tant que la version d'Hermès n'est pas confirmée, la relecture lit les issues mais ne lance
 pas `intake`, ne crée rien et ne poste rien. En mode observateur, le journal le dit une fois par issue (« en attente
@@ -306,7 +329,7 @@ exactement `/<clé> <geste>`, suivie d'une note facultative (le reste de la lign
 compte (`/Essai valider` n'est pas un geste), et le geste doit ouvrir le commentaire.
 
 Seuls comptent les commentaires du compte du propriétaire (la variable `WORKFLOW_CORE_OWNER_LOGIN` du `.env`, le même
-que pour la relecture des issues ; sans elle, aucun geste n'est pris) ; tout autre commentaire est
+que pour la relecture des issues, comparé sans tenir compte de la casse ; sans elle, aucun geste n'est pris) ; tout autre commentaire est
 ignoré sans réaction, de même qu'un geste d'un autre workflow (`/factory unblock` sur l'issue d'un élément `essai` :
 la factory lit ses gestes elle-même). Gestes reconnus : ceux de sorte `comment` du manifeste (`valider` et `refaire`
 pour le workflow d'essai), plus `unblock`, valable pour tout workflow. Un geste de sorte `issue` (`ouvrir`) ne se donne
@@ -334,9 +357,12 @@ Application, par le moteur à sa passe suivante (30 secondes au plus) :
   marquée appliquée au blocage (`<clé>:blocked:<carte>:<événement blocked>`), et la commande de sa station est
   relancée aussitôt avec `answer` `{"gesture": "unblock", "note": …}`, sa décision appliquée. Si elle échoue de
   nouveau, la carte est bloquée de nouveau, avec une autre sorte de blocage (voir « Le moteur ») : elle reste
-  `blocked`, et un nouvel `unblock` s'y applique. Sur un élément non bloqué, `unblock` est refusé. Un déblocage
+  `blocked`, et un nouvel `unblock` s'y applique. Un `unblock` posté avant le dernier blocage de la carte (son
+  dernier événement `blocked` ; même seconde acceptée) ne le lève pas : il est refusé (😕), comme un écran périmé, et
+  l'`unblock` suivant de l'élément est essayé. Sur un élément non bloqué, `unblock` est refusé. Un déblocage
   qu'Hermès refuse d'écrire est écrit au journal (`<3>`) et la réponse est refusée (😕) : la carte reste bloquée, et le
-  propriétaire peut reposer le geste ;
+  propriétaire peut reposer le geste. Un déblocage que le socle s'interdit d'écrire (mode observateur, version
+  d'Hermès pas encore relue) ne consomme rien : la réponse reste en attente, sans réaction ;
 - un geste inconnu du workflow est refusé.
 
 Ces règles ne valent que pour les gestes de GitHub : une réponse de `scripts/inject_answer.py` (source `local`) garde

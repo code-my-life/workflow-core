@@ -13,8 +13,8 @@
    count.
 4. A new issue is handed to the workflow's intake command (`uv run --directory <repo> ...`, within its delay, without
    the core's secrets), `{"schema_version": 1, "issue": {...}}` on its input. A command that cannot be launched, runs
-   past its delay or gives an unreadable output has made no decision: the journal says so, nothing is posted, and the
-   next reading tries again.
+   past its delay, ends with an exit code other than 0 or gives an unreadable output has made no decision: the journal
+   says so, nothing is posted, and the next reading tries again.
 5. Accepted with the id `<id>`, the issue becomes the item `<key>:<id>`: its root card is created, assigned to the
    lane of the first station, with the item as its idempotency key and the issue's address as its body (the runtime
    gives back the existing card for a key already taken). Then the App comments the issue: the item, its first
@@ -100,8 +100,9 @@ def refuse_comment(*, key: str, reason: str, marker: str) -> str:
 
 def taken(workflow: PluggedWorkflow, issue: OpenIssue, owner: str | None) -> bool:
     """Whether the workflow takes this issue in: opened by the owner's account (none without it), with the workflow's
-    label, or without the test label when it has none. GitHub's label names ignore case, and so does the comparison."""
-    if owner is None or issue.author != owner:
+    label, or without the test label when it has none. GitHub's logins and label names ignore case, and so do the
+    comparisons."""
+    if owner is None or issue.author.casefold() != owner.casefold():
         return False
     labels = {label.casefold() for label in issue.labels}
     if workflow.issue_label is not None:

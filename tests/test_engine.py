@@ -127,7 +127,7 @@ def test_later_passes_park_the_owner_card_once_and_then_change_nothing(fake_runt
     waiting = "En attente du propriétaire à la station revue"
     assert fake_runtime.writes() == [
         ["kanban", "--board", "essai", "assign", CARD, "essai-revue"],
-        ["kanban", "--board", "essai", "schedule", CARD, waiting],
+        ["kanban", "--board", "essai", "schedule", CARD, "--", waiting],
     ]
     assert assignee_of(fake_runtime.home) == "essai-revue"
     assert status_of(fake_runtime.home) == ("scheduled", None)
@@ -176,9 +176,9 @@ def test_the_engine_never_claims_a_card(fake_runtime):
     waiting = "En attente du propriétaire à la station revue"
     assert [station for station, _ in launches.calls] == ["preparer"]
     assert fake_runtime.writes() == [
-        ["kanban", "--board", "essai", "schedule", "t_00000002", waiting],
+        ["kanban", "--board", "essai", "schedule", "t_00000002", "--", waiting],
         ["kanban", "--board", "essai", "assign", CARD, "essai-revue"],
-        ["kanban", "--board", "essai", "schedule", CARD, waiting],
+        ["kanban", "--board", "essai", "schedule", CARD, "--", waiting],
     ]
     assert not any("claim" in argument for call in fake_runtime.calls() for argument in call)
 
@@ -296,7 +296,7 @@ def test_a_fail_a_timeout_or_an_unreadable_output_blocks_the_card_with_its_reaso
         motive = f"Échec de la station preparer : {reason}"
 
         def block(kind: str, board=board, motive=motive) -> list[str]:
-            return ["kanban", "--board", board, "block", CARD, motive, "--kind", kind]
+            return ["kanban", "--board", board, "block", CARD, "--kind", kind, "--", motive]
 
         unblock = ["kanban", "--board", board, "unblock", CARD]
         core.run_pass()
@@ -351,7 +351,7 @@ def test_the_last_station_completes_the_root_card(fake_runtime):
         core.run_pass()
 
     completes = [call for call in fake_runtime.writes() if call[3] == "complete"]
-    assert completes == [["kanban", "--board", "essai", "complete", CARD, "--result", "élément clos"]]
+    assert completes == [["kanban", "--board", "essai", "complete", CARD, "--result=élément clos"]]
     assert status_of(fake_runtime.home) == ("done", None)
     # The other item went on to the owner station, and waits there: only the last station completes a root card.
     assert status_of(fake_runtime.home, second) == ("scheduled", None)
@@ -372,4 +372,83 @@ def test_an_unknown_target_station_blocks_the_card(fake_runtime, tmp_path):
     core.run_pass()
 
     motive = "Échec de la station preparer : station « nulle-part » inconnue"
-    assert fake_runtime.writes() == [["kanban", "--board", "essai", "block", CARD, motive, "--kind", "needs_input"]]
+    assert fake_runtime.writes() == [
+        ["kanban", "--board", "essai", "block", CARD, "--kind", "needs_input", "--", motive]
+    ]
+
+
+def test_an_unexpected_error_on_an_item_leaves_the_next_items_to_go_on(fake_runtime):
+    second = "t_0f0f0f0f"
+    make_runtime_board(
+        fake_runtime.home,
+        "essai",
+        tasks=[root_card(), root_card(id=second, idempotency_key="essai:2", title="essai:2 · Second essai")],
+    )
+    launched: list[str] = []
+
+    def breaks_on_the_first(repo, command, payload, timeout, log, *, label):
+        launched.append(payload["item"]["id"])
+        if payload["item"]["id"] == "essai:1":
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+        return run_command(repo, command, payload, timeout, log, label=label)
+
+    core, lines = engine(launches=breaks_on_the_first)
+    core.run_pass()
+
+    assert launched == ["essai:1", "essai:2"]
+    assert assignee_of(fake_runtime.home, second) == "essai-revue"
+    assert assignee_of(fake_runtime.home) == "essai-preparer"
+    assert any(line.startswith("<3>") and "essai:1" in line and "UnicodeDecodeError" in line for line in lines)
+
+
+def test_a_pass_launches_nothing_more_once_the_core_turns_observer(fake_runtime):
+    second = "t_0f0f0f0f"
+    make_runtime_board(
+        fake_runtime.home,
+        "essai",
+        tasks=[root_card(), root_card(id=second, idempotency_key="essai:2", title="essai:2 · Second essai")],
+    )
+    core_state = state()
+    launched: list[str] = []
+
+    def turns_observer(repo, command, payload, timeout, log, *, label):
+        launched.append(payload["item"]["id"])
+        # The runtime changed while the first command ran: the core is an observer now.
+        core_state.contract = state(ok=False).contract
+        return run_command(repo, command, payload, timeout, log, label=label)
+
+    core, _ = engine(core=core_state, launches=turns_observer)
+    core.run_pass()
+
+    assert launched == ["essai:1"]
+    assert assignee_of(fake_runtime.home, second) == "essai-preparer"
+
+
+def test_a_blank_or_option_like_reason_still_completes_the_root_card(fake_runtime, tmp_path):
+    second = "t_00000002"
+    make_runtime_board(
+        fake_runtime.home,
+        "essai",
+        tasks=[
+            root_card(assignee="essai-clore"),
+            root_card(id=second, assignee="essai-clore", idempotency_key="essai:2", created_at=1762900001),
+        ],
+    )
+    command = tmp_path / "clore.py"
+    command.write_text(
+        "import json, sys\nitem = json.load(sys.stdin)['item']['id']\n"
+        'print(json.dumps({"decision": "advance", "reason": "   " if item == "essai:1" else "-fini"}))\n',
+        encoding="utf-8",
+    )
+    core, lines = engine(workflow=essai(clore={"command": ["python", str(command)]}))
+
+    core.run_pass()
+
+    # A blank reason is the default text; a reason that looks like an option is written as it is.
+    assert status_of(fake_runtime.home) == ("done", None)
+    assert status_of(fake_runtime.home, second) == ("done", None)
+    with sqlite3.connect(fake_runtime.home / "kanban" / "boards" / "essai" / "kanban.db") as db:
+        results = dict(db.execute("SELECT id, result FROM tasks").fetchall())
+    db.close()
+    assert results == {CARD: "élément terminé à la station clore", second: "-fini"}
+    assert not any(line.startswith("<3>") for line in lines), lines

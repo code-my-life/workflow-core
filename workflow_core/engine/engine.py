@@ -9,8 +9,10 @@ Under the item's own lock, with the card read again:
 - a ready root card at the lane of an `owner` station is parked (`schedule`) with its reason: the item waits for its
   owner. The wait's id is `<key>:owner:<card>:<event>`, the event being the card's last `scheduled` event;
 - a root card waiting at an `owner` station, with an answer of the owner in the answer box, has the station's command
-  run with that answer. The answer is marked applied to the wait once the command is back, before any write, so it is
-  never handed to a command twice; `wait` leaves the card waiting, any other decision unblocks it and is applied;
+  run with that answer, unless the writes are refused (observer mode, or the writer's gate): then nothing is consumed
+  and the answer waits. The answer is marked applied to the wait once the command is back, before any write, so it is
+  never handed to a command twice; `wait` leaves the card waiting, any other decision unblocks it and is applied; a
+  decision that cannot be written turns the answer refused, so that the owner can give it again;
 - a ready root card at the lane of an `agent` station gets a child card at each passage, assigned to the station's
   profile, with the idempotency key `<item>/<station>/<passage>` and the item's id on the first line of its body
   (its issue's address on the second). The child is tied to its item by this key only, never by a parent or a link
@@ -24,7 +26,8 @@ The root card itself is never handed to an agent, and only the engine finishes i
 - a run on a root card is an anomaly, written once per run to the journal and noted for the notifier; while it runs
   (no end), the item is left alone: nothing written, nothing run, its answers neither applied nor refused; once it
   has ended, the item is handled as any other;
-- the engine notes each root card it completes, just before the write (taken back when the write fails); a root card
+- the engine notes each root card it completes, just before the write (taken back when the write fails, unless the
+  write passed its delay and the card, read again, is done); a root card
   done that is not noted, at any station, was finished by another: an anomaly written once to the journal and noted,
   and the engine never touches the item again, even after a restart.
 A decision is applied this way: `advance` assigns the card to the lane of the station `to`, or of the next station
@@ -39,10 +42,12 @@ test machine's tool (`local`) does not:
 - a gesture the workflow's manifest does not declare (by a comment), and that is not `unblock`, is refused;
 - a gesture commented before the open wait's `scheduled` event is refused (a stale screen), and the next answer of the
   item is tried;
-- `unblock`, for an item whose root card is blocked, unblocks the card, is marked applied to
+- `unblock`, for an item whose root card is blocked, given after the card's last `blocked` event (else refused,
+  and the item's next `unblock` is tried), unblocks the card, is marked applied to
   `<key>:blocked:<card>:<event>` (the card's last `blocked` event), and runs the station's command again at once with
-  the answer `{"gesture": "unblock", "note": ...}`, its decision applied; an unblock the board refuses to write is
-  marked refused, so that the owner can give it again; for an item whose card is not blocked, it is refused.
+  the answer `{"gesture": "unblock", "note": ...}`, its decision applied; an unblock the board fails to write is
+  marked refused, so that the owner can give it again, and one the writer's gate refuses stays pending; for an item
+  whose card is not blocked, it is refused.
 """
 
 from __future__ import annotations
@@ -60,7 +65,7 @@ from workflow_core.model.board import BoardReader, BoardUnavailableError, Item, 
 from workflow_core.model.decision import Decision
 from workflow_core.model.manifest import ManifestStation as Station
 from workflow_core.model.state import CoreState
-from workflow_core.model.writer import BoardWriteError, BoardWriter
+from workflow_core.model.writer import BoardWriteError, BoardWriter, BoardWriteRefusedError
 from workflow_core.notify.notifier import journal_line
 from workflow_core.plugin.commands import command_input, run_command
 from workflow_core.plugin.manifest import PluggedWorkflow, is_root_card, issue_of, lanes_of, wait_id
@@ -89,11 +94,12 @@ def last_event(item: Item, kind: str):
     return next((event for event in reversed(item.events) if event.kind == kind), None)
 
 
-def stale(answer: Answer, item: Item) -> bool:
-    """Whether a GitHub answer was given before the item's open wait was opened (the same second is not)."""
+def stale(answer: Answer, item: Item, kind: str = "scheduled") -> bool:
+    """Whether a GitHub answer was given before the card's last event of this kind: its open wait's `scheduled`, or
+    the `blocked` of its block (the same second is not)."""
     if answer.source != "github":
         return False
-    opened = last_event(item, "scheduled")
+    opened = last_event(item, kind)
     if opened is None:
         return False
     try:
@@ -131,6 +137,7 @@ class Engine:
         confirm_version: Callable[[], bool] | None = None,
         answers: AnswerBox | None = None,
         records: Signals | None = None,
+        write_refusal: Callable[[], str | None] | None = None,
     ) -> None:
         self.workflows = workflows
         self.reader = reader
@@ -145,6 +152,8 @@ class Engine:
         self.answers = answers
         # The engine's own finishes and the anomalies it found, in `engine.db` of the core's state folder.
         self.records = records if records is not None else Signals(state_dir() / ENGINE_DB)
+        # The reason the writer's gate refuses a write now, or None: the service's version watch.
+        self.write_refusal = write_refusal
         self._guard = threading.Lock()
         self._boards_lock = threading.Lock()
         self._known_boards: set[str] = set()
@@ -165,7 +174,8 @@ class Engine:
     def run_pass(self) -> None:
         """One pass over every plugged workflow. Never raises: a failure is written to the journal, and the next pass
         tries again. In observer mode, or while the runtime's version is not confirmed, nothing is read, run or
-        written."""
+        written; the mode is read again before each launch and each answer marked, so a pass running when the core
+        turns observer launches and marks nothing more."""
         mode = self.state.mode
         if mode != self._mode:
             self._mode = mode
@@ -194,6 +204,17 @@ class Engine:
                 self.writer.create_board(workflow.board)
                 self.log(f"{PREFIX}, {workflow.key} : board {workflow.board} créé")
             self._known_boards.add(workflow.board)
+
+    def _refusal(self) -> str | None:
+        """The reason the engine may not write now: the observer mode, or its writer's gate; None when it may."""
+        if self.state.mode != "normal":
+            return "mode observateur"
+        return self.write_refusal() if self.write_refusal is not None else None
+
+    def _halted(self) -> bool:
+        """Whether the pass must launch no command and mark no answer any more: the engine is stopped, or may not write
+        (the mode is read again before each launch and each marking, not only at the pass's start)."""
+        return self._stopped.is_set() or self._refusal() is not None
 
     def _lock_of(self, item: str) -> threading.Lock:
         with self._guard:
@@ -225,7 +246,7 @@ class Engine:
         # The items whose root card has a run in progress: left alone, their answers kept for later.
         held: set[str] = set()
         for item in items:
-            if self._stopped.is_set():
+            if self._halted():
                 return
             if not is_root_card(item, workflow.key):
                 continue
@@ -257,10 +278,10 @@ class Engine:
                     )
             elif item.status == "blocked":
                 blocked.add(element)
-                answer = next((answer for answer in unblocks if answer.item == element), None)
-                if answer is not None:
+                given = [answer for answer in unblocks if answer.item == element]
+                if given:
                     self._under_lock(
-                        workflow, item, lambda fresh, s=station, a=answer: self._unblock(workflow, fresh, s, a)
+                        workflow, item, lambda fresh, s=station, a=given: self._unblock(workflow, fresh, s, a)
                     )
             elif item.status == "ready" and station.nature == "owner":
                 self._under_lock(workflow, item, lambda fresh, s=station: self._park(workflow, fresh, s))
@@ -269,13 +290,13 @@ class Engine:
             elif item.status == "ready":
                 self._under_lock(workflow, item, lambda fresh, s=station: self._step(workflow, fresh, s))
         for answer in unknown:
-            if answer.item not in held and not self._stopped.is_set():
+            if answer.item not in held and not self._halted():
                 self._refuse(answer, "geste inconnu du workflow")
         for answer in pending:
-            if answer.item not in waiting and answer.item not in held and not self._stopped.is_set():
+            if answer.item not in waiting and answer.item not in held and not self._halted():
                 self._refuse(answer)
         for answer in unblocks:
-            if answer.item not in blocked and answer.item not in held and not self._stopped.is_set():
+            if answer.item not in blocked and answer.item not in held and not self._halted():
                 self._refuse(answer, "carte racine non bloquée")
 
     def _finished_elsewhere(self, workflow: PluggedWorkflow, item: Item, station: Station) -> None:
@@ -330,7 +351,8 @@ class Engine:
         return running
 
     def _under_lock(self, workflow: PluggedWorkflow, item: Item, action: Callable[[Item], None]) -> None:
-        """Run the action on the card read again under the item's lock; an item another pass holds is skipped."""
+        """Run the action on the card read again under the item's lock; an item another pass holds is skipped. Never
+        raises: a failure is written to the journal, and the next items go on."""
         lock = self._lock_of(item.idempotency_key)
         if not lock.acquire(blocking=False):
             return
@@ -340,9 +362,13 @@ class Engine:
             fresh = next((card for card in self.reader.read_items(workflow.board) if card.id == item.id), None)
             if fresh is None or fresh.status != item.status or fresh.assignee != item.assignee:
                 return
+            if self._halted():
+                return
             action(fresh)
         except (BoardWriteError, BoardUnavailableError) as error:
             self.log(f"<3>{PREFIX}, {item.idempotency_key} : {error}")
+        except Exception as error:  # an item that fails leaves the next items to go on
+            self.log(f"<3>{PREFIX}, {item.idempotency_key} : {type(error).__name__}: {error}")
         finally:
             lock.release()
 
@@ -440,6 +466,8 @@ class Engine:
             if not self.answers.is_pending(answer.id):
                 continue
             if stale(answer, item):
+                if self._halted():
+                    return
                 if self.answers.mark(answer.id, "refused"):
                     self.log(
                         f"<4>{PREFIX}, {element} : réponse {answer.id} ({answer.gesture}) refusée, donnée avant "
@@ -451,7 +479,17 @@ class Engine:
 
     def _answer_wait(self, workflow: PluggedWorkflow, item: Item, station: Station, answer: Answer, wait: str) -> None:
         element = item.idempotency_key
+        refusal = self._refusal()
+        if refusal is not None:
+            # Nothing is consumed: the answer waits for a pass that may write.
+            self.log(f"{PREFIX}, {element} : réponse {answer.id} gardée en attente, écriture refusée : {refusal}")
+            return
         decision = self._launch(workflow, item, station, {"gesture": answer.gesture, "note": answer.note})
+        refusal = self._refusal()
+        if refusal is not None:
+            # The mode changed while the command ran: the answer is not marked, and goes to the command again later.
+            self.log(f"{PREFIX}, {element} : réponse {answer.id} non marquée, écriture refusée : {refusal}")
+            return
         # Marked before any write: whatever happens next, the answer is never handed to a command again.
         if not self.answers.mark(answer.id, "applied", wait):
             self.log(f"{PREFIX}, {element} : réponse {answer.id} déjà traitée, décision de {station.key} ignorée")
@@ -464,24 +502,50 @@ class Engine:
             self.writer.unblock(workflow.board, item.id)
             self._apply(workflow, item, station, decision)
         except BoardWriteError:
+            # Nothing moved: the answer is refused (😕), and the owner can give it again.
+            self.answers.refuse_applied(answer.id)
             self.log(
                 f"<3>{PREFIX}, {element} : réponse {answer.id} ({answer.gesture}) appliquée à l'attente {wait}, "
-                f"mais la décision de {station.key} n'a pas pu être écrite"
+                f"mais la décision de {station.key} n'a pas pu être écrite : réponse refusée, le geste peut être "
+                "reposé"
             )
             raise
 
-    def _unblock(self, workflow: PluggedWorkflow, item: Item, station: Station, answer: Answer) -> None:
-        """A blocked root card, and the owner's `unblock`: the card unblocked, the answer marked applied, and the
-        station's command run again at once with the answer, its decision applied. An unblock the board refuses is
-        marked refused: the owner can give it again."""
-        element = item.idempotency_key
-        if item.status != "blocked" or not self.answers.is_pending(answer.id):
+    def _unblock(self, workflow: PluggedWorkflow, item: Item, station: Station, answers: list[Answer]) -> None:
+        """A blocked root card, and the owner's `unblock`s: the first one given after the card's last block is applied;
+        those given before it are refused on the way (they were meant for an earlier block)."""
+        if item.status != "blocked":
             return
         event = last_event(item, "blocked")
         wait = f"{workflow.key}:blocked:{item.id}:{event.id if event is not None else 0}"
+        for answer in answers:
+            if not self.answers.is_pending(answer.id):
+                continue
+            if stale(answer, item, "blocked"):
+                if self._halted():
+                    return
+                if self.answers.mark(answer.id, "refused"):
+                    self.log(
+                        f"<4>{PREFIX}, {item.idempotency_key} : réponse {answer.id} ({UNBLOCK}) refusée, donnée avant "
+                        f"le blocage {wait}"
+                    )
+                continue
+            self._unblock_with(workflow, item, station, answer, wait)
+            return
+
+    def _unblock_with(self, workflow: PluggedWorkflow, item: Item, station: Station, answer: Answer, wait: str) -> None:
+        """The card unblocked, the answer marked applied, and the station's command run again at once with the
+        answer, its decision applied. An unblock the board refuses is marked refused: the owner can give it again."""
+        element = item.idempotency_key
+        if self._halted():
+            return
         # Written before it is marked, under the item's lock: an answer is applied only once its unblock is written.
         try:
             self.writer.unblock(workflow.board, item.id)
+        except BoardWriteRefusedError as error:
+            # Refused by the writer's gate, nothing was run: the answer waits for a pass that may write.
+            self.log(f"{PREFIX}, {element} : réponse {answer.id} ({UNBLOCK}) gardée en attente : {error}")
+            return
         except BoardWriteError:
             if self.answers.mark(answer.id, "refused"):
                 self.log(
@@ -492,7 +556,7 @@ class Engine:
         if not self.answers.mark(answer.id, "applied", wait):
             return
         self.log(f"{PREFIX}, {element} : réponse {answer.id} ({UNBLOCK}) appliquée au blocage {wait}")
-        if station.command is None or self._stopped.is_set():
+        if station.command is None or self._halted():
             return
         decision = self._launch(workflow, item, station, {"gesture": UNBLOCK, "note": answer.note})
         self._apply(workflow, item, station, decision)
@@ -503,6 +567,8 @@ class Engine:
         if not lock.acquire(blocking=False):
             return
         try:
+            if self._halted():
+                return
             if self.answers.mark(answer.id, "refused"):
                 self.log(f"<4>{PREFIX}, {answer.item} : réponse {answer.id} ({answer.gesture}) refusée, {why}")
         finally:
@@ -524,14 +590,22 @@ class Engine:
         else:
             target = workflow.next_station(station.key)
             if target is None:
-                # Only here does the engine finish a root card (AD-4). The runtime refuses an empty result.
-                result = decision.reason or f"élément terminé à la station {station.key}"
+                # Only here does the engine finish a root card (AD-4). The runtime refuses a blank result.
+                result = decision.reason.strip() or f"élément terminé à la station {station.key}"
                 # Noted before the write, taken back when it fails: a root card done that is not noted was finished
                 # by another.
                 self.records.note_finish(workflow.board, item.id, element)
                 try:
                     self.writer.complete(workflow.board, item.id, result)
-                except BoardWriteError:
+                except BoardWriteError as error:
+                    # Past its delay, the write may still have been made: the card is read again, and a card done is
+                    # the engine's own finish, its note kept.
+                    if error.code is None and self._done(workflow, item.id):
+                        self.log(
+                            f"<4>{PREFIX}, {element} : écriture de la fin sans réponse ({error}), carte {item.id} "
+                            "relue terminée : fin gardée"
+                        )
+                        return
                     self.records.forget_finish(workflow.board, item.id)
                     raise
                 self.log(f"{PREFIX}, {element} : {station.key} rend advance, carte {item.id} terminée ({result})")
@@ -539,6 +613,14 @@ class Engine:
         lane = workflow.lane(target.key)
         self.writer.assign(workflow.board, item.id, lane)
         self.log(f"{PREFIX}, {element} : {station.key} rend advance, carte {item.id} passée à {lane}")
+
+    def _done(self, workflow: PluggedWorkflow, card: str) -> bool:
+        """Whether the card, read again, is done; False when it cannot be read."""
+        try:
+            items = self.reader.read_items(workflow.board)
+        except BoardUnavailableError:
+            return False
+        return any(item.id == card and item.status == "done" for item in items)
 
     def _fail(self, workflow: PluggedWorkflow, item: Item, station: Station, reason: str) -> None:
         motive = f"Échec de la station {station.key} : {reason}"

@@ -83,6 +83,12 @@ def _missing_command(manifest: dict, sheet: dict) -> list[str]:
     return []
 
 
+def _owner_without_gesture(manifest: dict, sheet: dict) -> list[str]:
+    # Only the gesture given by opening an issue is left: nothing can answer the owner station.
+    manifest["gestures"] = [gesture for gesture in manifest["gestures"] if gesture["kind"] != "comment"]
+    return []
+
+
 def _missing_profile(manifest: dict, sheet: dict) -> list[str]:
     manifest["stations"].append({"key": "relire", "nature": "agent"})
     sheet["stations"].append(sheet_station("relire", 3, kind="ai"))
@@ -132,6 +138,7 @@ BROKEN: dict[str, tuple[Callable[[dict, dict], list[str]], tuple[str, ...]]] = {
     "duplicate-station": (_duplicate_station, ('"preparer"',)),
     "duplicate-gesture": (_duplicate_gesture, ('"valider"',)),
     "missing-command": (_missing_command, ('"revue"', "command")),
+    "owner-without-gesture": (_owner_without_gesture, ('"revue"', "comment")),
     "missing-profile": (_missing_profile, ('"relire"', "profile")),
     "shared-agent-profile": (_shared_agent_profile, ('"relire"', '"corriger"', '"relecteur"')),
     "gesture-repo-not-read": (_gesture_repo_not_read, ('"signaler"', '"code-my-life/ailleurs"')),

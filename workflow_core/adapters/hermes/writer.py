@@ -5,7 +5,10 @@ base is ever opened for writing: Hermès writes its own bases. A command that fa
 error (`BoardWriteError`): the command without its values, its exit code and its error output. A writer given a
 `gate` asks it before each command: a reason refuses the write (`BoardWriteRefusedError`) and `hermes` is not run.
 
-The commands and options used here are declared in `contract.COMMANDS`, which the contract test checks.
+The commands and options used here are declared in `contract.COMMANDS`, which the contract test checks. A free value
+(a title aside, which the core always begins with the item's id) never reaches Hermès' parser (argparse) where it could
+read as an option: an option's value is given as `--name=<value>`, and free positional words come after `--`, the
+options before them.
 """
 
 from __future__ import annotations
@@ -92,9 +95,9 @@ class HermesBoardWriter:
     def create_root_card(self, board: str, *, title: str, lane: str, item: str, issue: str | None) -> CreatedCard:
         arguments = ["create", title, "--assignee", lane, "--idempotency-key", item]
         if issue is not None:
-            arguments += ["--body", issue]
+            arguments.append(f"--body={issue}")
         arguments.append("--json")
-        shape = "create <title> --assignee <lane> --idempotency-key <item> --body <issue> --json"
+        shape = "create <title> --assignee <lane> --idempotency-key <item> --body=<issue> --json"
         return self._created(board, arguments, shape)
 
     def create_child_card(self, board: str, *, title: str, profile: str, key: str, body: str) -> str:
@@ -115,10 +118,14 @@ class HermesBoardWriter:
         """Create a card and return its id. `--parent` is used by the write cycle only (write_cycle.py), never for a
         child card."""
         arguments, shape = ["create", title, "--assignee", assignee], ["create <title> --assignee <assignee>"]
-        for name, value in (("--idempotency-key", idempotency_key), ("--body", body), ("--parent", parent)):
+        for name, value in (("--idempotency-key", idempotency_key), ("--parent", parent)):
             if value is not None:
                 arguments += [name, value]
                 shape.append(f"{name} <{name.removeprefix('--')}>")
+        if body is not None:
+            # A free value: given with `=`, so that a body beginning with `-` is still a value.
+            arguments.append(f"--body={body}")
+            shape.append("--body=<body>")
         arguments.append("--json")
         shape.append("--json")
         return self._create(board, arguments, " ".join(shape))
@@ -131,27 +138,27 @@ class HermesBoardWriter:
         if reason is None:
             self._run(board, ["schedule", card], "schedule <card>")
         else:
-            self._run(board, ["schedule", card, reason], "schedule <card> <reason>")
+            self._run(board, ["schedule", card, "--", reason], "schedule <card> -- <reason>")
 
     def unblock(self, board: str, card: str) -> None:
         self._run(board, ["unblock", card], "unblock <card>")
 
     def block(self, board: str, card: str, reason: str | None = None, *, kind: str | None = None) -> None:
-        # The reason is positional: `block <id> [reason ...] [--kind <kind>]`.
+        # The reason is positional: `block <id> [reason ...] [--kind <kind>]`; it comes last, after `--`.
         arguments, shape = ["block", card], ["block <card>"]
-        if reason is not None:
-            arguments.append(reason)
-            shape.append("<reason>")
         if kind is not None:
             arguments += ["--kind", kind]
             shape.append("--kind <kind>")
+        if reason is not None:
+            arguments += ["--", reason]
+            shape.append("-- <reason>")
         self._run(board, arguments, " ".join(shape))
 
     def comment(self, board: str, card: str, text: str) -> None:
-        self._run(board, ["comment", card, text], "comment <card> <text>")
+        self._run(board, ["comment", card, "--", text], "comment <card> -- <text>")
 
     def complete(self, board: str, card: str, result: str) -> None:
-        self._run(board, ["complete", card, "--result", result], "complete <card> --result <result>")
+        self._run(board, ["complete", card, f"--result={result}"], "complete <card> --result=<result>")
 
     def remove_board(self, board: str) -> None:
         # `boards rm` ignores `--board` in Hermès 0.22.2; `--delete` removes the board's folder instead of archiving it.

@@ -290,8 +290,7 @@ def test_an_accepted_issue_creates_one_root_card_and_says_so(fake_runtime, serve
             "essai-preparer",
             "--idempotency-key",
             "essai:7",
-            "--body",
-            issue_url(7),
+            f"--body={issue_url(7)}",
             "--json",
         ]
     ]
@@ -637,3 +636,42 @@ def test_the_service_reads_github_only_with_a_workflow_plugged_by_its_manifest(f
     with TestClient(app):
         assert len(started) == 1
         assert started[0]._task is None
+
+
+def test_an_intake_output_that_is_not_utf8_is_no_decision_and_never_raises(fake_runtime):
+    lines: list[str] = []
+    noisy_error = (
+        "import sys; sys.stderr.buffer.write(b'\\xff erreur'); sys.stderr.flush(); "
+        'print(\'{"decision": "accept", "id": "7"}\')'
+    )
+    # A byte that is no UTF-8 on the output, which is no longer JSON: no decision.
+    broken_output = "import sys; sys.stdout.buffer.write(b'{\\xff')"
+    payload = {"schema_version": 1, "issue": {"repo": REPO, "number": 7}}
+
+    kept = run_intake(ESSAI_REPO, ["python", "-c", noisy_error], payload, 30, lines.append)
+    broken = run_intake(ESSAI_REPO, ["python", "-c", broken_output], payload, 30, lines.append)
+
+    assert kept is not None and (kept.decision, kept.id) == ("accept", "7")
+    assert broken is None
+    assert any("sortie illisible" in line for line in lines)
+
+
+def test_the_owner_s_login_ignores_case(fake_runtime, serve, tmp_path):
+    # GitHub's logins ignore case: the login set in the environment may not be written as GitHub writes it.
+    fake = FakeGitHub([issue(5, author="Proprietaire"), issue(6, author="inconnu")])
+    intake, intakes, _ = reading(serve(fake), tmp_path, owner="PROPRIETAIRE")
+
+    intake.read_once()
+
+    assert intakes.numbers() == [5]
+
+
+def test_an_intake_that_ends_with_an_error_makes_no_decision(fake_runtime):
+    lines: list[str] = []
+    failed = 'import sys; print(\'{"decision": "accept", "id": "7"}\'); sys.exit(3)'
+    payload = {"schema_version": 1, "issue": {"repo": REPO, "number": 7}}
+
+    decision = run_intake(ESSAI_REPO, ["python", "-c", failed], payload, 30, lines.append, label="intake")
+
+    assert decision is None
+    assert any(line.startswith("<3>") and "code de sortie 3" in line for line in lines)

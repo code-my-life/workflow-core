@@ -153,6 +153,14 @@ def _manifest_rule(
             for field in ("command", "timeout_seconds"):
                 if getattr(station, field) is None:
                     return "missing-command", f'{station.nature} station "{station.key}" has no {field}'
+    # An owner station waits for a gesture given by a comment: without one, nothing can ever answer it.
+    if not any(gesture.kind == "comment" for gesture in manifest.gestures):
+        for station in manifest.stations:
+            if station.nature == "owner":
+                return (
+                    "owner-without-gesture",
+                    f'owner station "{station.key}" waits for the owner, but the manifest declares no comment gesture',
+                )
     for station in manifest.stations:
         if station.nature == "agent" and station.profile is None:
             return "missing-profile", f'agent station "{station.key}" has no profile'

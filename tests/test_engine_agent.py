@@ -62,8 +62,7 @@ def child_create(passage: int) -> list[str]:
         "essai-agent",
         "--idempotency-key",
         f"essai:7/brouillon/{passage}",
-        "--body",
-        f"essai:7\n{ISSUE}",
+        f"--body=essai:7\n{ISSUE}",
         "--json",
     ]
 
@@ -242,7 +241,7 @@ def test_a_done_child_at_the_last_station_completes_the_root_card(fake_runtime):
     root_completes = [call for call in fake_runtime.writes() if call[3] == "complete" and ROOT in call]
     child = agent.child()
     assert root_completes == [
-        ["kanban", "--board", "essai", "complete", ROOT, "--result", f"carte fille {child} terminée"]
+        ["kanban", "--board", "essai", "complete", ROOT, f"--result=carte fille {child} terminée"]
     ]
     # The root card was completed by the engine, never by the agent.
     assert [call[3] for call in agent.calls] == ["complete"]
@@ -581,3 +580,31 @@ def test_a_run_the_runtime_opens_on_a_lane_is_not_an_agent(fake_runtime):
 
     assert [line for line in lines if "anomalie" in line] == []
     assert signals() == []
+
+
+class CompletesThenTimesOut:
+    """A writer whose `complete` is written by the runtime, then passes its delay: the core never hears back."""
+
+    def __init__(self, writer) -> None:
+        self.writer = writer
+
+    def __getattr__(self, name):
+        return getattr(self.writer, name)
+
+    def complete(self, board, card, result):
+        self.writer.complete(board, card, result)
+        raise BoardWriteError("hermes kanban --board <board> complete <card> --result <result>", None, "délai dépassé")
+
+
+def test_a_finish_past_its_delay_that_the_runtime_wrote_is_kept_as_the_engine_s(fake_runtime):
+    make_runtime_board(fake_runtime.home, "essai", tasks=[root_card(assignee="essai-clore")])
+    core, lines = engine(launches=Launches(), workflow=essai_agent())
+    core.writer = CompletesThenTimesOut(core.writer)
+
+    core.run_pass()
+    assert card(fake_runtime.home) == ("done", "essai-clore")
+    core.run_pass()
+
+    # The card read again is done: the engine's own finish, never finished by another.
+    assert signals() == []
+    assert not any("anomalie" in line for line in lines)

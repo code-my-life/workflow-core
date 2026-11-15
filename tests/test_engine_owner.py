@@ -47,7 +47,7 @@ def test_an_owner_station_schedules_the_card_with_its_wait_id(fake_runtime):
 
     core.run_pass()
 
-    assert fake_runtime.writes() == [["kanban", "--board", "essai", "schedule", CARD, WAITING]]
+    assert fake_runtime.writes() == [["kanban", "--board", "essai", "schedule", CARD, "--", WAITING]]
     assert card_row(fake_runtime.home) == ("scheduled", "essai-revue")
     (event,) = scheduled_events(fake_runtime.home)
     wait = f"essai:owner:{CARD}:{event}"
@@ -57,7 +57,7 @@ def test_an_owner_station_schedules_the_card_with_its_wait_id(fake_runtime):
 
     # A second pass calls nothing: the card waits.
     core.run_pass()
-    assert fake_runtime.writes() == [["kanban", "--board", "essai", "schedule", CARD, WAITING]]
+    assert fake_runtime.writes() == [["kanban", "--board", "essai", "schedule", CARD, "--", WAITING]]
     assert launches.calls == []
 
 
@@ -102,7 +102,7 @@ def test_an_answer_resumes_the_card_once(fake_runtime):
         )
     ]
     assert fake_runtime.writes() == [
-        ["kanban", "--board", "essai", "schedule", CARD, WAITING],
+        ["kanban", "--board", "essai", "schedule", CARD, "--", WAITING],
         ["kanban", "--board", "essai", "unblock", CARD],
         ["kanban", "--board", "essai", "assign", CARD, "essai-clore"],
     ]
@@ -247,7 +247,7 @@ def test_an_answer_applied_by_another_pass_is_not_handed_again(fake_runtime):
     other.run_pass()
 
     assert [station for station, _ in launches.calls] == ["revue"]
-    assert fake_runtime.writes() == [["kanban", "--board", "essai", "schedule", CARD, WAITING]]
+    assert fake_runtime.writes() == [["kanban", "--board", "essai", "schedule", CARD, "--", WAITING]]
 
 
 def test_a_decision_not_written_after_its_answer_is_told_in_the_journal(fake_runtime):
@@ -258,6 +258,80 @@ def test_a_decision_not_written_after_its_answer_is_told_in_the_journal(fake_run
 
     core.run_pass()
 
-    assert handled(box, answer) == ("applied", wait)
+    # Its decision not written, the answer is refused: the owner can give it again (revue de fin d'epic, M3).
+    assert handled(box, answer) == ("refused", None)
     told = f"réponse {answer} (valider) appliquée à l'attente {wait}, mais la décision de revue n'a pas pu être écrite"
     assert any(line.startswith("<3>") and told in line for line in lines)
+
+
+def test_an_answer_is_kept_waiting_while_the_writes_are_refused(fake_runtime):
+    box, launches = answer_box(), Launches()
+    core, _, wait = parked(fake_runtime, box, launches)
+    writes = fake_runtime.writes()
+    refusal = ["version d'Hermès pas encore relue"]
+    core.writer.gate = lambda: refusal[0]
+    core.write_refusal = lambda: refusal[0]
+    answer = box.receive("essai:1", "valider")
+
+    core.run_pass()
+
+    # Nothing is consumed: no command run, the answer still pending, nothing written.
+    assert launches.calls == []
+    assert handled(box, answer) == (None, None)
+    assert [pending.id for pending in box.pending("essai:")] == [answer]
+    assert fake_runtime.writes() == writes
+    assert card_row(fake_runtime.home) == ("scheduled", "essai-revue")
+
+    refusal[0] = None
+    core.run_pass()
+    assert handled(box, answer) == ("applied", wait)
+    assert [station for station, _ in launches.calls] == ["revue"]
+    assert card_row(fake_runtime.home) == ("ready", "essai-clore")
+
+
+def test_an_answer_whose_decision_is_not_written_is_refused_and_can_be_given_again(fake_runtime, monkeypatch):
+    box, launches = answer_box(), Launches()
+    core, lines, wait = parked(fake_runtime, box, launches)
+    answer = box.receive("essai:1", "valider")
+    fake_runtime.fail("unblock")
+
+    core.run_pass()
+
+    # The command ran, but nothing moved: the answer is refused, so that it is not taken as applied.
+    assert [station for station, _ in launches.calls] == ["revue"]
+    assert handled(box, answer) == ("refused", None)
+    assert card_row(fake_runtime.home) == ("scheduled", "essai-revue")
+    assert any(line.startswith("<3>") and f"réponse {answer}" in line and "reposé" in line for line in lines)
+
+    # Given again, it is applied.
+    monkeypatch.delenv("FAKE_RUNTIME_FAIL")
+    again = box.receive("essai:1", "valider")
+    core.run_pass()
+    assert handled(box, again) == ("applied", wait)
+    assert card_row(fake_runtime.home) == ("ready", "essai-clore")
+
+
+def test_an_answer_is_not_marked_once_the_core_turns_observer(fake_runtime):
+    box = answer_box()
+    core, lines, _ = parked(fake_runtime, box, Launches())
+    writes = fake_runtime.writes()
+    answer = box.receive("essai:1", "valider")
+    refused = box.receive("essai:9", "valider")
+    launched: list[str] = []
+
+    def turns_observer(repo, command, payload, timeout, log, *, label):
+        launched.append(payload["station"])
+        # The runtime changed while the command ran: the core is an observer now.
+        core.state.contract = state(ok=False).contract
+        return Launches()(repo, command, payload, timeout, log, label=label)
+
+    core.run = turns_observer
+    core.run_pass()
+
+    # Neither the answer the command was given nor the one without a wait is marked: both wait for the normal mode.
+    assert launched == ["revue"]
+    assert handled(box, answer) == (None, None)
+    assert handled(box, refused) == (None, None)
+    assert fake_runtime.writes() == writes
+    assert card_row(fake_runtime.home) == ("scheduled", "essai-revue")
+    assert any(f"réponse {answer} non marquée" in line for line in lines)

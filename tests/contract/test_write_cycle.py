@@ -1,5 +1,5 @@
 """The write cycle against the installed Hermès: every command the writer runs, done on a throwaway board
-`contrat-<Unix time>` and read back, then the board removed (ADR 0019).
+`workflow-core-contrat-<Unix time>` and read back, then the board removed (ADR 0019).
 
 It runs at the install (scripts/install.sh) and by `uv run pytest tests/contract`. It writes to no board in service.
 On a machine without the runtime's command (the CI on GitHub), it is skipped with its reason.
@@ -19,8 +19,13 @@ def test_a_full_write_cycle_on_a_throwaway_board():
 
     try:
         board = adapter.run_write_cycle(adapter.make_board_writer(), reader)
-        assert board.startswith("contrat-")
+        assert board.startswith("workflow-core-contrat-")
     finally:
         folder = reader.home / "kanban" / "boards"
-        left = sorted(path.name for path in folder.glob("contrat-*")) if folder.is_dir() else []
+        # Neither a board of the reserved prefix nor one of the former `contrat-` prefix is left.
+        left = (
+            sorted(path.name for pattern in ("workflow-core-contrat-*", "contrat-*") for path in folder.glob(pattern))
+            if folder.is_dir()
+            else []
+        )
         assert left == [], f"throwaway boards left: {left}"

@@ -7,8 +7,9 @@
    answer. Only the comments from the previous reading of that issue on are read (two minutes earlier, for the clocks),
    page by page; every comment at the first reading of an issue since the start.
 2. A comment is a gesture when its author is the owner's account (`WORKFLOW_CORE_OWNER_LOGIN`, also the one
-   factory-live comments for; without it, no comment is) and its first line is exactly `/<key> <gesture>`, then an
-   optional note (the rest of the line); the case counts. Any other comment is left without a word.
+   factory-live comments for, compared without case as GitHub's logins; without it, no comment is) and its first line
+   is exactly `/<key> <gesture>`, then an optional note (the rest of the line); the case of the line counts.
+   Any other comment is left without a word.
 3. A gesture enters the answer box of `engine.db` once, its id `github:<comment id>`, its time the comment's creation
    time. A comment that already carries a reaction of the App is never taken again, even when `engine.db` is lost.
 4. The engine applies or refuses it at its pass (`workflow_core.engine.engine`).
@@ -164,7 +165,10 @@ class Gestures:
 
     def _take(self, workflow: PluggedWorkflow, repo: str, number: int, item: Item, comment: IssueComment) -> None:
         gesture = gesture_of(workflow.key, comment.body)
-        if gesture is None or comment.author != self.owner or comment.app_reactions or not comment.id:
+        # GitHub's logins ignore case.
+        if self.owner is None or comment.author.casefold() != self.owner.casefold():
+            return
+        if gesture is None or comment.app_reactions or not comment.id:
             return
         answer_id = f"github:{comment.id}"
         if self.answers.has(answer_id):

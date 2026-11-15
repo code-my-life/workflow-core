@@ -12,11 +12,12 @@ from datetime import UTC, datetime
 from workflow_core.adapters import runtime_adapter
 from workflow_core.engine.answers import AnswerBox
 from workflow_core.gestures import Gestures
+from workflow_core.intake import GITHUB_POLL_SECONDS, IntakeRunner
 
 from conftest import make_runtime_board
 from test_engine import CARD, Launches, engine, essai, root_card, state
 from test_engine_owner import WAITING, answer_box, card_row, scheduled_events
-from test_intake import OWNER, REPO, FakeGitHub, issue, issue_url
+from test_intake import OWNER, REPO, Clock, FakeGitHub, issue, issue_url
 
 OTHER_CARD = "t_0e0e0e0e"
 
@@ -91,7 +92,7 @@ def test_an_owner_gesture_resumes_the_wait_and_gets_a_thumbs_up(fake_runtime, se
     assert card_row(fake_runtime.home) == ("ready", "essai-clore")
     assert fake.reacted == [(comment, "+1")]
     assert fake_runtime.writes() == [
-        ["kanban", "--board", "essai", "schedule", CARD, WAITING],
+        ["kanban", "--board", "essai", "schedule", CARD, "--", WAITING],
         ["kanban", "--board", "essai", "unblock", CARD],
         ["kanban", "--board", "essai", "assign", CARD, "essai-clore"],
     ]
@@ -472,3 +473,138 @@ def test_a_box_created_before_the_gestures_gets_their_columns(tmp_path):
     assert box.unreacted() == [("github:7", "essai:1", "refused")]
     box.mark_reacted("github:7")
     assert box.unreacted() == []
+
+
+def test_an_unblock_given_before_the_card_s_last_block_is_refused(fake_runtime, serve):
+    failing = essai(preparer={"command": ["python", "commands/fails.py"]})
+    make_runtime_board(fake_runtime.home, "essai", tasks=[root_card()])
+    box, launches = answer_box(), Launches()
+    core, lines = engine(launches=launches, answers=box, workflow=failing)
+    core.run_pass()
+    (first_block,) = events(fake_runtime.home, "blocked")
+    # The first block is old: both gestures were given after it.
+    with sqlite3.connect(fake_runtime.home / "kanban" / "boards" / "essai" / "kanban.db") as db:
+        db.execute("UPDATE task_events SET created_at = 1000 WHERE id = ?", (first_block,))
+    db.close()
+    fake = FakeGitHub([issue(1)])
+    first = fake.add_comment(1, OWNER, "/essai unblock", created_at="2020-01-01T00:00:00Z")
+    second = fake.add_comment(1, OWNER, "/essai unblock encore", created_at="2020-01-01T00:00:01Z")
+    gestures, _ = reading(serve(fake), box, workflow=failing)
+
+    gestures.read_once()
+    # The first unblock is applied, the command run again fails, and the card is blocked again.
+    core.run_pass()
+    assert card_row(fake_runtime.home) == ("blocked", "essai-preparer")
+    assert len(events(fake_runtime.home, "blocked")) == 2
+    # The second one was given before that new block: it does not lift it.
+    core.run_pass()
+    core.run_pass()
+    gestures.react()
+
+    assert handled(box, f"github:{first}")[3:] == ("applied", f"essai:blocked:{CARD}:{first_block}")
+    assert handled(box, f"github:{second}")[3:] == ("refused", None)
+    assert fake.reacted == [(first, "+1"), (second, "confused")]
+    assert [call[3] for call in fake_runtime.writes()] == ["block", "unblock", "block"]
+    assert [station for station, _ in launches.calls] == ["preparer", "preparer"]
+    assert card_row(fake_runtime.home) == ("blocked", "essai-preparer")
+    assert any("<4>" in line and f"github:{second}" in line and "refusée" in line for line in lines)
+
+
+def test_a_handled_gesture_is_not_reacted_to_in_observer_mode(fake_runtime, serve):
+    box, launches = answer_box(), Launches()
+    core_state = state()
+    core, _, wait = parked(fake_runtime, box, launches, core=core_state)
+    fake = FakeGitHub([issue(1)])
+    comment = fake.add_comment(1, OWNER, "/essai valider")
+    gestures, _ = reading(serve(fake), box, core=core_state)
+    gestures.read_once()
+    # Handled in normal mode.
+    core.run_pass()
+    assert handled(box, f"github:{comment}")[3:] == ("applied", wait)
+
+    core_state.contract = state(ok=False).contract
+    gestures.react()
+
+    assert fake.reacted == []
+    assert box.unreacted() == [(f"github:{comment}", "essai:1", "applied")]
+
+    # Back in normal mode, the reaction is posted.
+    core_state.contract = state().contract
+    gestures.react()
+    assert fake.reacted == [(comment, "+1")]
+    assert box.unreacted() == []
+
+
+def test_an_unblock_the_writer_s_gate_refuses_stays_pending(fake_runtime, serve):
+    make_runtime_board(fake_runtime.home, "essai", tasks=[root_card()])
+    box, launches = answer_box(), Launches()
+    core, _ = engine(launches=launches, answers=box, workflow=relance())
+    core.run_pass()
+    writes = fake_runtime.writes()
+    fake = FakeGitHub([issue(1)])
+    comment = fake.add_comment(1, OWNER, "/essai unblock relance")
+    gestures, _ = reading(serve(fake), box, workflow=relance())
+    gestures.read_once()
+    refusal = ["version d'Hermès pas encore relue"]
+    # Only the writer's gate refuses: the engine itself is not told.
+    core.writer.gate = lambda: refusal[0]
+
+    core.run_pass()
+    gestures.react()
+
+    # Nothing consumed: the answer still pending, no reaction, the card still blocked.
+    assert handled(box, f"github:{comment}")[3:] == (None, None)
+    assert fake.reacted == []
+    assert fake_runtime.writes() == writes
+    assert card_row(fake_runtime.home) == ("blocked", "essai-preparer")
+
+    refusal[0] = None
+    core.run_pass()
+    gestures.react()
+    assert handled(box, f"github:{comment}")[3] == "applied"
+    assert fake.reacted == [(comment, "+1")]
+
+
+def test_the_owner_s_login_ignores_case_for_a_gesture(fake_runtime, serve):
+    box, launches = answer_box(), Launches()
+    parked(fake_runtime, box, launches)
+    fake = FakeGitHub([issue(1)])
+    # GitHub's logins ignore case: the login set in the environment may not be written as GitHub writes it.
+    comment = fake.add_comment(1, "Proprietaire", "/essai valider")
+    fake.add_comment(1, "inconnu", "/essai valider")
+    gestures, _ = reading(serve(fake), box, owner="PROPRIETAIRE")
+
+    gestures.read_once()
+
+    assert answer_ids(box) == [f"github:{comment}"]
+
+
+class Counts:
+    """A fake reading of the issues or of the gestures that counts its calls, at the time of the clock."""
+
+    def __init__(self, clock) -> None:
+        self.clock = clock
+        self.read_at: list[float] = []
+        self.reacted_at: list[float] = []
+
+    def read_once(self) -> None:
+        self.read_at.append(self.clock())
+
+    def react(self) -> None:
+        self.reacted_at.append(self.clock())
+
+
+def test_gestures_are_read_every_ten_minutes_and_reacted_to_at_every_check():
+    clock = Clock()
+    intake, gestures = Counts(clock), Counts(clock)
+    runner = IntakeRunner(intake, gestures, clock=clock)
+    checks = (0, 5, 10, 599, 600, 605, 1199, 1200)
+
+    for now in checks:
+        clock.now = now
+        runner.tick()
+
+    assert GITHUB_POLL_SECONDS == 600
+    assert intake.read_at == [0, 600, 1200]
+    assert gestures.read_at == [0, 600, 1200]
+    assert gestures.reacted_at == list(checks)

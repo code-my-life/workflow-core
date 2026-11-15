@@ -169,6 +169,7 @@ def build_service(
         confirm_version=watch.ensure_confirmed,
         answers=AnswerBox(state_dir(environ) / ENGINE_DB),
         records=records,
+        write_refusal=watch.write_refusal,
     )
     owner = (os.environ if environ is None else environ).get(OWNER_LOGIN_VARIABLE) or None
     if plugged and owner is None:

@@ -42,8 +42,7 @@ def test_every_write_names_its_board_and_goes_through_the_command_line(fake_runt
             "essai-preparer",
             "--idempotency-key",
             "essai:1",
-            "--body",
-            ISSUE,
+            f"--body={ISSUE}",
             "--json",
         ],
         ["kanban", "--board", "essai", "assign", card, "essai-revue"],
@@ -96,3 +95,29 @@ def test_a_failing_command_is_a_named_error(fake_runtime, capsys):
     errors = [line for line in capsys.readouterr().err.splitlines() if line.startswith("<3>")]
     assert len(errors) == 1
     assert "essai:1" in errors[0] and "assign <card> <lane>" in errors[0] and "code 1" in errors[0]
+
+
+def test_a_free_value_that_looks_like_an_option_is_written_as_it_is(fake_runtime):
+    writer = runtime_adapter().make_board_writer()
+    writer.create_board("essai")
+    # Each free value starts with `-`, without a space: the runtime's parser would take it for an option.
+    card = writer.create_card("essai", title="essai:1 · Premier essai", assignee="essai-preparer", body="-corps")
+    writer.schedule("essai", card, "-attente")
+    writer.unblock("essai", card)
+    writer.block("essai", card, "-motif", kind="needs_input")
+    writer.comment("essai", card, "-note")
+    writer.complete("essai", card, "-fini")
+
+    assert all(declared(call) for call in fake_runtime.writes())
+    base = fake_runtime.home / "kanban" / "boards" / "essai" / "kanban.db"
+    with sqlite3.connect(base) as db:
+        row = db.execute("SELECT body, status, result FROM tasks WHERE id = ?", (card,)).fetchone()
+        reasons = db.execute(
+            "SELECT kind, payload FROM task_events WHERE task_id = ? AND kind IN ('scheduled', 'blocked') ORDER BY id",
+            (card,),
+        ).fetchall()
+        comments = [found for (found,) in db.execute("SELECT body FROM task_comments WHERE task_id = ?", (card,))]
+    db.close()
+    assert row == ("-corps", "done", "-fini")
+    assert reasons == [("scheduled", '{"reason": "-attente"}'), ("blocked", '{"reason": "-motif"}')]
+    assert comments == ["-note"]

@@ -162,3 +162,16 @@ class AnswerBox:
             return cursor.rowcount == 1
         finally:
             db.close()
+
+    def refuse_applied(self, answer_id: str) -> bool:
+        """Turn an answer applied into refused, its wait forgotten: its decision could not be written, nothing moved,
+        and the owner can give it again. False when it was not applied."""
+        db = self._connect()
+        try:
+            cursor = db.execute(
+                "UPDATE answers SET outcome = 'refused', wait = NULL WHERE id = ? AND outcome = 'applied'",
+                (answer_id,),
+            )
+            return cursor.rowcount == 1
+        finally:
+            db.close()

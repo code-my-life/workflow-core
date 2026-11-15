@@ -64,7 +64,9 @@ def pass_blocks_the_card(fake_runtime, repo: Path, reason: str) -> list[str]:
         log=lines.append,
     ).run_pass()
     motive = f"Échec de la station preparer : {reason}"
-    assert fake_runtime.writes() == [["kanban", "--board", "essai", "block", CARD, motive, "--kind", "needs_input"]]
+    assert fake_runtime.writes() == [
+        ["kanban", "--board", "essai", "block", CARD, "--kind", "needs_input", "--", motive]
+    ]
     with sqlite3.connect(fake_runtime.home / "kanban" / "boards" / "essai" / "kanban.db") as db:
         row = db.execute("SELECT assignee, status, block_kind FROM tasks WHERE id = ?", (CARD,)).fetchone()
         assert row == ("essai-preparer", "blocked", "needs_input")
@@ -126,3 +128,31 @@ def test_a_command_does_not_inherit_the_core_secrets(fake_runtime, monkeypatch):
     decision = run_command(ESSAI_REPO, ["python", "-c", seen], payload(), 30, lines.append)
 
     assert (decision.decision, decision.reason) == ("wait", "ESSAI_VISIBLE")
+
+
+def test_bytes_that_are_not_utf8_never_raise(fake_runtime):
+    lines: list[str] = []
+    # A decision on the output, and a byte that is no UTF-8 on the error output.
+    noisy_error = (
+        "import sys; sys.stderr.buffer.write(b'\\xff\\xfe erreur'); sys.stderr.flush(); "
+        'print(\'{"decision": "wait", "reason": "plus tard"}\')'
+    )
+    # A byte that is no UTF-8 on the output: no longer a decision.
+    broken_output = 'import sys; sys.stdout.buffer.write(b\'{"decision": "wait\\xff"}\')'
+
+    kept = run_command(ESSAI_REPO, ["python", "-c", noisy_error], payload(), 30, lines.append, label="essai")
+    broken = run_command(ESSAI_REPO, ["python", "-c", broken_output], payload(), 30, lines.append, label="essai")
+
+    assert (kept.decision, kept.reason) == ("wait", "plus tard")
+    assert any("sortie d'erreur" in line and "erreur" in line for line in lines)
+    assert (broken.decision, broken.reason) == ("fail", "sortie illisible")
+
+
+def test_an_exit_code_other_than_zero_is_a_fail(fake_runtime):
+    lines: list[str] = []
+    # A decision on the output does not count when the command ends with an error.
+    failed = 'import sys; print(\'{"decision": "advance", "reason": "fait"}\'); sys.exit(3)'
+
+    decision = run_command(ESSAI_REPO, ["python", "-c", failed], payload(), 30, lines.append, label="essai")
+
+    assert (decision.decision, decision.reason, decision.to) == ("fail", "code de sortie 3", None)

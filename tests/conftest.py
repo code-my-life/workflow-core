@@ -451,7 +451,13 @@ def declared(call: list[str]) -> bool:
     for command, options in runtime_adapter().contract.COMMANDS.items():
         words = command.split()
         if rest[: len(words)] == words:
-            used = [argument for argument in rest[len(words) :] if argument.startswith("--")]
+            used = []
+            for argument in rest[len(words) :]:
+                # After `--`, every word is positional; `--name=value` is the option `--name`.
+                if argument == "--":
+                    break
+                if argument.startswith("--"):
+                    used.append(argument.partition("=")[0])
             return all(option in options for option in used)
     return False
 
