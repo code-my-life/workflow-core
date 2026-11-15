@@ -140,14 +140,14 @@ key = "essai"
 repo = "~/perso/workflow-essai"
 
 # The checks of the machine besides the runtime's own (ADR 0008): one [[check]] table each, with its id, its label,
-# its group on the screen (hermes, models, tools, intake), its kind (http: the address answers below 500; tcp: the port
+# its group on the screen (runtime, models, tools, intake), its kind (http: the address answers below 500; tcp: the port
 # listens; vram: nvidia-smi; funnel: tailscale funnel status) and optionally its target and its cadence in seconds
 # (30 at least, the default). No secret is read: freellmapi answers 401 without a key, which says it runs.
 
 [[check]]
 id = "dashboard"
 label = "Dashboard Hermès"
-group = "hermes"
+group = "runtime"
 kind = "http"
 target = "http://127.0.0.1:9119/api/status"
 

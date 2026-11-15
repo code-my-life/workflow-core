@@ -80,7 +80,7 @@ def test_the_gateway_is_alive_while_its_heartbeat_is_fresh(runtime_home, no_tool
     fresh = by_id(machine(runtime_home))["gateway"]
     assert fresh["status"] == "ok"
     assert fresh["metrics"]["pid"] == "4242"
-    assert fresh["group"] == "her" + "mes"
+    assert fresh["group"] == "runtime"
     assert fresh["checked_at"].endswith("Z") or "+00:00" in fresh["checked_at"]
 
     (runtime_home / "state.db").unlink()
@@ -88,6 +88,23 @@ def test_the_gateway_is_alive_while_its_heartbeat_is_fresh(runtime_home, no_tool
     stale = by_id(machine(runtime_home))["gateway"]
     assert stale["status"] == "down"
     assert "120" in stale["detail"]
+
+
+def test_the_runtime_checks_are_in_the_runtime_group(runtime_home, no_tools):
+    gateway_base(runtime_home, NOW - 10)
+    checks = by_id(machine(runtime_home))
+    assert {check_id: checks[check_id]["group"] for check_id in ("pause", "gateway", "disk")} == {
+        "pause": "runtime",
+        "gateway": "runtime",
+        "disk": "runtime",
+    }
+
+
+def test_no_declared_check_is_grouped_under_the_runtime_name():
+    declared = load_checks()
+    assert declared, "config/workflows.toml declares no check"
+    assert [check.id for check in declared if check.group.lower() == "her" + "mes"] == []
+    assert {check.id: check.group for check in declared}["dashboard"] == "runtime"
 
 
 def test_a_pause_and_a_failing_cron_job_are_degraded(runtime_home, no_tools):
@@ -156,7 +173,7 @@ def test_declared_tcp_and_http_checks(runtime_home, no_tools):
             target=f"http://127.0.0.1:{server.server_address[1]}/v1/models",
         ),
         DeclaredCheck(
-            id="dashboard", label="Dashboard", group="hermes", kind="http", target=f"http://127.0.0.1:{closed}/"
+            id="dashboard", label="Dashboard", group="runtime", kind="http", target=f"http://127.0.0.1:{closed}/"
         ),
     ]
     port = listening.getsockname()[1]
