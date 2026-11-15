@@ -2,6 +2,8 @@
 
 import os
 import sqlite3
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -10,7 +12,16 @@ from workflow_core.adapters import runtime_adapter
 from workflow_core.config import Workflow
 from workflow_core.service import build_service
 
-from conftest import ESSAI_REPO, FACTORY_ITEMS, fake_version_command
+from conftest import (
+    ESSAI_REPO,
+    FACTORY_CARDS,
+    FACTORY_ITEMS,
+    FACTORY_STUDIO_CONFIG,
+    STUDIO_CARDS,
+    fake_version_command,
+    make_board,
+    make_fake_runtime,
+)
 
 SECRET = "test-secret-not-a-real-one"
 WORKFLOWS = {
@@ -588,3 +599,55 @@ def test_every_call_uses_a_declared_command_and_option(fake_runtime):
     assert declared(["kanban", "--board", "essai", "create", "x", "--assignee", "a", "--triage"]) is False
     assert declared(["kanban", "boards", "list", "--all"]) is False
     assert declared(["kanban", "boards", "list", "--json"]) is True
+
+
+INSTALLED_BOARDS_TEST = Path(__file__).resolve().parent / "contract" / "test_installed_boards.py"
+RUNTIME_HOME_VAR = "HER" + "MES_HOME"
+
+
+def test_the_installed_boards_contract_skips_a_manifest_board_the_engine_has_not_created(tmp_path):
+    # The configuration of production: the factory, the studio, and a workflow plugged by its manifest whose board the
+    # engine creates only at its first pass. The runtime home holds the factory's and the studio's boards alone.
+    config = tmp_path / "workflows.toml"
+    config.write_text(
+        FACTORY_STUDIO_CONFIG.read_text(encoding="utf-8") + f'\n[[workflow]]\nkey = "essai"\nrepo = "{ESSAI_REPO}"\n',
+        encoding="utf-8",
+    )
+    runtime = tmp_path / "runtime"
+    factory = make_board(runtime, "factory", FACTORY_CARDS)
+    studio = make_board(runtime, "studio", STUDIO_CARDS)
+    runtime_bin, variables = make_fake_runtime(tmp_path / "fake-runtime")
+    env = {
+        **os.environ,
+        **variables,
+        RUNTIME_HOME_VAR: str(runtime),
+        "WORKFLOW_CORE_CONFIG": str(config),
+        "PATH": os.pathsep.join([str(runtime_bin), os.environ["PATH"]]),
+    }
+
+    def run_contract() -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, "-m", "pytest", str(INSTALLED_BOARDS_TEST), "-rs", "-p", "no:cacheprovider"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+    kept = run_contract()
+
+    assert kept.returncode == 0, kept.stdout + kept.stderr
+    assert "essai: board absent, créé par le moteur à sa première passe" in kept.stdout
+    assert "le contrat porte sur factory, studio" in kept.stdout
+
+    # The factory's and the studio's boards are still checked: a base each that breaks the contract fails it.
+    for base in (factory, studio):
+        with sqlite3.connect(base) as db:
+            db.execute("ALTER TABLE tasks DROP COLUMN assignee")
+        db.close()
+    broken = run_contract()
+
+    assert broken.returncode == 1
+    assert "factory: tasks.assignee absente" in broken.stdout
+    assert "studio: tasks.assignee absente" in broken.stdout

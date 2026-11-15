@@ -134,6 +134,11 @@ board = "studio"
 sheet = "~/perso/video-factory/hermes/workflow.json"
 repo = "~/perso/video-factory"
 
+# The trial workflow, plugged by the manifest at the root of its repository (workflow-manifest.json, ADR 0005).
+[[workflow]]
+key = "essai"
+repo = "~/perso/workflow-essai"
+
 # The checks of the machine besides the runtime's own (ADR 0008): one [[check]] table each, with its id, its label,
 # its group on the screen (hermes, models, tools, intake), its kind (http: the address answers below 500; tcp: the port
 # listens; vram: nvidia-smi; funnel: tailscale funnel status) and optionally its target and its cadence in seconds

@@ -434,6 +434,10 @@ def diagnosis_input_of(data: dict):
 # The trial workflow's repository, as the tests use it: its manifest and sample commands.
 ESSAI_REPO = Path(__file__).resolve().parent / "fixtures" / "workflows" / "essai"
 
+# A test copy of the factory's and the studio's entries of config/workflows.toml: the tests of these two entries read
+# it, never the production configuration, where other workflows are added.
+FACTORY_STUDIO_CONFIG = Path(__file__).resolve().parent / "fixtures" / "config" / "factory-studio.toml"
+
 
 OPTION = r"(?<![\w-]){}(?![\w-])"
 

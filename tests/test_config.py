@@ -9,13 +9,14 @@ import shutil
 from pathlib import Path
 
 import pytest
+import workflow_core.config
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from workflow_core.adapters import runtime_adapter
 from workflow_core.config import DEFAULT_CONFIG, Workflow, config_path, load_checks, load_workflows
 from workflow_core.service import build_service
 
-from conftest import ESSAI_REPO
+from conftest import ESSAI_REPO, FACTORY_STUDIO_CONFIG
 
 ROOT = Path(__file__).resolve().parent.parent
 SECRET = "test-secret-not-a-real-one"
@@ -40,7 +41,7 @@ def test_a_manifest_entry_has_its_key_and_its_repository(tmp_path):
         Workflow(key="seul")
 
     # The factory and the studio keep their form: a sheet, a board, served by the API.
-    declared = load_workflows(DEFAULT_CONFIG)
+    declared = load_workflows(FACTORY_STUDIO_CONFIG)
     assert sorted(declared) == ["factory", "studio"]
     for key, workflow in declared.items():
         assert (workflow.board, workflow.plugged_by_manifest) == (key, False)
@@ -63,6 +64,8 @@ def test_the_configuration_path_comes_from_its_variable(tmp_path, monkeypatch):
     )
     monkeypatch.delenv("WORKFLOW_CORE_CONFIG", raising=False)
     assert config_path() == DEFAULT_CONFIG
+    # The default file, read without the variable, is here the test copy of the factory's and the studio's entries.
+    monkeypatch.setattr(workflow_core.config, "DEFAULT_CONFIG", FACTORY_STUDIO_CONFIG)
     assert sorted(load_workflows()) == ["factory", "studio"]
 
     monkeypatch.setenv("WORKFLOW_CORE_CONFIG", str(config))

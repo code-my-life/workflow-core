@@ -8,10 +8,10 @@ import shutil
 from pathlib import Path
 
 from workflow_core.adapters import runtime_adapter
-from workflow_core.config import DEFAULT_CONFIG, Workflow, load_workflows
+from workflow_core.config import Workflow, load_workflows
 from workflow_core.service import build_service
 
-from conftest import ESSAI_REPO
+from conftest import ESSAI_REPO, FACTORY_STUDIO_CONFIG
 
 SECRET = "test-secret-not-a-real-one"
 
@@ -31,7 +31,7 @@ def repo_of(tmp_path: Path, key: str, change=None) -> Path:
 def test_a_refused_manifest_leaves_its_workflow_unplugged(runtime_home, tmp_path, capsys):
     refused = repo_of(tmp_path, "double", lambda manifest: manifest["stations"].append(manifest["stations"][0]))
     workflows = {
-        **load_workflows(DEFAULT_CONFIG),
+        **load_workflows(FACTORY_STUDIO_CONFIG),
         "double": Workflow(key="double", repo=refused),
         "bon": Workflow(key="bon", repo=repo_of(tmp_path, "bon")),
     }
@@ -58,7 +58,7 @@ def reads_only_second(manifest: dict) -> None:
 
 def test_two_workflows_never_read_the_same_issues_repo(runtime_home, tmp_path, capsys):
     workflows = {
-        **load_workflows(DEFAULT_CONFIG),
+        **load_workflows(FACTORY_STUDIO_CONFIG),
         "premier": Workflow(key="premier", repo=repo_of(tmp_path, "premier")),
         "second": Workflow(
             key="second",
